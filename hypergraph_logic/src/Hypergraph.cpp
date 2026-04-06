@@ -58,7 +58,11 @@ namespace hypergraph_logic {
 	}
 
 	void Hypergraph::addHyperedgeToLayer(int layer, const HyperedgePtr& edge) {
-		if (!edge || layers_.find(layer) == layers_.end()) return;
+		if (!edge) return;
+		if (layers_.find(layer) == layers_.end()) {
+			layers_[layer] = LayerData{};
+		}
+
 		auto& layer_data = layers_[layer];
 
 		layer_data.outgoing_edges.push_back(edge);
@@ -114,7 +118,7 @@ namespace hypergraph_logic {
 		}
 
 		//  Check for redundancy connections (the child already has this parent in its ancestry)
-		if (parentIsInAncestors(child, parent)) {
+		if (parentIsInAncestors({ child }, parent)) {
 			throw std::logic_error("This connection already exists in the diagram.");
 		}
 
@@ -139,11 +143,10 @@ namespace hypergraph_logic {
 		//   - For any y in X, if b < y then we also have a < y (transitivity).
 		// Therefore, any preexisting connection x < y where x < a and b < y would now be redundant 
 		// and can be removed without losing any information about the partial order.
-		removeTransitiveConnections(parent, child);
+		removeTransitiveConnections({ parent }, { child });
 
 		int parent_layer = parent->getLayer();
 		int child_layer = child->getLayer();
-
 		if (parent_layer == child_layer - 1) {
 			// Easiest case: just add the new hyperedge and update the layer data
 			createHyperedge({ parent }, { child }, parent_layer);
@@ -154,26 +157,147 @@ namespace hypergraph_logic {
 			HyperedgePtr edge = createHyperedge({ parent }, { child }, -1);
 
 			// Rewire the connection from parent to child with the new dummy nodes and split the hyperedge.
-			splitLongEdge(edge, { parent }, { child });
+			splitLongEdge(edge);
 		}
 		else {
 			// Worst case: the child layer needs to be updated. This automatically implies that the new layer
 			// number is the parent_layer + 1 and this should propagate down to all the descendants of the child.
 			HyperedgePtr edge = createHyperedge({ parent }, { child }, parent_layer);
-			applyRelocationAndPropagate(child, parent_layer+1);
+
+			applyRelocationAndPropagate({ {child, parent_layer + 1} });
 		}
 	}
 
-	void Hypergraph::splitLongEdge(const HyperedgePtr& long_edge, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets) {
+	void Hypergraph::addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) {
+		if (!edge || edge->isSegment() || !source) return;
+
+		const auto& targets = edge->getTargets();
+		for (const auto& t : targets) {
+			if (t == source) {
+				throw std::logic_error("A node cannot be connected to itself.");
+			}
+		}
+
+		if (parentIsInAncestors(targets, source)) {
+			throw std::logic_error("This connection already exists in the diagram.");
+		}
+	
+		// Temporarily add the source and check for cycles
+		for (const auto& t : targets) {
+			source->addChild(t);
+			t->addParent(source);
+		}
+
+		if (checkCycles(source)) {
+			// Rollback
+			for (const auto& t : targets) {
+				source->removeChild(t);
+				t->removeParent(source);
+			}
+			throw std::logic_error("Adding this connection would create a cycle in the diagram.");
+		}
+
+		// Now we know that no cycles are added, we can safely add the connection.
+		// As before, we need to remove any pre-existing connections which are now redundant.
+		removeTransitiveConnections({ source }, targets);
+		
+		edge->addSource(source);
+		int parent_layer = source->getLayer();
+		std::vector<std::pair<NodePtr, int>> relocations;
+		for (const auto& t : targets) {
+			if (parent_layer + 1 > t->getLayer()) {
+				// The child layer needs to be updated. This automatically implies that the new layer
+				// number is the parent_layer + 1 and this should propagate down to all the descendants of the child.
+				relocations.push_back({ t, parent_layer + 1 });
+			}
+		}
+
+		if (relocations.empty()) {
+			// No targets need to be relocated. But the updated edge might be long, so we
+			// need to resplit or split it if necessary.
+
+			if (edgeIsShort(edge) < 0) {
+				// The edge needs to be split or resplitted. 
+				dissolveSegments({ edge.get() });
+				splitLongEdge(edge);
+			}
+		}
+		else {
+			// Inside the function call, if adding the new source has made the edge long,
+			// it will be split and the necessary dummy nodes will be added.
+			applyRelocationAndPropagate(relocations);
+		}
+	}
+
+
+	void Hypergraph::addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target) {
+		if (!edge || edge->isSegment() || !target) return;
+
+		const auto& sources = edge->getSources();
+		for (const auto& s : sources) {
+			if (s == target) {
+				throw std::logic_error("A node cannot be connected to itself.");
+			}
+		}
+
+		if (childIsInDescendants(sources, target)) {
+			throw std::logic_error("This connection already exists in the diagram.");
+		}
+
+		// Temporarily add the target and check for cycles
+		int parents_layer = 0;
+		for (const auto& s : sources) {
+			target->addParent(s);
+			s->addChild(target);
+			if (s->getLayer() > parents_layer) parents_layer = s->getLayer();
+		}
+
+		// If adding these connections has created a cycle, then it must be the case
+		// that target is part of the cycle, so it suffices to check for cycles starting
+		// there rather than checking the sources.
+		if (checkCycles(target)) {
+			// Rollback
+			for (const auto& s : sources) {
+				target->removeParent(s);
+				s->removeChild(target);
+			}
+			throw std::logic_error("Adding this connection would create a cycle in the diagram.");
+		}
+
+		// Now we know that no cycles are added, we can safely add the connection.
+		// As before, we need to remove any pre-existing connections which are now redundant.
+		removeTransitiveConnections(sources, { target });
+
+		edge->addTarget(target);
+
+		if (parents_layer + 1 > target->getLayer()) {
+			// The child layer needs to be updated. This automatically implies that the new layer
+			// number is the parents_layer + 1 and this should propagate down to all the descendants of the child.
+			applyRelocationAndPropagate({ {target, parents_layer + 1} });
+		}
+		else {
+			// The target layer does not need to be updated, but it may be necessary to split the edge.
+			if (edgeIsShort(edge) < 0) {
+				// The edge needs to be split or resplitted. 
+				dissolveSegments({ edge.get() });
+				splitLongEdge(edge);
+			}
+		}
+	}
+
+
+	void Hypergraph::splitLongEdge(const HyperedgePtr& long_edge) {
+		if (long_edge->isSegment()) return;
+
 		// ----------------------------------------------------------------
 		// Group sources and targets by layer
 		// ----------------------------------------------------------------
 		std::map<int, std::vector<NodePtr>> sources_by_layer;
-		for (const auto& source : sources)
+		for (const auto& source : long_edge->getSources())
 			sources_by_layer[source->getLayer()].push_back(source);
 
 		std::map<int, std::vector<NodePtr>> targets_by_layer;
-		for (const auto& target : targets)
+		for (const auto& target : long_edge->getTargets())
 			targets_by_layer[target->getLayer()].push_back(target);
 
 		int min_src_layer = sources_by_layer.begin()->first;
@@ -238,50 +362,35 @@ namespace hypergraph_logic {
 	void Hypergraph::dissolveSegments(const std::unordered_set<Hyperedge*>& long_edges) {
 		if (long_edges.empty()) return;
 
-		// ================================================================
-		// 1. Collect segments that belong to any of the long edges and
-		//	 the dummy nodes which also need to be removed
-		// ================================================================
 		std::map<int, std::unordered_set<Node*>> dummy_removes; // for quick lookup when removing from LayerData
 		std::map<int, std::unordered_set<Hyperedge*>> segment_removes; // for quick lookup when removing from LayerData
 		std::unordered_set<Node*> dummy_set; // for quick lookup when removing from all_nodes_
-		std::unordered_set<Hyperedge*> remove_set; // for quick lookup when removing from all_hyperedges_
 
-		for (const auto& edge : all_hyperedges_) {
-			if (!edge->isSegment()) continue;
-
-			auto origin = edge->getOrigin();
-			if (!origin.lock() || !long_edges.count(origin.lock().get())) continue;
-
-			int layer = edge->getLayer();
-			for (const auto& s : edge->getSources()) {
-				if (s->isDummy()) {
-					dummy_removes[layer].insert(s.get());
-					dummy_set.insert(s.get());
+		// Collect segments and dummy nodes to be removed.
+		for (const auto& edge : long_edges) {
+			if (!edge) continue;
+			auto& segments = all_hyperedges_[edge->shared_from_this()];
+			for (const auto& seg : segments) {
+				for (const auto& s : seg->getSources()) {
+					if (s->isDummy()) {
+						dummy_removes[s->getLayer()].insert(s.get());
+						dummy_set.insert(s.get());
+					}
 				}
-			}
-			for (const auto& t : edge->getTargets()) {
-				if (t->isDummy()) {
-					dummy_removes[layer + 1].insert(t.get());
-					dummy_set.insert(t.get());
+				for (const auto& t : seg->getTargets()) {
+					if (t->isDummy()) {
+						dummy_removes[t->getLayer()].insert(t.get());
+						dummy_set.insert(t.get());
+					}
 				}
+				segment_removes[seg->getLayer()].insert(seg.get());
 			}
-			segment_removes[layer].insert(edge.get());
-			remove_set.insert(edge.get());
+			segments.clear(); // Remove segments from all_hyperedges_
 		}
 
-		if (remove_set.empty()) return;
+		if (segment_removes.empty()) return;
 
-		// ================================================================
-		// 2. Remove from all_hyperedges_ and all_nodes_.
-		// ================================================================
-		all_hyperedges_.erase(
-			std::remove_if(all_hyperedges_.begin(), all_hyperedges_.end(),
-				[&](const HyperedgePtr& e) {
-					return remove_set.count(e.get()) > 0;
-				}),
-			all_hyperedges_.end());
-
+		// Remove from all_nodes and from LayerData.
 		all_nodes_.erase(
 			std::remove_if(all_nodes_.begin(), all_nodes_.end(),
 				[&](const NodePtr& n) {
@@ -289,9 +398,6 @@ namespace hypergraph_logic {
 				}),
 			all_nodes_.end());
 
-		// ================================================================
-		// 3. Remove from LayerData.
-		// ================================================================
 		for (const auto& [layer, edges] : segment_removes) {
 			removeHyperedgeFromLayer(layer, edges);
 		}
@@ -328,10 +434,7 @@ namespace hypergraph_logic {
 		if (original_edge->getSources().empty()) {
 			// Edge has no sources left — dissolve everything.
 			dissolveSegments({ original_edge.get() });
-			all_hyperedges_.erase(
-				std::remove(all_hyperedges_.begin(), all_hyperedges_.end(), original_edge),
-				all_hyperedges_.end());
-
+			all_hyperedges_.erase(original_edge);
 			if (original_edge->getLayer() >= 0) {
 				removeHyperedgeFromLayer(original_edge->getLayer(), original_edge);
 			}
@@ -339,14 +442,11 @@ namespace hypergraph_logic {
 		}
 		// Group segments by layer for higher efficiency in the next steps.
 		std::map<int, HyperedgePtr> segs_by_layer;
-		for (const auto& edge : all_hyperedges_) {
-			if (!edge->isSegment()) continue;
-			auto origin = edge->getOrigin();
-			if (!origin.lock() || origin.lock() != edge) continue;
-			segs_by_layer[edge->getLayer()] = edge;
+		for (const auto& seg : all_hyperedges_[original_edge]) {
+			segs_by_layer[seg->getLayer()] = seg;
 		}
 
-		// Track dead dummies and segments in a up-bottom manner.
+		// Track dead dummies and segments in an up-bottom manner.
 		std::unordered_set<Node*> dead_dummies;
 		std::unordered_set<Hyperedge*> dead_segments;
 		for (auto& [layer, seg] : segs_by_layer) {
@@ -371,12 +471,13 @@ namespace hypergraph_logic {
 			if (!dead_segments.count(seg.get())) continue;
 			removeHyperedgeFromLayer(layer, seg);
 		}
-		all_hyperedges_.erase(
-			std::remove_if(all_hyperedges_.begin(), all_hyperedges_.end(),
+		auto& segments = all_hyperedges_[original_edge];
+		segments.erase(
+			std::remove_if(segments.begin(), segments.end(),
 				[&](const HyperedgePtr& e) {
 					return dead_segments.count(e.get()) > 0;
 				}),
-			all_hyperedges_.end());
+			segments.end());
 
 		// Remove dead dummies from LayerData and all_nodes_. 
 		std::map<int, std::unordered_set<Node*>> dead_by_layer;
@@ -394,116 +495,139 @@ namespace hypergraph_logic {
 			all_nodes_.end());
 	}
 
-	void Hypergraph::removeTransitiveConnections(const NodePtr& parent, const NodePtr& child) {
-		// Collect child and all its descendants.
-		std::unordered_set<Node*> child_and_descendants = child->getAllDescendants();
-		child_and_descendants.insert(child.get());
+	void Hypergraph::removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children) {
+		if (children.empty()) return;
 
-		// Collect parent and all its ancestors.
-		std::unordered_set<Node*> parent_and_ancestors = parent->getAllAncestors();
-		parent_and_ancestors.insert(parent.get());
+		// Collect all ancestors of every parent (including the parents themselves).
+		std::unordered_set<Node*> parents_and_ancestors = getAllAncestors(parents);
+		for (const auto& p : parents)   parents_and_ancestors.insert(p.get());
+
+		// Collect all descendants of every child (including the children themselves).
+		std::unordered_set<Node*> children_and_descendants = getAllDescendants(children);
+		for (const auto& c : children)  children_and_descendants.insert(c.get());
 
 		// Snapshot all_hyperedges_ since it may be modified during the iteration.
-		std::vector<HyperedgePtr> snapshot = all_hyperedges_;
-
-		for (const auto& edge : snapshot) {
-			if (edge->isSegment()) continue;
-
-			// Check if any source of this edge is an ancestor of child
-			// (including parent itself).
-			bool source_is_ancestor = false;
-			std::unordered_set<Node*> ancestor_sources = {};
+		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;
+		for (const auto& [edge, _] : snapshot) {
+			// Collect sources which are ancestors of the parent.
+			std::unordered_set<Node*> ancestor_sources;
 			for (const auto& s : edge->getSources())
-				if (parent_and_ancestors.count(s.get())) {
-					source_is_ancestor = true;
+				if (parents_and_ancestors.count(s.get()))
 					ancestor_sources.insert(s.get());
-				}
-			if (!source_is_ancestor) continue;
 
-			// Find targets that are now redundant.
-			std::vector<NodePtr> non_descendants_targets = {};
-			bool redundant = false;
+			if (ancestor_sources.empty()) continue;
+
+			// Split targets into redundant (now covered transitively) and surviving.
+			std::vector<NodePtr> surviving_targets;
+			bool any_redundant = false;
 			for (const auto& t : edge->getTargets()) {
-				if (child_and_descendants.count(t.get())) {
-					redundant = true;
+				if (children_and_descendants.count(t.get())) {
+					any_redundant = true;
 				}
 				else {
-					non_descendants_targets.push_back(t);
+					surviving_targets.push_back(t);
 				}
 			}
-			
-			if (!redundant) continue;
 
-			// We have to eliminate the sources from the hyperedge and we also have to 
-			// create a new hyperedge with the same sources that targets the non redundant 
-			// connections that existed before.
+			if (!any_redundant) continue;
+
+			// Remove the ancestor sources from this edge (and its segments).
 			removeSourcesFromHyperedge(edge, ancestor_sources);
-			if (!non_descendants_targets.empty()) {
+
+			// If those sources still had non-redundant targets, create a 
+			// new edge from the ancestor sources to the surviving targets
+			// since that connection is still needed.
+			if (!surviving_targets.empty()) {
 				std::vector<NodePtr> ancestor_sources_vec(ancestor_sources.begin(), ancestor_sources.end());
 				if (edge->getLayer() >= 0) {
-					// The original edge is short and still valid after source removal, so we can just create a new short edge.
-					 createHyperedge(ancestor_sources_vec, non_descendants_targets, edge->getLayer());
+					// If the original edge was short, this new edge will also be short and can
+					// be directly added to the same layer without any lookup.
+					createHyperedge(ancestor_sources_vec, surviving_targets, edge->getLayer());
 				}
 				else {
-					const auto& new_edge = createHyperedge(ancestor_sources_vec, non_descendants_targets, -1);
-					// It may be short or long depending on the layers of the sources and targets.
+					const auto& new_edge = createHyperedge(ancestor_sources_vec, surviving_targets, -1);
 					int k = edgeIsShort(new_edge);
 					if (k < 0) {
-						splitLongEdge(new_edge, ancestor_sources_vec, non_descendants_targets);
+						splitLongEdge(new_edge);
 					}
 					else {
 						addHyperedgeToLayer(k, new_edge);
 					}
-
 				}
 			}
 		}
 	}
 
+	void Hypergraph::cleanUp() {
+		std::vector<int> empty;
+		for (const auto& [l, data] : layers_)
+			if (data.nodes.empty() && data.outgoing_edges.empty())
+				empty.push_back(l);
+		for (int l : empty)
+			layers_.erase(l);
+	}
 
-	void Hypergraph::applyRelocationAndPropagate(const NodePtr& node, int new_layer) {
+	void Hypergraph::applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations) {
+		if (relocations.empty()) return;
 
 		// ====================================================================
-		// Phase 1: Move the node in LayerData and fix all real edges that
-		//          target it, since they may now be long.
+		// Phase 1: Move all nodes in LayerData and update incoming edges.
 		// ====================================================================
-		removeNodeFromLayer(node->getLayer(), node);
-		addNodeToLayer(new_layer, -1, node);
-
 		std::unordered_set<Hyperedge*> incoming_set;
-		for (const auto& edge : all_hyperedges_) {
-			if (edge->isSegment()) continue;
-			if (edge->containsTarget(node)) incoming_set.insert(edge.get());
+		std::unordered_set<Node*> relocated_nodes; // Improve efficiency when checking for incoming edges.
+		std::vector<NodePtr> vec_relocated_nodes; // For getAllDescendants input.
+
+		for (const auto& [node, new_layer] : relocations) {
+			removeNodeFromLayer(node->getLayer(), node);
+			addNodeToLayer(new_layer, -1, node);
+			relocated_nodes.insert(node.get());
+			vec_relocated_nodes.push_back(node);
+		}
+
+		for (const auto& [edge, _] : all_hyperedges_) {
+			for (const auto& t : edge->getTargets()) {
+				if (relocated_nodes.count(t.get()) > 0) {
+					incoming_set.insert(edge.get());
+					break;
+				}
+			}
 		}
 
 		dissolveSegments(incoming_set);
-		for (const auto& edge : incoming_set) {
-			splitLongEdge(edge->shared_from_this(), edge->getSources(), edge->getTargets());
+		for (Hyperedge* edge : incoming_set)
+			splitLongEdge(edge->shared_from_this());
+
+		// ====================================================================
+		// Phase 2: Collect all descendants of every relocated node and
+		//          recalculate their layers bottom-up to ensure that 
+		//			when the depth of a node is recalculated, all its parents
+		//			have previously updated their layers.
+		// ====================================================================
+		std::unordered_set<Node*> affected_nodes = getAllDescendants(vec_relocated_nodes);
+
+		// Remove relocated nodes themselves from affected_nodes: they are
+		// already in their correct layer and must not be moved again.
+		for (const auto& node : relocated_nodes)
+			affected_nodes.erase(node);
+
+		if (affected_nodes.empty()) {
+			cleanUp();
+			return;
 		}
 
-		// ====================================================================
-		// Phase 2: Collect the affected nodes and recalculate their layers.
-		//			This is done in a bottom-up manner, layer by layer, to 
-		//			ensure that when we recalculate the depth of a node,
-		//			all its parents have already been recalculated and are in 
-		//			their correct layers. 
-		// ====================================================================
-		std::unordered_set<Node*> affected_nodes;
-		std::map<int, std::unordered_set<Node*>> affected_nodes_by_layer;
-		affected_nodes = node->getAllDescendants();
-		if (affected_nodes.empty()) return;
-
+		std::map<int, std::unordered_set<Node*>> affected_by_layer;
 		for (Node* n : affected_nodes)
-			affected_nodes_by_layer[n->getLayer()].insert(n);
+			affected_by_layer[n->getLayer()].insert(n);
 
-		for (auto& [layer, nodes] : affected_nodes_by_layer) {			
+		for (auto& [layer, nodes] : affected_by_layer) {
 			for (auto it = nodes.begin(); it != nodes.end();) {
-				// Recompute its new depth and check if it varies
 				auto parents = (*it)->getParents();
-				int new_depth = parents.empty() ? 0 : (*std::max_element(parents.begin(), parents.end(),
-					[](const NodePtr& a, const NodePtr& b) {
-						return a->getLayer() < b->getLayer();
-					}))->getLayer() + 1;
+				int new_depth = parents.empty() ? 0
+					: (*std::max_element(parents.begin(), parents.end(),
+						[](const NodePtr& a, const NodePtr& b) {
+							return a->getLayer() < b->getLayer();
+						}))->getLayer() + 1;
+
 				if (new_depth == layer) {
 					affected_nodes.erase(*it);
 					nodes.erase(it);
@@ -513,106 +637,93 @@ namespace hypergraph_logic {
 					++it;
 				}
 			}
-
-			// It does not matter if some nodes do not belong to this layer, they will be ignored by the function.
-			// In addition, the performance is not affected since the lookup is O(1) independently of the number of nodes.
 			removeNodeFromLayer(layer, nodes);
 		}
 
-		// After Phase 2, affected_nodes contains only nodes whose layer
-		// actually changed. Nodes that were descendants but did not need
-		// to move were erased and their edges need not be rebuilt.
-
 		// ====================================================================
-		// Phase 3: Collect the affected hyperedges, clean up segments
-		//			and split them again if necessary.
+		// Phase 3: Rebuild edges for all nodes whose layer actually changed.
 		// ====================================================================
 		std::unordered_set<Hyperedge*> affected_edges;
-		for (const auto& edge : all_hyperedges_) {
-			if (edge->isSegment()) continue;
-			bool sourced_here = false;
-			bool targeted_here = false;
+		for (const auto& [edge, _] : all_hyperedges_) {
+			bool touches = false;
 			for (const auto& s : edge->getSources())
-				if (affected_nodes.count(s.get())) { sourced_here = true; break; }
-			for (const auto& t : edge->getTargets())
-				if (affected_nodes.count(t.get())) { targeted_here = true; break; }
-			if (sourced_here || targeted_here)
-				affected_edges.insert(edge.get());
+				if (affected_nodes.count(s.get())) { touches = true; break; }
+			if (!touches)
+				for (const auto& t : edge->getTargets())
+					if (affected_nodes.count(t.get())) { touches = true; break; }
+			if (touches) affected_edges.insert(edge.get());
 		}
 
 		dissolveSegments(affected_edges);
-		for (const auto& edge : affected_edges) {
+		for (Hyperedge* edge : affected_edges) {
 			int k = edgeIsShort(edge->shared_from_this());
 			if (k >= 0) {
-				// This edge is now short, so it just needs to be relocated
-				// to the correct layer if it is not already there.
 				if (k != edge->getLayer()) {
+					// This edge is now short, so it just needs to be relocated
+					// to the correct layer if it is not already there.
 					removeHyperedgeFromLayer(edge->getLayer(), edge->shared_from_this());
 					addHyperedgeToLayer(k, edge->shared_from_this());
 				}
 			}
 			else {
-				// This edge is a long edge, so it needs to be resplitted.
-				splitLongEdge(edge->shared_from_this(), edge->getSources(), edge->getTargets());
+				splitLongEdge(edge->shared_from_this());
 			}
 		}
 
 		// ====================================================================
-		// Cleanup: remove empty layers left behind after relocation.
+		// Cleanup: remove empty layers.
 		// ====================================================================
-		std::vector<int> empty;
-		for (const auto& [l, data] : layers_)
-			if (data.nodes.empty() && data.outgoing_edges.empty())
-				empty.push_back(l);
-		for (int l : empty)
-			layers_.erase(l);
+		cleanUp();
 	}
 
-	static bool isParentInAncestorsHelper(const NodePtr& node, const NodePtr& parent, std::unordered_set<Node*>& visited) {
-		// Helper function to check if parent is in the ancestors of a node.
-		// Uses memoization (visited set) to avoid re-exploring the same nodes multiple times.
-		// Also uses layer information to prune impossible branches.
+	static bool isNodeInNeighboursHelper(const NodePtr& node, const NodePtr& target, int target_layer, bool search_up, std::unordered_set<Node*>& visited) {
+		const auto neighbours = search_up ? node->getParents() : node->getChildren();
+		for (const auto& neighbour : neighbours) {
+			if (visited.count(neighbour.get()) > 0) continue;
 
-		int parent_layer = parent->getLayer();
+			int neighbour_layer = neighbour->getLayer();
 
-		for (const auto& ancestor : node->getParents()) {
-			// Skip if already visited (avoids redundant exploration)
-			if (visited.count(ancestor.get()) > 0) {
+			// Pruning: when searching up, skip branches shallower than target.
+			//          when searching down, skip branches deeper than target.
+			if (search_up && neighbour_layer < target_layer) continue;
+			if (!search_up && neighbour_layer > target_layer) continue;
+
+			if (neighbour_layer == target_layer) {
+				if (neighbour == target) return true;
 				continue;
 			}
 
-			int ancestor_layer = ancestor->getLayer();
-
-			// If ancestor layer < parent layer, the parent cannot be in this branch.
-			// If both layers are the same, it must be the case that both nodes are the same.
-			if (ancestor_layer < parent_layer) {
-				continue;  // Skip this branch
-			}
-			else if (ancestor_layer == parent_layer) {
-				// Same layer - can only be ancestor if it's the exact same node
-				if (ancestor == parent) {
-					return true;
-				}
-				continue;
-			}
-
-			// Mark as visited to avoid repetition in future calls
-			visited.insert(ancestor.get());
-
-			if (isParentInAncestorsHelper(ancestor, parent, visited)) {
+			visited.insert(neighbour.get());
+			if (isNodeInNeighboursHelper(neighbour, target, target_layer, search_up, visited))
 				return true;
-			}
 		}
 		return false;
 	}
 
-	bool Hypergraph::parentIsInAncestors(const NodePtr& child, const NodePtr& parent) {
-		// Wrapper function that initializes the visited set and calls the helper
-		if (!child || !parent) return false;
+	bool Hypergraph::parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent) {
+		if (!parent || children.empty()) return false;
+		int target_layer = parent->getLayer();
 		std::unordered_set<Node*> visited;
-		return isParentInAncestorsHelper(child, parent, visited);
+		for (const auto& child : children) {
+			if (!child || child->getLayer() <= target_layer) continue;
+			if (isNodeInNeighboursHelper(child, parent, target_layer, true, visited))
+				return true;
+		}
+		return false;
 	}
-	
+
+	bool Hypergraph::childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child) {
+		if (!child || parents.empty()) return false;
+		int target_layer = child->getLayer();
+		std::unordered_set<Node*> visited;
+		for (const auto& parent : parents) {
+			if (!parent || parent->getLayer() >= target_layer) continue;
+			if (isNodeInNeighboursHelper(parent, child, target_layer, false, visited))
+				return true;
+		}
+		return false;
+	}
+
 
 	static bool checkCyclesUtil(Node* node, std::unordered_set<Node*>& visited, std::unordered_set<Node*>& path) {
 		// The implemented algorithm for cycle detection uses DFS and keeps track of visited nodes and the current path.
@@ -689,7 +800,7 @@ namespace hypergraph_logic {
 	// ============================================================================
 	HyperedgePtr Hypergraph::createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
 		auto edge = std::make_shared<Hyperedge>(sources, targets);
-		all_hyperedges_.push_back(edge);
+		all_hyperedges_[edge] = {};
 
 		if (layer >= 0) {
 			edge->setLayer(layer);
@@ -711,7 +822,9 @@ namespace hypergraph_logic {
 
 	HyperedgePtr Hypergraph::createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {	
 		auto edge = std::make_shared<Hyperedge>(origin, sources, targets);
-		all_hyperedges_.push_back(edge);
+		if (auto orig = origin.lock()) {
+			all_hyperedges_[orig].push_back(edge);  
+		}
 
 		if (layer >= 0) {
 			edge->setLayer(layer);
@@ -742,7 +855,12 @@ namespace hypergraph_logic {
 	}
 
 	std::vector<HyperedgePtr> Hypergraph::getAllHyperedges() const {
-		return all_hyperedges_;
+		std::vector<HyperedgePtr> result;
+		for (const auto& [orig, segments] : all_hyperedges_) {
+			result.push_back(orig);
+			result.insert(result.end(), segments.begin(), segments.end());
+		}
+		return result;
 	}
 
 	int Hypergraph::edgeIsShort(const HyperedgePtr& edge) {
@@ -761,5 +879,47 @@ namespace hypergraph_logic {
 	// Private helpers
 	// ============================================================================
 
+
+
+	static void getAllAncestorsHelper(const NodePtr& node, std::unordered_set<Node*>& ancestors) {
+		for (const auto& parent : node->getParents()) {
+			if (!parent) continue;
+			if (!ancestors.insert(parent.get()).second) continue;
+			getAllAncestorsHelper(parent, ancestors);
+		}
+
+	}
+
+	std::unordered_set<Node*> Hypergraph::getAllAncestors(const std::vector<NodePtr>& nodes) {
+		if (nodes.empty()) return {};
+		std::unordered_set<Node*> ancestors = {};
+		for (const auto& node : nodes) {
+			if (!node || ancestors.count(node.get()) > 0) continue;
+			getAllAncestorsHelper(node, ancestors);
+		}
+		for (const auto& node : nodes)
+			ancestors.erase(node.get());
+		return ancestors;
+	}
+
+	static void getAllDescendantsHelper(const NodePtr& node, std::unordered_set<Node*>& descendants) {
+		for (const auto& child : node->getChildren()) {
+			if (!child) continue;
+			if (!descendants.insert(child.get()).second) continue;
+			getAllDescendantsHelper(child, descendants);
+		}
+	}
+
+	std::unordered_set<Node*> Hypergraph::getAllDescendants(const std::vector<NodePtr>& nodes) {
+		if (nodes.empty()) return {};
+		std::unordered_set<Node*> descendants = {};
+		for (const auto& node : nodes) {
+			if (!node || descendants.count(node.get()) > 0) continue;
+			getAllDescendantsHelper(node, descendants);
+		}
+		for (const auto& node : nodes)
+			descendants.erase(node.get());
+		return descendants;
+	}
 
 } // namespace hypergraph_logic

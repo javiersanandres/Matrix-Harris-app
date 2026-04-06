@@ -4,6 +4,7 @@
 #include "Hyperedge.h"
 
 #include <map>
+#include <unordered_map>
 #include <vector>
 
 namespace hypergraph_logic {
@@ -42,6 +43,9 @@ namespace hypergraph_logic {
 		/// Create a new real node and add it to the graph
 		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent);
 		void addConnection(const NodePtr& parent, const NodePtr& child);
+		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
+		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
+
 
 
 		/// Get all nodes at a specific layer
@@ -87,8 +91,14 @@ namespace hypergraph_logic {
 		// All nodes owned by this graph
 		std::vector<NodePtr> all_nodes_;
 
+		struct HyperedgePtrHash {
+			size_t operator()(const HyperedgePtr& e) const {
+				return std::hash<Hyperedge*>()(e.get());
+			}
+		};
+
 		// All hyperedges owned by this graph
-		std::vector<HyperedgePtr> all_hyperedges_;
+		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> all_hyperedges_;
 
 		void addNodeToLayer(int layer, int position, const NodePtr& node);
 		void removeNodeFromLayer(int layer, const NodePtr& node);
@@ -100,27 +110,33 @@ namespace hypergraph_logic {
 
 		/// Remove all hyperedges in the set from the specified layer
 		void removeHyperedgeFromLayer(int layer, const std::unordered_set<Hyperedge*>& edges);
-		void applyRelocationAndPropagate(const NodePtr& node, int new_layer);
+		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations);
 
 		//NodePtr createNode(const NodePtr& parent, const NodePtr& oldChild); -- to be implemented when the ordering is figured out
-
-		void splitLongEdge(const HyperedgePtr& long_edge, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& long_targets);
+		void splitLongEdge(const HyperedgePtr& long_edge);
 
 		void dissolveSegments(const std::unordered_set<Hyperedge*>& long_edges);
 
 		/// Remove specified sources from a hyperedge and all its segments, cleaning up unused dummies
 		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove);
 
-		void removeTransitiveConnections(const NodePtr& parent, const NodePtr& child);
+		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children);
 
 		/// Remove specified targets from a hyperedge and all its segments, cleaning up unused dummies
 		//void removeTargetsFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<NodePtr>& targets_to_remove);
 
 		/// Check if a node is in the ancestors of this node
-		bool parentIsInAncestors(const NodePtr& child, const NodePtr& parent);
+		bool parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent);
+		bool childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child);
 
 		/// Check for cycles in the graph starting from a given node.
 		bool checkCycles(const NodePtr& node);
+
+	private:
+		std::unordered_set<Node*> getAllAncestors(const std::vector<NodePtr>& nodes);
+		std::unordered_set<Node*> getAllDescendants(const std::vector<NodePtr>& nodes);
+
+		void cleanUp();
 	};
 
 } // namespace hypergraph_logic
