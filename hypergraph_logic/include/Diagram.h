@@ -3,7 +3,7 @@
 #include <string>
 
 
-namespace graph_logic {
+namespace hypergraph_logic {
 	class Diagram {
 	public:
 		explicit Diagram(std::string name);

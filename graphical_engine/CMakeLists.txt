@@ -1,4 +1,4 @@
-# Graphical engine that consumes graph_logic (views / display)
+# Graphical engine that consumes hypergraph_logic (views / display)
 cmake_minimum_required(VERSION 3.10)
 
 # Collect sources for the engine
@@ -13,14 +13,14 @@ if(NOT GRAPHICAL_ENGINE_SOURCES)
 else()
     add_executable(graphical_engine ${GRAPHICAL_ENGINE_SOURCES})
 
-    # Engine needs the graph_logic public headers and library
+    # Engine needs the hypergraph_logic public headers and library
     target_include_directories(graphical_engine PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/include
     )
 
-    # Link to graph_logic if available
-    if(TARGET graph_logic)
-        target_link_libraries(graphical_engine PRIVATE graph_logic)
+    # Link to hypergraph_logic if available
+    if(TARGET hypergraph_logic)
+        target_link_libraries(graphical_engine PRIVATE hypergraph_logic)
     else()
         message(WARNING "graph_logic target not found. graphical_engine will build without linking to it.")
     endif()

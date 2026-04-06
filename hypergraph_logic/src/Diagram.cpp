@@ -4,7 +4,7 @@
 #include <algorithm>
 #include <limits>
 
-namespace graph_logic {
+namespace hypergraph_logic {
 	// static helper functions declaration
 	static void rewireConnection(const NodePtr& parent, const NodePtr& oldChild, const NodePtr& newChild);
 	static size_t findInsertPosition(const Diagram* diagram, const std::vector<NodePtr>& nodes, const NodePtr& newNode);
