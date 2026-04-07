@@ -54,6 +54,77 @@ namespace hypergraph_logic {
 		);
 	}
 
+	std::vector<NodePtr> Hypergraph::getNodesAt(int layer) const {
+		auto it = layers_.find(layer);
+		if (it != layers_.end()) {
+			return it->second.nodes;
+		}
+		return std::vector<NodePtr>();  // Empty vector if layer doesn't exist
+	}
+
+	std::vector<NodePtr> Hypergraph::getAllNodes() const {
+		return all_nodes_;
+	}
+
+	// ============================================================================
+	// Hyperedge management
+	// ============================================================================
+	HyperedgePtr Hypergraph::createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
+		auto edge = std::make_shared<Hyperedge>(sources, targets);
+		all_hyperedges_[edge] = {};
+
+		if (layer >= 0) {
+			edge->setLayer(layer);
+			layers_[layer].outgoing_edges.push_back(edge);
+		}
+
+		// Register parent-child relationships between sources and targets. 
+		// Since the hyperedge is not a segment, all sources and targets are real nodes, 
+		// so we can directly connect them without worrying about dummy nodes.
+		for (const auto& s : sources)
+			for (const auto& t : targets)
+				if (!s->isDummy() && !t->isDummy()) {
+					s->addChild(t);
+					t->addParent(s);
+				}
+
+		return edge;
+	}
+
+	HyperedgePtr Hypergraph::createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
+		auto edge = std::make_shared<Hyperedge>(origin, sources, targets);
+		if (auto orig = origin.lock()) {
+			all_hyperedges_[orig].push_back(edge);
+		}
+
+		if (layer >= 0) {
+			edge->setLayer(layer);
+			layers_[layer].outgoing_edges.push_back(edge);
+		}
+
+		// Establish parent-child relationships between sources and targets,
+		// taking account the real nodes should not have any notion of the dummies.
+		for (const auto& src : sources) {
+			for (const auto& tgt : targets) {
+				bool src_dummy = src->isDummy();
+				bool tgt_dummy = tgt->isDummy();
+
+				if (src_dummy && tgt_dummy) {
+					src->addChild(tgt);
+					tgt->addParent(src);
+				}
+				else if (src_dummy && !tgt_dummy) {
+					src->addChild(tgt);
+				}
+				else if (!src_dummy && tgt_dummy) {
+					tgt->addParent(src);
+				}
+			}
+		}
+
+		return edge;
+	}
+
 	void Hypergraph::addHyperedgeToLayer(int layer, const HyperedgePtr& edge) {
 		if (!edge) return;
 		if (layers_.find(layer) == layers_.end()) {
@@ -70,7 +141,6 @@ namespace hypergraph_logic {
 
 		edge->setLayer(layer);
 	}
-
 
 	void Hypergraph::removeHyperedgeFromLayer(int layer, const HyperedgePtr& edge) {
 		if (!edge || layers_.find(layer) == layers_.end()) return;
@@ -95,7 +165,46 @@ namespace hypergraph_logic {
 		}
 	}
 
+	std::vector<HyperedgePtr> Hypergraph::getAllHyperedges() const {
+		std::vector<HyperedgePtr> result;
+		for (const auto& [orig, segments] : all_hyperedges_) {
+			result.push_back(orig);
+			result.insert(result.end(), segments.begin(), segments.end());
+		}
+		return result;
+	}
 
+	int Hypergraph::edgeIsShort(const HyperedgePtr& edge) {
+		if (!edge || edge->getSources().empty() || edge->getTargets().empty()) return -1;
+
+
+		for (const auto& s : edge->getSources())
+			for (const auto& t : edge->getTargets())
+				if (std::abs(s->getLayer() - t->getLayer()) != 1)
+					return -1;
+
+		return edge->getSources()[0]->getLayer();
+	}
+
+	// ============================================================================
+	// Layer queries
+	// ============================================================================
+	int Hypergraph::getLayerCount() const {
+		return static_cast<int>(layers_.size());
+	}
+
+	const std::map<int, LayerData>& Hypergraph::getLayers() const {
+		return layers_;
+	}
+
+	const LayerData& Hypergraph::getLayerData(int layer) const {
+		auto it = layers_.find(layer);
+		if (it != layers_.end()) {
+			return it->second;
+		}
+		static const LayerData empty_layer{};
+		return empty_layer;
+	}
 
 	// ============================================================================
 	// Connection addition management
@@ -114,7 +223,6 @@ namespace hypergraph_logic {
 
 		return node;
 	}
-
 
 	void Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child) {
 		if (!child || !parent) return;
@@ -233,7 +341,6 @@ namespace hypergraph_logic {
 			applyRelocationAndPropagate(relocations);
 		}
 	}
-
 
 	void Hypergraph::addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target) {
 		if (!edge || edge->isSegment() || !target) return;
@@ -628,122 +735,6 @@ namespace hypergraph_logic {
 		if (relocation) relocateTargets(original_edge);
 	}
 
-
-
-
-
-	std::vector<NodePtr> Hypergraph::getNodesAt(int layer) const {
-		auto it = layers_.find(layer);
-		if (it != layers_.end()) {
-			return it->second.nodes;
-		}
-		return std::vector<NodePtr>();  // Empty vector if layer doesn't exist
-	}
-
-	std::vector<NodePtr> Hypergraph::getAllNodes() const {
-		return all_nodes_;
-	}
-
-	// ============================================================================
-	// Layer queries
-	// ============================================================================
-
-	int Hypergraph::getLayerCount() const {
-		return static_cast<int>(layers_.size());
-	}
-
-	const std::map<int, LayerData>& Hypergraph::getLayers() const {
-		return layers_;
-	}
-
-	const LayerData& Hypergraph::getLayerData(int layer) const {
-		auto it = layers_.find(layer);
-		if (it != layers_.end()) {
-			return it->second;
-		}
-		static const LayerData empty_layer{};
-		return empty_layer;
-	}
-
-	// ============================================================================
-	// Hyperedge management
-	// ============================================================================
-	HyperedgePtr Hypergraph::createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
-		auto edge = std::make_shared<Hyperedge>(sources, targets);
-		all_hyperedges_[edge] = {};
-
-		if (layer >= 0) {
-			edge->setLayer(layer);
-			layers_[layer].outgoing_edges.push_back(edge);
-		}
-
-		// Register parent-child relationships between sources and targets. 
-		// Since the hyperedge is not a segment, all sources and targets are real nodes, 
-		// so we can directly connect them without worrying about dummy nodes.
-		for (const auto& s : sources)
-			for (const auto& t : targets)
-				if (!s->isDummy() && !t->isDummy()) {
-					s->addChild(t);
-					t->addParent(s);
-				}
-
-		return edge;
-	}
-
-	HyperedgePtr Hypergraph::createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {	
-		auto edge = std::make_shared<Hyperedge>(origin, sources, targets);
-		if (auto orig = origin.lock()) {
-			all_hyperedges_[orig].push_back(edge);  
-		}
-
-		if (layer >= 0) {
-			edge->setLayer(layer);
-			layers_[layer].outgoing_edges.push_back(edge);
-		}
-
-		// Establish parent-child relationships between sources and targets,
-		// taking account the real nodes should not have any notion of the dummies.
-		for (const auto& src : sources) {
-			for (const auto& tgt : targets) {
-				bool src_dummy = src->isDummy();
-				bool tgt_dummy = tgt->isDummy();
-
-				if (src_dummy && tgt_dummy) {
-					src->addChild(tgt);
-					tgt->addParent(src);
-				}
-				else if (src_dummy && !tgt_dummy) {
-					src->addChild(tgt);
-				}
-				else if (!src_dummy && tgt_dummy) {
-					tgt->addParent(src);
-				}
-			}
-		}
-
-		return edge;
-	}
-
-	std::vector<HyperedgePtr> Hypergraph::getAllHyperedges() const {
-		std::vector<HyperedgePtr> result;
-		for (const auto& [orig, segments] : all_hyperedges_) {
-			result.push_back(orig);
-			result.insert(result.end(), segments.begin(), segments.end());
-		}
-		return result;
-	}
-
-	int Hypergraph::edgeIsShort(const HyperedgePtr& edge) {
-		if (!edge || edge->getSources().empty() || edge->getTargets().empty()) return -1;
-
-
-		for (const auto& s : edge->getSources())
-			for (const auto& t : edge->getTargets())
-				if (std::abs(s->getLayer() - t->getLayer()) != 1)
-					return -1;
-
-		return edge->getSources()[0]->getLayer();
-	}
 
 	// ============================================================================
 	// Protected helper methods for connection management
