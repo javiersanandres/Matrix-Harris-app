@@ -63,6 +63,7 @@ namespace hypergraph_logic {
 		std::vector<NodePtr> getTargets() const;
 
 		/// Check if a specific node is among the targets of this hyperedge
+		bool containsSource(const NodePtr& node) const;
 		bool containsTarget(const NodePtr& node) const;
 
 		// ------------------------------------------------------------------

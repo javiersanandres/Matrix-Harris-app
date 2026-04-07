@@ -80,6 +80,21 @@ namespace hypergraph_logic {
 		return result;
 	}
 
+
+	bool Hyperedge::containsSource(const NodePtr& node) const {
+		if (!node) return false;
+
+		for (const auto& weak : sources_) {
+			if (auto source = weak.lock()) {
+				if (source == node) {
+					return true;
+				}
+			}
+		}
+		return false;
+	}
+
+
 	bool Hyperedge::containsTarget(const NodePtr& node) const {
 		if (!node) return false;
 
@@ -92,6 +107,7 @@ namespace hypergraph_logic {
 		}
 		return false;
 	}
+
 
 	// ============================================================================
 	// Mutation

@@ -45,8 +45,10 @@ namespace hypergraph_logic {
 		void addConnection(const NodePtr& parent, const NodePtr& child);
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
-
-
+		void removeNode(const NodePtr& node);
+		void removeConnection(const NodePtr& parent, const NodePtr& child);
+		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove, bool relocation);
+		void removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation);
 
 		/// Get all nodes at a specific layer
 		std::vector<NodePtr> getNodesAt(int layer) const;
@@ -110,15 +112,13 @@ namespace hypergraph_logic {
 
 		/// Remove all hyperedges in the set from the specified layer
 		void removeHyperedgeFromLayer(int layer, const std::unordered_set<Hyperedge*>& edges);
+		bool relocateTargets(const HyperedgePtr& original_edge);
 		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations);
 
 		//NodePtr createNode(const NodePtr& parent, const NodePtr& oldChild); -- to be implemented when the ordering is figured out
 		void splitLongEdge(const HyperedgePtr& long_edge);
 
 		void dissolveSegments(const std::unordered_set<Hyperedge*>& long_edges);
-
-		/// Remove specified sources from a hyperedge and all its segments, cleaning up unused dummies
-		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove);
 
 		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children);
 
