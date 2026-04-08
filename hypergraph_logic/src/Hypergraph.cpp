@@ -1431,6 +1431,4 @@ namespace hypergraph_logic {
 
 		return checkCyclesUtil(node.get(), visited, path);
 	}
-
-
 } // namespace hypergraph_logic
