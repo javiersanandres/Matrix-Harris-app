@@ -1,8 +1,6 @@
 ﻿#include "Hypergraph.h"
 #include <algorithm>
 #include <stdexcept>
-#include <queue>
-#include <unordered_map>
 
 namespace hypergraph_logic {
 	// ============================================================================
@@ -224,6 +222,104 @@ namespace hypergraph_logic {
 		return node;
 	}
 
+	NodePtr Hypergraph::createNode(const std::string& label, const HyperedgePtr& edge) {
+		if (!edge) return nullptr;
+		NodePtr node = std::make_shared<Node>(label);
+		all_nodes_.push_back(node);
+
+		// Snapshot sources and targets before modifying.
+		auto sources = edge->getSources();
+		auto targets = edge->getTargets();
+		int edge_layer = edge->getLayer();
+
+		// Removing all sources triggers edge removal and also handles the connection rewiring
+		std::unordered_set<Node*> sources_set;
+		int node_layer = 0;
+		for (const auto& s : sources) {
+			sources_set.insert(s.get());
+			
+			if(s->getLayer() + 1 > node_layer)
+				node_layer = s->getLayer() + 1;
+		}
+		removeSourcesFromHyperedge(edge, sources_set, false);
+		addNodeToLayer(node_layer, -1, node);
+
+		if (edge_layer >= 0) {
+			// If it was short, the two new edges will also be short
+			createHyperedge(sources, { node }, edge_layer);
+			const auto& new_edge = createHyperedge({ node }, targets, edge_layer + 1);
+			relocateTargets(new_edge); // Relocate the targets to one layer down
+		}
+		else {
+			const auto& new_edge_1 = createHyperedge(sources, { node }, -1);
+			int k = edgeIsShort(new_edge_1);
+			if (k >= 0) {
+				addHyperedgeToLayer(k, new_edge_1);
+			}
+			else {
+				splitLongEdge(new_edge_1);
+			}
+
+			const auto& new_edge_2 = createHyperedge({ node }, targets, -1);
+			relocateTargets(new_edge_2); // Relocate the targets to one layer down. 
+
+			k = edgeIsShort(new_edge_2);
+			if (k >= 0) {
+				addHyperedgeToLayer(k, new_edge_2);
+			}
+			else {
+				splitLongEdge(new_edge_2);
+			}
+		}
+		return node;
+	}
+
+	NodePtr Hypergraph::createSource(const std::string& label, int layer_position, const HyperedgePtr& edge) {
+		if (!edge) return nullptr;
+		NodePtr node = std::make_shared<Node>(label);
+		all_nodes_.push_back(node);
+		addNodeToLayer(0, layer_position, node);
+
+		edge->addSource(node);
+		for (const auto& t : edge->getTargets()) {
+			t->addParent(node);
+			node->addParent(t);
+		}
+
+		if (edgeIsShort(edge) < 0) { // The edge needs to be split or resplitted.
+			if (edge->getLayer() >= 0) { // It wasn't long before, so we need to remove it from the layer data.
+				removeHyperedgeFromLayer(edge->getLayer(), edge);
+			}
+			splitLongEdge(edge);
+		}
+		// No relocation is needed since the new source is in the first layer and no cycles
+		// can be created by adding a new source to an existing edge.
+		return node;
+	}
+	
+	NodePtr Hypergraph::createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge) {
+		if (!edge) return nullptr;
+		NodePtr node = std::make_shared<Node>(label);
+		all_nodes_.push_back(node);
+
+		int node_layer = 0;
+		for (const auto& s : edge->getSources()) {
+			if (s->getLayer() + 1 > node_layer) {
+				node_layer = s->getLayer() + 1;
+			}
+			s->addChild(node);
+			node->addParent(s);
+		}
+
+		addNodeToLayer(node_layer, layer_position, node);
+		if (edgeIsShort(edge) < 0) { // The edge needs to be resplitted (it was long before).
+			splitLongEdge(edge);
+		}
+		// Again it is fairly simple to see that no relocation is needed and 
+		// also no cycles can be created.
+		return node;
+	}
+
 	void Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child) {
 		if (!child || !parent) return;
 		if (child == parent) {
@@ -290,28 +386,64 @@ namespace hypergraph_logic {
 				throw std::logic_error("A node cannot be connected to itself.");
 			}
 		}
-
-		if (parentIsInAncestors(targets, source)) {
+		
+		// Although the connection might be redundant, it can also encode
+		// a different grouping of sources and targets, so we need to check.
+		std::unordered_set<Node*> affected_targets;
+		std::vector<HyperedgePtr> affected_edges;
+		for (const auto& [hyperedge, _] : all_hyperedges_) {
+			if (!hyperedge->containsSource(source)) continue;
+			bool update_grouping = false;
+			for (const auto& t : targets) {
+				if (hyperedge->containsTarget(t)) {
+					affected_targets.insert(t.get());
+					affected_edges.push_back(hyperedge);
+					update_grouping = true;
+				}
+			}
+			if (update_grouping && hyperedge->getSources().size() != 1) {
+				throw std::logic_error("This connection already exists in the diagram.");
+			}
+		}
+		
+		if (affected_targets.empty() && parentIsInAncestors(targets, source)) {
 			throw std::logic_error("This connection already exists in the diagram.");
 		}
-	
+		
 		// Temporarily add the source and check for cycles
 		for (const auto& t : targets) {
-			source->addChild(t);
-			t->addParent(source);
+			if (affected_targets.count(t.get()) == 0) {
+				source->addChild(t);
+				t->addParent(source);
+			}
 		}
 
 		if (checkCycles(source)) {
 			// Rollback
 			for (const auto& t : targets) {
-				source->removeChild(t);
-				t->removeParent(source);
+				if (affected_targets.count(t.get()) == 0) {
+					source->removeChild(t);
+					t->removeParent(source);
+				}
 			}
 			throw std::logic_error("Adding this connection would create a cycle in the diagram.");
 		}
 
 		// Now we know that no cycles are added, we can safely add the connection.
-		// As before, we need to remove any pre-existing connections which are now redundant.
+		if (!affected_targets.empty()) {
+			// Remove the targets from the affected hyperedges in which they participate as so.
+			for (const auto& hyperedge : affected_edges) {
+				removeTargetsFromHyperedge(hyperedge, affected_targets, false); // We will relocate later, so we avoid it here.
+			}
+			
+			// Now, reinstate the connections from the source to the affected targets since they were removed in the previous step.
+			for (const auto& t : affected_targets) {
+				source->addChild(t->shared_from_this());
+				t->addParent(source);
+			}
+		}
+		
+		// Remove any pre-existing connections which are now redundant.
 		removeTransitiveConnections({ source }, targets);
 		
 		edge->addSource(source);
@@ -352,16 +484,40 @@ namespace hypergraph_logic {
 			}
 		}
 
-		if (childIsInDescendants(sources, target)) {
+		std::vector<HyperedgePtr> affected_edges;
+		for (const auto& [hyperedge, _] : all_hyperedges_) {
+			if (!hyperedge->containsTarget(target)) continue;
+			bool update_grouping = false;
+			for (const auto& s : sources) {
+				if (hyperedge->containsSource(s)) {
+					affected_edges.push_back(hyperedge);
+					update_grouping = true;
+					break;
+				}
+			}
+			if (update_grouping && !std::includes(sources.begin(), sources.end(), hyperedge->getSources().begin(), hyperedge->getSources().end())) {
+				throw std::logic_error("This connection already exists in the diagram.");
+			}
+		}
+
+		if (affected_edges.empty() && childIsInDescendants(sources, target)) {
 			throw std::logic_error("This connection already exists in the diagram.");
+		}
+
+		std::unordered_set<Node*> target_parents_set; // for quick lookup when adding connections and rolling back.
+		for (const auto& p : target->getParents()) {
+			target_parents_set.insert(p.get());
 		}
 
 		// Temporarily add the target and check for cycles
 		int parents_layer = 0;
 		for (const auto& s : sources) {
-			target->addParent(s);
-			s->addChild(target);
 			if (s->getLayer() > parents_layer) parents_layer = s->getLayer();
+			if (target_parents_set.count(s.get()) == 0) {
+				// This connection does not exist yet, so we need to add it temporarily.
+				target->addParent(s);
+				s->addChild(target);
+			}
 		}
 
 		// If adding these connections has created a cycle, then it must be the case
@@ -370,18 +526,32 @@ namespace hypergraph_logic {
 		if (checkCycles(target)) {
 			// Rollback
 			for (const auto& s : sources) {
-				target->removeParent(s);
-				s->removeChild(target);
+				if (target_parents_set.count(s.get()) == 0) {
+					// This connection was not pre-existing, so we need to rollback.
+					target->removeParent(s);
+					s->removeChild(target);
+				}
 			}
 			throw std::logic_error("Adding this connection would create a cycle in the diagram.");
 		}
 
-		// Now we know that no cycles are added, we can safely add the connection.
+		// Now that we know that no cycles are added, we can safely add the connection.
+		if (affected_edges.empty()) {
+			// Remove the target from all the hyperedges in which it participates as so.
+			for (const auto& hyperedge : affected_edges) {
+				removeTargetsFromHyperedge(hyperedge, { target.get()}, false); // We will relocate later, so we avoid it here.
+			}
+			// Now, reinstate the connections from the target parents to the target since they were removed in the previous step.
+			for (const auto& s : target_parents_set) {
+				s->addChild(target);
+				target->addParent(s->shared_from_this());
+			}
+		}
+		
 		// As before, we need to remove any pre-existing connections which are now redundant.
 		removeTransitiveConnections(sources, { target });
 
 		edge->addTarget(target);
-
 		if (parents_layer + 1 > target->getLayer()) {
 			// The child layer needs to be updated. This automatically implies that the new layer
 			// number is the parents_layer + 1 and this should propagate down to all the descendants of the child.
@@ -554,6 +724,7 @@ namespace hypergraph_logic {
 			// layer, since the remaining sources are in the inmediate shallower layer.
 			dissolveSegments({ original_edge.get() });
 			addHyperedgeToLayer(k, original_edge);
+			return;
 		}
 
 		// Group segments by layer for up-bottom traversal.
@@ -663,6 +834,7 @@ namespace hypergraph_logic {
 			// The edge is now short, so just dissolve the segments and add it to the new layer.
 			dissolveSegments({ original_edge.get() });
 			addHyperedgeToLayer(k, original_edge);
+			return;
 		}
 
 		// Group segments by layer for bottom-up traversal.
@@ -735,7 +907,68 @@ namespace hypergraph_logic {
 		if (relocation) relocateTargets(original_edge);
 	}
 
+	// ============================================================================
+	// Node fusion management
+	// ============================================================================
+	void Hypergraph::fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_name) {
+		if (!node1 || !node2) return;
+		if (node1 == node2) {
+			throw std::invalid_argument("Cannot fuse a node with itself.");
+		}
 
+		// Temporarily fuse the nodes and check for cycles.
+		const auto parents2 = node2->getParents();
+		const auto children2 = node2->getChildren();
+		
+		// Move all the connections to one node and disconnect the other.
+		for (const auto& p : parents2) {
+			p->replaceChild(node2, node1);
+			node1->addParent(p);
+		}
+
+		for (const auto& c : children2) {
+			c->replaceParent(node2, node1);
+			node1->addChild(c);
+		}
+
+		if (checkCycles(node1)) {
+			// Rollback
+			for (const auto& p : parents2) {
+				p->replaceChild(node1, node2);
+				node1->removeParent(p);
+			}
+			for (const auto& c : children2) {
+				c->replaceParent(node1, node2);
+				node1->removeChild(c);
+			}
+			throw std::logic_error("Fusing these nodes would create a cycle in the diagram.");
+		}
+
+		// Now we know that no cycles are added, we can safely fuse the nodes.
+		node1->setName(new_name);
+
+		// Modify all hyperedges in which node2 participated to replace it with node1.
+		for (const auto& edge : getAllHyperedges()) {
+			edge->replaceSource(node2, node1);
+			edge->replaceTarget(node2, node1);
+		}
+
+		// Calculate new layer for the fused node and relocate if necessary.
+		int new_layer = 0;
+		for (const auto& p : node1->getParents()) {
+			if (p->getLayer() + 1 > new_layer) {
+				new_layer = p->getLayer() + 1;
+			}
+		}
+		if (new_layer != node1->getLayer()) {
+			applyRelocationAndPropagate({ {node1, new_layer} });
+		}
+
+		// Finally, remove the fused node from the graph and from its layer.
+		all_nodes_.erase(std::remove(all_nodes_.begin(), all_nodes_.end(), node2), all_nodes_.end());
+		removeNodeFromLayer(node2->getLayer(), node2);
+	}
+	
 	// ============================================================================
 	// Protected helper methods for connection management
 	// ============================================================================
@@ -864,11 +1097,11 @@ namespace hypergraph_logic {
 
 		// Collect all ancestors of every parent (including the parents themselves).
 		std::unordered_set<Node*> parents_and_ancestors = getAllAncestors(parents);
-		for (const auto& p : parents)   parents_and_ancestors.insert(p.get());
+		for (const auto& p : parents) parents_and_ancestors.insert(p.get());
 
 		// Collect all descendants of every child (including the children themselves).
 		std::unordered_set<Node*> children_and_descendants = getAllDescendants(children);
-		for (const auto& c : children)  children_and_descendants.insert(c.get());
+		for (const auto& c : children) children_and_descendants.insert(c.get());
 
 		// Snapshot all_hyperedges_ since it may be modified during the iteration.
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;

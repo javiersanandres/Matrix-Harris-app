@@ -42,6 +42,9 @@ namespace hypergraph_logic {
 
 		/// Create a new real node and add it to the graph
 		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent);
+		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
+		NodePtr createSource(const std::string& label, int layer_position, const HyperedgePtr& edge);
+		NodePtr createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge);
 		void addConnection(const NodePtr& parent, const NodePtr& child);
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
@@ -49,6 +52,8 @@ namespace hypergraph_logic {
 		void removeConnection(const NodePtr& parent, const NodePtr& child);
 		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove, bool relocation);
 		void removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation);
+		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_label);
+		
 
 		/// Get all nodes at a specific layer
 		std::vector<NodePtr> getNodesAt(int layer) const;

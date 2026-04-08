@@ -44,6 +44,7 @@ namespace hypergraph_logic {
 
 		bool isDummy() const noexcept;
 		const std::string& getName() const noexcept;
+		void setName(const std::string& name);
 
 		// ====================================================================
 		// Layer management

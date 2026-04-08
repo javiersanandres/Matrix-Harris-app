@@ -26,6 +26,10 @@ namespace hypergraph_logic {
 		return name_;
 	}
 
+	void Node::setName(const std::string& name) {
+		name_ = name;
+	}
+
 	int Node::getLayer() const noexcept {
 		return layer_;
 	}
