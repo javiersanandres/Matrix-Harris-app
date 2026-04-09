@@ -151,6 +151,9 @@ namespace hypergraph_logic {
 	void Hypergraph::removeHyperedgeFromLayer(int layer, const std::unordered_set<Hyperedge*>& edges) {
 		if (edges.empty() || layers_.find(layer) == layers_.end()) return;
 		auto& layer_outgoing_edges = layers_[layer].outgoing_edges;
+		for (const auto& edge : edges) {
+			edge->setLayer(-1); // Unset layer
+		}
 		layer_outgoing_edges.erase(
 			std::remove_if(layer_outgoing_edges.begin(), layer_outgoing_edges.end(),
 				[&edges](const HyperedgePtr& edge) {
@@ -158,10 +161,6 @@ namespace hypergraph_logic {
 				}),
 			layer_outgoing_edges.end()
 		);
-
-		for (const auto& edge : edges) {
-			edge->setLayer(-1); // Unset layer
-		}
 	}
 
 	std::vector<HyperedgePtr> Hypergraph::getAllHyperedges() const {
@@ -1366,8 +1365,7 @@ namespace hypergraph_logic {
 						}))->getLayer() + 1;
 
 				if (new_depth == layer) {
-					affected_nodes.erase(*it);
-					it = nodes.erase(it);
+					it = nodes.erase(it); // Prevent removing from layer if the node does not need to relocate.
 				}
 				else {
 					addNodeToLayer(new_depth, -1, (*it)->shared_from_this());
@@ -1391,10 +1389,10 @@ namespace hypergraph_logic {
 			if (touches) affected_edges.insert(edge.get());
 		}
 
-		dissolveSegments(affected_edges);
 		for (Hyperedge* edge : affected_edges) {
 			int k = edgeIsShort(edge->shared_from_this());
 			if (k >= 0) {
+				dissolveSegments({ edge }); // Dissolve any existing segments since the edge may now be short when it wasn't before.
 				if (k != edge->getLayer()) {
 					// This edge is now short, so it just needs to be relocated
 					// to the correct layer if it is not already there.
@@ -1403,7 +1401,7 @@ namespace hypergraph_logic {
 				}
 			}
 			else {
-				splitLongEdge(edge->shared_from_this());
+				splitLongEdge(edge->shared_from_this()); // Already handles edge dissolution.
 			}
 		}
 

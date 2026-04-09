@@ -974,10 +974,10 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         auto z3 = g.createNode("z3", 0, z2);
         auto z4 = g.createNode("z4", 0, z3);
 
-        g.addConnection(z0, z2);
-        g.addConnection(z0, z3);
-        g.addConnection(z1, z3);
-        g.addConnection(z1, z4);
+		EXPECT_THROW(g.addConnection(z0, z2), std::logic_error);
+        EXPECT_THROW(g.addConnection(z0, z3), std::logic_error);
+        EXPECT_THROW(g.addConnection(z1, z3), std::logic_error);
+        EXPECT_THROW(g.addConnection(z1, z4), std::logic_error);
 
         EXPECT_EQ(z0->getLayer(), 0);
         EXPECT_EQ(z1->getLayer(), 1);
