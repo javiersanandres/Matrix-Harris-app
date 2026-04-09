@@ -185,14 +185,37 @@ namespace hypergraph_logic {
 	// the graph will take care of that when necessary, and it is easier to manage 
 	// the connections if they are not removed in the middle of the rewiring process.
 	void Node::replaceChild(const NodePtr& oldChild, const NodePtr& newChild) {
-		replaceComponent(oldChild, std::vector<NodePtr>{newChild}, children_);
+		replaceChild(oldChild, std::vector<NodePtr>{newChild});
 	}
 
 	void Node::replaceChild(const NodePtr& oldChild, const std::vector<NodePtr>& newChildren) {
-		replaceComponent(oldChild, newChildren, children_);
+		std::vector<NodePtr> validNewChildren;
+		for (const auto& newChild : newChildren) {
+			if (!newChild) continue;
+			// Check if newChild is already in children_ (avoid duplicates)
+			auto it = std::find_if(children_.begin(), children_.end(),
+				[&newChild](const WeakNodePtr& weak) {
+					auto ptr = weak.lock();
+					return ptr && ptr == newChild;
+				});
+			if (it != children_.end()) continue;
+
+			validNewChildren.push_back(newChild);
+		}
+
+		replaceComponent(oldChild, validNewChildren, children_);
 	}
 
 	void Node::replaceParent(const NodePtr& oldParent, const NodePtr& newParent) {
+		if (!newParent) return;
+		// Check if newParent is already in parents_ (avoid duplicates)
+		auto it = std::find_if(parents_.begin(), parents_.end(),
+			[&newParent](const WeakNodePtr& weak) {
+				auto ptr = weak.lock();
+				return ptr && ptr == newParent;
+			});
+		if (it != parents_.end()) return; // Already exists, don't replace
+
 		replaceComponent(oldParent, std::vector<NodePtr>{newParent}, parents_);
 	}
 }

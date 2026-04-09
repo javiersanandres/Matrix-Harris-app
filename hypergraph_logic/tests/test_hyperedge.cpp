@@ -454,6 +454,78 @@ namespace hypergraph_logic::hyperedge_tests {
     }
 
     // ============================================================================
+    // Replace Tests: Weak Ptr Handling (Fixed in updated Hyperedge.cpp)
+    // ============================================================================
+
+    TEST(Hyperedge, ReplaceSourceAvoidsDuplicatesWithWeakPtr) {
+        // Tests the fix: properly locks weak_ptr before comparing
+        auto oldSource = std::make_shared<Node>("OldSource");
+        auto newSource = std::make_shared<Node>("NewSource");
+        auto existingSource = std::make_shared<Node>("ExistingSource");
+        auto target = std::make_shared<Node>("Target");
+
+        auto edge = std::make_shared<Hyperedge>(
+            std::vector<NodePtr>{oldSource, existingSource},
+            std::vector<NodePtr>{target}
+        );
+
+        std::vector<NodePtr> newSources = { newSource, existingSource };
+        edge->replaceSource(oldSource, newSources);
+
+        auto sources = edge->getSources();
+        // Should have: newSource, existingSource (not duplicated)
+        EXPECT_EQ(sources.size(), 2u);
+        EXPECT_TRUE(std::find(sources.begin(), sources.end(), newSource) != sources.end());
+        EXPECT_TRUE(std::find(sources.begin(), sources.end(), existingSource) != sources.end());
+    }
+
+    TEST(Hyperedge, ReplaceTargetAvoidsDuplicatesWithWeakPtr) {
+        // Tests the fix: properly locks weak_ptr before comparing
+        auto source = std::make_shared<Node>("Source");
+        auto oldTarget = std::make_shared<Node>("OldTarget");
+        auto newTarget = std::make_shared<Node>("NewTarget");
+        auto existingTarget = std::make_shared<Node>("ExistingTarget");
+
+        auto edge = std::make_shared<Hyperedge>(
+            std::vector<NodePtr>{source},
+            std::vector<NodePtr>{oldTarget, existingTarget}
+        );
+
+        std::vector<NodePtr> newTargets = { newTarget, existingTarget };
+        edge->replaceTarget(oldTarget, newTargets);
+
+        auto targets = edge->getTargets();
+        // Should have: newTarget, existingTarget (not duplicated)
+        EXPECT_EQ(targets.size(), 2u);
+        EXPECT_TRUE(std::find(targets.begin(), targets.end(), newTarget) != targets.end());
+        EXPECT_TRUE(std::find(targets.begin(), targets.end(), existingTarget) != targets.end());
+    }
+
+    TEST(Hyperedge, ReplaceSourceMultipleDuplicatesFiltered) {
+        // Tests the fix: properly checks != sources_.end() for each candidate
+        auto oldSource = std::make_shared<Node>("OldSource");
+        auto newSource1 = std::make_shared<Node>("NewSource1");
+        auto newSource2 = std::make_shared<Node>("NewSource2");
+        auto existingSource = std::make_shared<Node>("ExistingSource");
+        auto target = std::make_shared<Node>("Target");
+
+        auto edge = std::make_shared<Hyperedge>(
+            std::vector<NodePtr>{oldSource, existingSource},
+            std::vector<NodePtr>{target}
+        );
+
+        std::vector<NodePtr> newSources = { newSource1, existingSource, newSource2 };
+        edge->replaceSource(oldSource, newSources);
+
+        auto sources = edge->getSources();
+        // Should have: newSource1, existingSource (not duplicated), newSource2
+        EXPECT_EQ(sources.size(), 3u);
+        EXPECT_EQ(sources[0], existingSource);
+        EXPECT_EQ(sources[1], newSource1);
+        EXPECT_EQ(sources[2], newSource2);
+    }
+
+    // ============================================================================
     // Complex Hyperedge Tests
     // ============================================================================
 

@@ -166,14 +166,7 @@ namespace hypergraph_logic {
 	}
 
 	void Hyperedge::replaceSource(const NodePtr& oldNode, const NodePtr& newNode) {
-		if (!oldNode || !newNode) return;
-
-		for (auto& weak : sources_) {
-			if (auto s = weak.lock(); s && s == oldNode) {
-				weak = newNode;
-				return;
-			}
-		}
+		replaceSource(oldNode, std::vector<NodePtr>{ newNode });
 	}
 
 	void Hyperedge::replaceSource(const NodePtr& oldNode, const std::vector<NodePtr>& newNodes) {
@@ -186,25 +179,26 @@ namespace hypergraph_logic {
 			});
 
 		if (it == sources_.end()) return;
-
 		sources_.erase(it);
 
+		bool replace = false;
 		for (const auto& newNode : newNodes) {
-			if (newNode) {
-				sources_.push_back(newNode);
-			}
+			if (!newNode) continue;
+			auto it2 = std::find_if(sources_.begin(), sources_.end(),
+				[&newNode](const WeakNodePtr& weak) {
+					auto s = weak.lock();
+					return s && s == newNode;
+				});
+
+			if (it2 != sources_.end()) continue; // Avoid adding duplicates
+			replace = true;
+			sources_.push_back(newNode);
 		}
+		if (!replace) sources_.push_back(oldNode);
 	}
 
 	void Hyperedge::replaceTarget(const NodePtr& oldNode, const NodePtr& newNode) {
-		if (!oldNode || !newNode) return;
-
-		for (auto& weak : targets_) {
-			if (auto t = weak.lock(); t && t == oldNode) {
-				weak = newNode;
-				return;
-			}
-		}
+		replaceTarget(oldNode, std::vector<NodePtr>{ newNode });
 	}
 
 	void Hyperedge::replaceTarget(const NodePtr& oldNode, const std::vector<NodePtr>& newNodes) {
@@ -219,10 +213,18 @@ namespace hypergraph_logic {
 		if (it == targets_.end()) return;
 		targets_.erase(it);
 
+		bool replace = false;
 		for (const auto& newNode : newNodes) {
-			if (newNode) {
-				targets_.push_back(newNode);
-			}
+			if (!newNode) continue;
+			auto it2 = std::find_if(targets_.begin(), targets_.end(),
+				[&newNode](const WeakNodePtr& weak) {
+					auto t = weak.lock();
+					return t && t == newNode;
+				});
+			if (it2 != targets_.end()) continue; // Avoid adding duplicates
+			replace = true;
+			targets_.push_back(newNode);
 		}
+		if (!replace) targets_.push_back(oldNode);
 	}
 }

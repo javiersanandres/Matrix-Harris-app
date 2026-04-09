@@ -117,7 +117,7 @@ namespace hypergraph_logic {
 
 		/// Remove all hyperedges in the set from the specified layer
 		void removeHyperedgeFromLayer(int layer, const std::unordered_set<Hyperedge*>& edges);
-		bool relocateTargets(const HyperedgePtr& original_edge);
+		bool relocateNodes(const std::vector<NodePtr>& nodes);
 		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations);
 
 		//NodePtr createNode(const NodePtr& parent, const NodePtr& oldChild); -- to be implemented when the ordering is figured out
@@ -137,7 +137,6 @@ namespace hypergraph_logic {
 		/// Check for cycles in the graph starting from a given node.
 		bool checkCycles(const NodePtr& node);
 
-	private:
 		std::unordered_set<Node*> getAllAncestors(const std::vector<NodePtr>& nodes);
 		std::unordered_set<Node*> getAllDescendants(const std::vector<NodePtr>& nodes);
 

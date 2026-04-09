@@ -94,29 +94,6 @@ namespace hypergraph_logic::node_tests {
         EXPECT_EQ(ancestors.size(), 0u);
     }
 
-    //TEST(Node, GetAllDescendantsWorks) {
-    //    Hypergraph graph("TestGraph");
-    //
-    //    auto root = graph.createNode("Root", 0, nullptr);
-    //    auto middle = graph.createNode("Middle", 0, root);
-    //    auto leaf = graph.createNode("Leaf", 0, middle);
-    //
-    //    auto descendants = root->getAllDescendants();
-    //
-    //    // Should have descendants in layers 1 and 2
-    //    EXPECT_EQ(descendants.size(), 2u);
-    //    EXPECT_TRUE(descendants.count(1) > 0);
-    //    EXPECT_TRUE(descendants.count(2) > 0);
-    //
-    //    // Check layer 1 contains middle
-    //    EXPECT_EQ(descendants[1].size(), 1u);
-    //    EXPECT_TRUE(descendants[1].count(middle.get()) > 0);
-    //
-    //    // Check layer 2 contains leaf
-    //    EXPECT_EQ(descendants[2].size(), 1u);
-    //    EXPECT_TRUE(descendants[2].count(leaf.get()) > 0);
-    //}
-
     TEST(Node, GetAllDescendantsReturnsEmptySet) {
         auto node = std::make_shared<Node>("Node");
         auto descendants = node->getAllDescendants();
@@ -330,44 +307,82 @@ namespace hypergraph_logic::node_tests {
         EXPECT_EQ(children[3], oldChild3);
     }
 
-
-
     // ============================================================================
-    // Complex Graph Tests
+    // Replace Tests: Weak Ptr Handling (Fixed in updated Node.cpp)
     // ============================================================================
 
-    //TEST(Node, ComplexGraphTopology) {
-    //    Hypergraph graph("TestGraph");
-    //
-    //    auto root = graph.createNode("Root", 0, nullptr);
-    //    auto branch1 = graph.createNode("Branch1", 0, root);
-    //    auto branch2 = graph.createNode("Branch2", 1, root);
-    //    auto leaf1 = graph.createNode("Leaf1", 0, branch1);
-    //    auto leaf2 = graph.createNode("Leaf2", 0, branch2);
-    //
-    //    // root -> branch1 -> leaf1
-    //    // root -> branch2 -> leaf2
-    //
-    //    EXPECT_EQ(root->getChildren().size(), 2u);
-    //    EXPECT_EQ(branch1->getParents().size(), 1u);
-    //    EXPECT_EQ(branch2->getParents().size(), 1u);
-    //
-    //    auto rootDescendants = root->getAllDescendants();
-    //    EXPECT_EQ(rootDescendants.size(), 2u);  // Two layers of descendants
-    //
-    //    // Layer 1 should have branch1 and branch2
-    //    EXPECT_TRUE(rootDescendants.count(1) > 0);
-    //    EXPECT_EQ(rootDescendants[1].size(), 2u);
-    //    EXPECT_TRUE(rootDescendants[1].count(branch1.get()) > 0);
-    //    EXPECT_TRUE(rootDescendants[1].count(branch2.get()) > 0);
-    //
-    //    // Layer 2 should have leaf1 and leaf2
-    //    EXPECT_TRUE(rootDescendants.count(2) > 0);
-    //    EXPECT_EQ(rootDescendants[2].size(), 2u);
-    //    EXPECT_TRUE(rootDescendants[2].count(leaf1.get()) > 0);
-    //    EXPECT_TRUE(rootDescendants[2].count(leaf2.get()) > 0);
-    //
-    //    auto leaf1Ancestors = leaf1->getAllAncestors();
-    //    EXPECT_EQ(leaf1Ancestors.size(), 2u); // root, branch1
-    //}
+    TEST(Node, ReplaceChildAvoidsDuplicatesWithWeakPtr) {
+        // Tests the fix: properly locks weak_ptr before comparing
+        auto parent = std::make_shared<Node>("Parent");
+        auto oldChild = std::make_shared<Node>("OldChild");
+        auto newChild = std::make_shared<Node>("NewChild");
+
+        parent->addChild(oldChild);
+        parent->addChild(newChild); // Already has newChild
+
+        // Try to replace oldChild with newChild (which already exists)
+        parent->replaceChild(oldChild, newChild);
+
+        auto children = parent->getChildren();
+        // Should have oldChild removed, but NOT duplicate newChild added
+        EXPECT_EQ(children.size(), 2u);
+        EXPECT_EQ(children[0], oldChild);
+		EXPECT_EQ(children[1], newChild);
+    }
+
+    TEST(Node, ReplaceChildMultipleAvoidsDuplicatesInVector) {
+        // Tests the fix: properly checks != children_.end() for each candidate
+        auto parent = std::make_shared<Node>("Parent");
+        auto oldChild = std::make_shared<Node>("OldChild");
+        auto newChild1 = std::make_shared<Node>("NewChild1");
+        auto newChild2 = std::make_shared<Node>("NewChild2");
+        auto existingChild = std::make_shared<Node>("ExistingChild");
+
+        parent->addChild(oldChild);
+        parent->addChild(existingChild); // Already exists
+
+        std::vector<NodePtr> newChildren = { newChild1, existingChild, newChild2 };
+        parent->replaceChild(oldChild, newChildren);
+
+        auto children = parent->getChildren();
+        // Should have: newChild1, existingChild (not duplicated), newChild2
+        EXPECT_EQ(children.size(), 3u);
+        EXPECT_EQ(children[0], newChild1);
+        EXPECT_EQ(children[1], newChild2);
+        EXPECT_EQ(children[2], existingChild);
+    }
+
+    TEST(Node, ReplaceParentAvoidsDuplicateNewParent) {
+        // Tests the fix: checks if newParent already exists before replacing
+        auto oldParent = std::make_shared<Node>("OldParent");
+        auto newParent = std::make_shared<Node>("NewParent");
+        auto child = std::make_shared<Node>("Child");
+
+        child->addParent(oldParent);
+        child->addParent(newParent); // Already has newParent
+
+        // Try to replace oldParent with newParent (which already exists)
+        child->replaceParent(oldParent, newParent);
+
+        auto parents = child->getParents();
+        // Should keep newParent, and NOT try to replace oldParent
+        EXPECT_EQ(parents.size(), 2u);
+        EXPECT_TRUE(std::find(parents.begin(), parents.end(), newParent) != parents.end());
+        EXPECT_TRUE(std::find(parents.begin(), parents.end(), oldParent) != parents.end());
+    }
+
+    TEST(Node, ReplaceParentIgnoresNullNewParent) {
+        // Tests the fix: returns early if newParent is null
+        auto oldParent = std::make_shared<Node>("OldParent");
+        auto child = std::make_shared<Node>("Child");
+
+        child->addParent(oldParent);
+
+        child->replaceParent(oldParent, nullptr);
+
+        auto parents = child->getParents();
+        // Should still have oldParent (no replacement occurred)
+        EXPECT_EQ(parents.size(), 1u);
+        EXPECT_EQ(parents[0], oldParent);
+    }
 } // namespace hypergraph_logic::node_tests

@@ -5,10 +5,8 @@
 add_executable(hypergraph_logic_tests
     test_node.cpp
     test_hyperedge.cpp
-    
-    
-    test_hypergraph_connection.cpp
-)
+    test_connection_management.cpp
+    test_hypergraph_internals.cpp)
 
 target_include_directories(hypergraph_logic_tests
     PRIVATE
