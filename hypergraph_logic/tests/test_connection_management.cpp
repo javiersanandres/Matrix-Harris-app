@@ -1043,15 +1043,15 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         auto b = g.createNode("b", 0, nullptr);
         auto c = g.createNode("c", 0, nullptr);
 
-        g.addConnection(a, b);   // b→1
-        g.addConnection(b, c);   // c→2
+        g.addConnection(a, b);   // b->1
+        g.addConnection(b, c);   // c->2
 
         auto d = g.createNode("d", 0, nullptr);
-        auto e = g.createNode("e", 0, d);  // e→1
-        g.addConnection(e, b);             // b→2, c→3
+        auto e = g.createNode("e", 0, d);  // e->1
+        g.addConnection(e, b);             // b->2, c->3
 
-        auto f = g.createNode("f", 0, e); // f→2
-        g.addConnection(f, c);            // c→3 (still), no change
+        auto f = g.createNode("f", 0, e); // f->2
+        g.addConnection(f, c);            // c->3 (still), no change
 
         EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
         EXPECT_TRUE(allSegmentEdgesAreShort(g));
@@ -1110,7 +1110,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
     }
 
     TEST_F(ConnectionManagementTest, Stress_AddSourceGrouping_TwoEdgesMergedIntoOne) {
-        // {p}->c and {q}->c independently; then add q to p's edge → merge groupings
+        // {p}->c and {q}->c independently; then add q to p's edge -> merge groupings
         auto p = g.createNode("p", 0, nullptr);
         auto q = g.createNode("q", 0, nullptr);
         auto c = g.createNode("c", 0, p);
@@ -1319,12 +1319,12 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         auto c = g.createNode("c", 0, b);
         auto d = g.createNode("d", 0, c);
 
-        // b and c are in a direct parent-child relationship → fusing would create cycle
+        // b and c are in a direct parent-child relationship -> fusing would create cycle
         EXPECT_THROW(g.fuseNodes(b, c, "bc"), std::logic_error);
     }
 
     TEST_F(ConnectionManagementTest, Stress_FuseNodes_TwoNodesWithDescendants_LayerCorrect) {
-        // r1->a->leaf1, r2->b->leaf2; fuse a and b → merged node below max(r1,r2)
+        // r1->a->leaf1, r2->b->leaf2; fuse a and b -> merged node below max(r1,r2)
         auto r1 = g.createNode("r1", 0, nullptr);
         auto r2 = g.createNode("r2", 0, nullptr);
         auto deep = g.createNode("deep", 0, r2);  // r2 at 0, deep at 1
@@ -1336,7 +1336,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         g.fuseNodes(a, b, "ab");
 
         EXPECT_FALSE(nodeInAllNodes(g, b));
-        EXPECT_EQ(a->getLayer(), 2);  // max parent layer is deep(1) → layer 2
+        EXPECT_EQ(a->getLayer(), 2);  // max parent layer is deep(1) -> layer 2
         EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
         EXPECT_TRUE(allSegmentEdgesAreShort(g));
         EXPECT_TRUE(eachNodeInExactlyOneLayer(g));

@@ -1150,7 +1150,7 @@ namespace hypergraph_logic {
 			}
 
 			// ------------------------------------------------------------
-			// Create the segment hyperedge for this L → L+1 transition.
+			// Create the segment hyperedge for this L -> L+1 transition.
 			// It automatically deals with the parent/child wiring.
 			// ------------------------------------------------------------
 			createHyperedge(long_edge, seg_sources, seg_targets, L);

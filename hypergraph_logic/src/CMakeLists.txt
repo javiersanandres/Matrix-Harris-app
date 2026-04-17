@@ -11,8 +11,7 @@ target_sources(node
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        FILES ../include/Node.h
-)
+        FILES ../include/Node.h)
 
 target_include_directories(node
     PUBLIC
@@ -29,8 +28,7 @@ target_sources(hyperedge
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        FILES ../include/Hyperedge.h
-)
+        FILES ../include/Hyperedge.h)
 
 target_include_directories(hyperedge
     PUBLIC
@@ -51,8 +49,7 @@ target_sources(hypergraph
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        FILES ../include/Hypergraph.h
-)
+        FILES ../include/Hypergraph.h)
 
 target_include_directories(hypergraph
     PUBLIC
@@ -62,4 +59,26 @@ target_include_directories(hypergraph
 
 target_link_libraries(hypergraph
     PUBLIC node hyperedge
+)
+
+
+# Graphical hypergraph library
+add_library(graphical_hypergraph)
+
+target_sources(graphical_hypergraph
+    PRIVATE
+        minimizeCrossings.cpp
+    PUBLIC
+        FILE_SET HEADERS
+        BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        FILES ../include/GraphicalHypergraph.h)
+
+target_include_directories(graphical_hypergraph
+    PUBLIC
+        $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
+        $<INSTALL_INTERFACE:include>
+)
+
+target_link_libraries(graphical_hypergraph
+    PUBLIC hypergraph
 )
