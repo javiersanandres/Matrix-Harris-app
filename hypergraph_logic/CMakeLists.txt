@@ -13,6 +13,7 @@ target_link_libraries(hypergraph_logic
         node
         hyperedge
         hypergraph
+        graphical_hypergraph
 )
 
 # ============================================================================

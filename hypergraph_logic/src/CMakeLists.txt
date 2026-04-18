@@ -64,7 +64,6 @@ target_link_libraries(hypergraph
 
 # Graphical hypergraph library
 add_library(graphical_hypergraph)
-
 target_sources(graphical_hypergraph
     PRIVATE
         minimizeCrossings.cpp
@@ -72,13 +71,13 @@ target_sources(graphical_hypergraph
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
         FILES ../include/GraphicalHypergraph.h)
-
 target_include_directories(graphical_hypergraph
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
         $<INSTALL_INTERFACE:include>
+    PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/../include
 )
-
 target_link_libraries(graphical_hypergraph
     PUBLIC hypergraph
 )
