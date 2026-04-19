@@ -385,13 +385,6 @@ namespace sifting_internal {
 
 	// ── siftingSwap ───────────────────────────────────────────────────────────────
 
-	std::set<int> levels(const SiftState& S, Block& block) {
-		std::set<int> lvls;
-		for (int g1_idx : block.g1_nodes)
-			lvls.insert(S.g1_nodes[g1_idx].g1_layer);
-		return lvls;
-	}
-
 	int getNodeAtLevel(const SiftState& S, Block& block, int level) {
 		for (int g1_idx : block.g1_nodes) {
 			if (S.g1_nodes[g1_idx].g1_layer == level) {
@@ -406,19 +399,16 @@ namespace sifting_internal {
 		Block& B = S.blocks[b_id];
 		int delta = 0;
 
-		auto levels_A = levels(S, A);
-		auto levels_B = levels(S, B);
-
 		int upper_a_layer = S.g1_nodes[A.upper()].g1_layer;
 		int lower_a_layer = S.g1_nodes[A.lower()].g1_layer;
 		int upper_b_layer = S.g1_nodes[B.upper()].g1_layer;
 		int lower_b_layer = S.g1_nodes[B.lower()].g1_layer;
 
 		std::set<std::pair<int, bool>> L;
-		if (levels_B.count(upper_a_layer)) L.insert({ upper_a_layer, true });
-		if (levels_B.count(lower_a_layer)) L.insert({ lower_a_layer, false });
-		if (levels_A.count(upper_b_layer)) L.insert({ upper_b_layer, true });
-		if (levels_A.count(lower_b_layer)) L.insert({ lower_b_layer, false });
+		if (upper_a_layer >= upper_b_layer && upper_a_layer <= lower_b_layer) L.insert({ upper_a_layer, true });
+		if (lower_a_layer >= upper_b_layer && lower_a_layer <= lower_b_layer) L.insert({ lower_a_layer, false });
+		if (upper_b_layer >= upper_a_layer && upper_b_layer <= lower_a_layer) L.insert({ upper_b_layer, true });
+		if (lower_b_layer >= upper_a_layer && lower_b_layer <= lower_a_layer) L.insert({ lower_b_layer, false });
 
 		for (const auto& [layer, is_minus] : L) {
 			int a = getNodeAtLevel(S, A, layer);
@@ -538,7 +528,7 @@ namespace sifting_internal {
 		return crosscount;
 	}
 
-	static void orderLayersByBlockOrder(SiftState& S, const BlockList& B) {
+	void orderLayersByBlockOrder(SiftState& S, const BlockList& B) {
 		// Project block order to pi, so that we can use it sort the layers.
 		for (int pos = 0; pos < static_cast<int>(B.size()); pos++)
 			S.pi[B[pos]] = pos;

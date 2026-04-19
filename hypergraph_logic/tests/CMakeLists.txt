@@ -6,7 +6,7 @@ add_executable(hypergraph_logic_tests
     test_node.cpp
     test_hyperedge.cpp
     test_connection_management.cpp
-    test_hypergraph_internals.cpp)
+    test_hypergraph_internals.cpp "test_minimize_crossings.cpp" "test_minimize_crossings_hypergraph.cpp")
 
 target_include_directories(hypergraph_logic_tests
     PRIVATE

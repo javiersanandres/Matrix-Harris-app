@@ -192,8 +192,6 @@ namespace sifting_internal {
 	//
 	// Swaps adjacent blocks A (left) and B (right), updates pi and adjacency lists,
 	// returns the change in crossing count.
-	std::set<int> levels(const SiftState& S, Block& block);
-
 	int getNodeAtLevel(const SiftState& S, Block& block, int level);
 
 	int siftingSwap(SiftState& S, int a_id, int b_id);
@@ -211,6 +209,8 @@ namespace sifting_internal {
 	// Implements the BJM algorithm from Barth, Mutzel & Jünger (2004).
 	// Complexity: O(|E| log |V_small|)
 	int countBilayerCrossings(const std::vector<int>& layer1, const std::vector<int>& layer2, const std::vector<std::vector<int>>& connections_out);
+
+	void orderLayersByBlockOrder(SiftState& S, const BlockList& B);
 
 	// Counts total crossings in the current block order B.
 	int countTotalCrossings(SiftState& S, const BlockList& B);
