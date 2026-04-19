@@ -42,6 +42,14 @@ namespace sifting_internal {
 		for (const auto& [layer, data] : layers) {
 			if (layer < anchor_layer) continue;
 
+			// Register all nodes at this layer
+			for (const auto& node : data.nodes) {
+				int idx = static_cast<int>(S.g1_nodes.size());
+				S.g1_nodes.emplace_back(node.get(), 2 * layer);
+				S.node_to_g1[node.get()] = idx;
+				S.g1_layers[2 * layer].push_back(idx);
+			}
+
 			// Register hubs caused by edges from the previous layer: sources are already 
 			// registered (previous iteration), targets are registered just below.
 			if (!incoming_edges.empty()) {
@@ -56,14 +64,6 @@ namespace sifting_internal {
 					for (const auto& tgt : edge->getTargets())
 						edges_to_add.push_back({ hub_idx, S.node_to_g1[tgt.get()] });
 				}
-			}
-
-			// Register all nodes at this layer
-			for (const auto& node : data.nodes) {
-				int idx = static_cast<int>(S.g1_nodes.size());
-				S.g1_nodes.emplace_back(node.get(), 2 * layer);
-				S.node_to_g1[node.get()] = idx;
-				S.g1_layers[2 * layer].push_back(idx);
 			}
 
 
@@ -283,9 +283,7 @@ namespace sifting_internal {
 	};
 
 	void sortAdjacencies(SiftState& S, const BlockList& B) {
-		int num_blocks = static_cast<int>(S.blocks.size());
-
-		for (int pos = 0; pos < num_blocks; pos++)
+		for (int pos = 0; pos < static_cast<int>(B.size()); pos++)
 			S.pi[B[pos]] = pos;
 
 		// Pre-size all adjacency arrays before any traversal
@@ -484,6 +482,7 @@ namespace sifting_internal {
 		const std::vector<int>& layer2,
 		const std::vector<std::vector<int>>& connections_out)
 	{
+		if (layer1.empty() || layer2.empty()) return 0;
 		// Build position maps: node index -> position in layer.
 		std::unordered_map<int, int> pos1;
 		std::unordered_map<int, int> pos2;
@@ -541,7 +540,7 @@ namespace sifting_internal {
 
 	static void orderLayersByBlockOrder(SiftState& S, const BlockList& B) {
 		// Project block order to pi, so that we can use it sort the layers.
-		for (int pos = 0; pos < static_cast<int>(S.blocks.size()); pos++)
+		for (int pos = 0; pos < static_cast<int>(B.size()); pos++)
 			S.pi[B[pos]] = pos;
 
 		for (auto& [layer, nodes] : S.g1_layers) {
@@ -554,15 +553,14 @@ namespace sifting_internal {
 		}
 	}
 
-
-	int countTotalCrossings(SiftState& S, const BlockList& B, int start_layer) {
-		int total_crossings = 0;
+	int countTotalCrossings(SiftState& S, const BlockList& B) {
 		orderLayersByBlockOrder(S, B);
-		for (int i = start_layer + 1; i < static_cast<int>(S.g1_layers.size()); i++) {
-			const auto& upper_layer = S.g1_layers[i - 1];
-			const auto& lower_layer = S.g1_layers[i];
-			total_crossings += countBilayerCrossings(upper_layer, lower_layer, S.g1_out);
-		}
+
+		int total_crossings = 0;
+		auto it = S.g1_layers.begin();
+		auto prev = it++;
+		for (; it != S.g1_layers.end(); ++prev, ++it)
+			total_crossings += countBilayerCrossings(prev->second, it->second, S.g1_out);
 
 		return total_crossings;
 	}
@@ -618,7 +616,7 @@ namespace hypergraph_logic {
 				});
 		}
 
-		return countTotalCrossings(S, B, start_layer);
+		return countTotalCrossings(S, B);
 	}
 
 } // namespace hypergraph_logic

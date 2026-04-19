@@ -213,6 +213,6 @@ namespace sifting_internal {
 	int countBilayerCrossings(const std::vector<int>& layer1, const std::vector<int>& layer2, const std::vector<std::vector<int>>& connections_out);
 
 	// Counts total crossings in the current block order B.
-	int countTotalCrossings(SiftState& S, const BlockList& B, int start_layer);
+	int countTotalCrossings(SiftState& S, const BlockList& B);
 
 } // namespace sifting_internal
