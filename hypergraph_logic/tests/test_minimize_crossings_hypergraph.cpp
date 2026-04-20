@@ -1,17 +1,3 @@
-// ============================================================================
-// test_minimizeCrossings_hypergraph.cpp
-//
-// GoogleTest tests for the hypergraph-dependent sifting_internal functions:
-//   buildG1, buildBlocks, buildBlockOrder
-//
-// These tests use a real GraphicalHypergraph (or its Hypergraph base) to
-// build proper LayerData / Node / Hyperedge structures, then exercise the
-// G1-construction and block-building pipeline against those structures.
-//
-// Drop this file alongside test_minimizeCrossings.cpp — it lives in the same
-// namespace so the two files can be compiled together into one test binary.
-// ============================================================================
-
 #include "GlobalSifting.h"
 #include "GraphicalHypergraph.h"
 #include <gtest/gtest.h>

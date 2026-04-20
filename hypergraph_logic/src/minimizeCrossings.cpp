@@ -109,7 +109,7 @@ namespace sifting_internal {
 			// Check if we can keep extending the chain.
 			if (!isDummyChainStart(current)) break;
 
-			auto children = current->getChildren();
+			children = current->getChildren();
 			current = children[0].get(); // We already know this is the only child, so we can directly access it.
 			curr_id = S.node_to_g1.at(current);
 		}

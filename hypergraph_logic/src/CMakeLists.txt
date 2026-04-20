@@ -81,3 +81,6 @@ target_include_directories(graphical_hypergraph
 target_link_libraries(graphical_hypergraph
     PUBLIC hypergraph
 )
+
+# For efficiency measures, keep them separate from the core libraries.
+add_subdirectory(efficiencyMeasures/minimizeCrossings)
