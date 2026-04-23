@@ -3,6 +3,13 @@
 
 namespace hypergraph_logic {
 
+    struct HyperedgeLayout {
+        double y = 0.0;                                 // horizontal line y-coord
+        std::unordered_map<Node*, double> source_x;     // source port x coordinates
+		std::unordered_map<Node*, double> target_x;     // target port x coordinates
+    };
+
+
     // ============================================================================
     // GraphicalHypergraph
     //
@@ -51,6 +58,16 @@ namespace hypergraph_logic {
         //
         // Returns the total crossing count of the final ordering.
         int minimizeCrossings(int sifting_rounds = 10, int start_layer = 0);
+
+		// Run Horizontal coordinate assignment (Brandes–Köpf).
+        // 
+        // Assigns an x-coordinate to every node in the graph.
+        // Coordinates are in logical pixels (see LayoutTypes.h for constants).
+        void assignCoordinates();
+
+    private:
+		std::unordered_map<Node*, double> node_layout_; // Map from node pointer to its assigned x coordinate in the layout.
+		std::unordered_map<Hyperedge*, HyperedgeLayout> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate, port assignments, etc.)
     };
 
 } // namespace hypergraph_logic

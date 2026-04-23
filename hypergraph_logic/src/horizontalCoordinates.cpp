@@ -1,0 +1,432 @@
+#include "BrandesKopf.h"
+
+#include <algorithm>
+#include <limits>
+#include <unordered_map>
+
+// ====================================================================================
+// Implementation of the Brandes–Köpf horizontal coordinate assignment as
+// described in:
+//  Brandes, U., & Köpf, B. (2002).
+//  "Fast and Simple Horizontal Coordinate Assignment."
+//  In: Graph Drawing (GD 2001), LNCS 2265, pp. 31–44. Springer.
+//  DOI: 10.1007/978-3-540-45848-7_3
+//
+// Since we are dealing with hypergraphs, we first have to transform the
+// original hypergraph into a directed graph G2 by replacing each short 
+// hyperedge with binary edges between all source-target pairs. This way, 
+// we can apply the algorithm to G2 and then translate the resulting horizontal 
+// coordinates back. Our inner segments are somewhat different from the paper's 
+// definition, as explained below, but the overall intent is the same: to identify
+// the "spines" of long edges and preferentially keep them vertical.
+// 
+// ====================================================================================
+
+namespace bk_internal {
+
+    using namespace hypergraph_logic;
+
+
+    // ── buildG2 ───────────────────────────────────────────────────────────────────
+
+    G2 buildG2(const std::map<int, LayerData>& layers) {
+        G2 g;
+
+        g.num_layers = static_cast<int>(layers.size());
+		g.layers.resize(g.num_layers);
+        int id_counter = 0;
+        for (const auto& [layer, data] : layers) {
+            for (int i = 0; i < static_cast<int>(data.nodes.size()); ++i) {
+                auto node = data.nodes[i].get();
+                int id = id_counter++;
+                g.nodes.push_back(node);
+                g.layers[layer].push_back(id);
+                g.pos.push_back(i);
+            }
+        }
+        int n = static_cast<int>(g.nodes.size());
+        g.upper.assign(n, {});
+        g.lower.assign(n, {});
+
+        // Build binary edges from hyperedges (G2 construction) 
+        for (const auto& [layer, data] : layers) {
+            if (layer == static_cast<int>(layers.size()) - 1) continue; // No outgoing edges from the last layer
+            for (const auto& edge : data.outgoing_edges) {
+                for (const auto& src : edge->getSources()) {
+                    int src_id = g.node_to_g2.at(src.get());
+
+                    for (const auto& tgt : edge->getTargets()) {
+                        int tgt_id = g.node_to_g2.at(tgt.get());
+
+                        g.upper[tgt_id].push_back(src_id);
+                        g.lower[src_id].push_back(tgt_id);
+                    }
+                }
+            }
+        }
+
+        // Sort upper and lower neighbours by position.
+        for (auto& node : g.nodes) {
+            int node_id = g.node_to_g2.at(node);
+
+            std::sort(g.upper[node_id].begin(), g.upper[node_id].end(),
+                [&](int a, int b) {
+                    return g.pos[a] < g.pos[b];
+                });
+            std::sort(g.lower[node_id].begin(), g.lower[node_id].end(),
+                [&](int a, int b) {
+                    return g.pos[a] < g.pos[b];
+                });
+        }
+
+        return g;
+    }
+
+    // Different from the normal definition of inner segment in graphs, when
+    // dealing with a hypergraph, there might be connections between two dummy
+    // nodes which don't constitute an inner segment because there is another
+    // real node in between. So, in this specific case, an inner segment is 
+    // a dummy -> dummy edge in which the upper dummy has exactly one child (the 
+    // lower dummy) and the lower dummy has exactly one parent (the upper dummy).
+    bool isInnerSegment(const G2& g, int u, int v) {
+        Node* nu = g.nodes[u];
+        Node* nv = g.nodes[v];
+        if (!nu->isDummy() || !nv->isDummy()) return false;
+
+        auto u_children = nu->getChildren();
+        if (u_children.size() != 1 || u_children[0].get() != nv) return false;
+
+        auto v_parents = nv->getParents();
+        if (v_parents.size() != 1 || v_parents[0].get() != nu) return false;
+
+        return true;
+    }
+
+    // ── Algorithm 1: Preprocessing (mark type-1 conflicts) ─────────────────────────────────────
+
+    void markType1Conflicts(G2& g) {
+        for (int i = 1; i < g.num_layers - 2; ++i) {
+            const auto& lower_layer = g.layers[i + 1];
+            int L1 = static_cast<int>(lower_layer.size());
+
+            int k0 = 0;
+            int l = 0;
+            for (int l1 = 0; l1 < L1; ++l1) {
+                int v = lower_layer[l1];
+                bool incident_to_inner = (upper[v].size() == 1 && isInnerSegment(upper[v][0], v));
+
+                if (l1 == L1 - 1 || incident_to_inner) {
+                    // Mark all non-inner segments from lower[l..l1] that cross
+                    // any inner segment in the window [k0, k1].
+                    int k1 = static_cast<int>(g.layers[i].size());
+                    if (incident_to_inner) {
+                        k1 = g.pos[upper[v][0]];
+                    }
+
+                    while (l <= l1) {
+                        int w = lower_layer[l];
+                        auto& parents = g.upper[w];
+                        for (int k = 0; k < k0 && k < static_cast<int>(parents.size()); k++) {
+                            g.marked.insert({ parents[k], w });
+                        }
+                        for (int k = k1 + 1; k < static_cast<int>(parents.size()); k++) {
+                            g.marked.insert({ parents[k], w });
+                        }
+                        ++l;
+                    }
+                    k0 = k1;
+                }
+            }
+        }
+    }
+
+
+    // ── Algorithm 2: Vertical alignment ──────────────────────────────────────────────────
+
+    BlockList verticalAlignment(const G2& g, int vdir, int hdir) {
+        int n = static_cast<int>(g.nodes.size());
+        BlockList B;
+        B.root.resize(n);
+        B.align.resize(n);
+        for (int v = 0; v < n; v++) {
+            B.root[v] = v;
+            B.align[v] = v;
+        }
+
+        // Iterate over layers in the direction of vdir
+        for (int i = (vdir == 1) ? 1 : g.num_layers - 2;
+            i != (vdir == 1) ? g.num_layers : -1; i += vdir) {
+            int r = (hdir == 1) ? -1 : INT_MAX;
+            const auto& cur_layer = g.layers[i];
+            int L = static_cast<int>(cur_layer.size());
+
+            // Process left-to-right for hdir=+1, right-to-left for hdir=-1
+            for (int k = (hdir == 1) ? 0 : L - 1;
+                k != (hdir == 1) ? L : -1; k += hdir) {
+                int v = cur_layer[k];
+                if (B.align[v] != v) continue; // v already aligned
+
+                // Gather neighbours in the adjacent layer 
+                // (upper for vdir=1, lower for vdir=-1)
+                const std::vector<int>& neighbours = (vdir == 1) ? g.upper[v] : g.lower[v];
+                if (neighbours.empty()) continue;
+
+                int d = static_cast<int>(neighbours.size());
+                int median_left = (d - 1) / 2;  // 0-based floor
+                int median_right = d / 2;        // 0-based ceil
+
+                // For leftmost (hdir=+1) we try left then right;
+                // for rightmost (hdir=-1) we try right then left.
+                std::vector<int> medians;
+                if (median_left == median_right) {
+                    medians = { median_left };
+                }
+                else {
+                    if (hdir == 1) medians = { median_left, median_right };
+                    else medians = { median_right, median_left };
+                }
+
+                for (int m_idx : medians) {
+                    int um = neighbours[m_idx];
+                    int um_pos = g.pos[um];
+
+                    // Check: segment not marked, and position respects current r
+                    bool not_marked = (vdir == 1) ? !g.isMarked(um, v) : !g.isMarked(v, um);
+                    bool position_ok = (hdir == 1) ? (r < um_pos) : (r > um_pos);
+
+                    if (not_marked && position_ok) {
+                        B.align[um] = v;
+                        B.root[v] = B.root[um];
+                        B.align[v] = B.root[v];
+                        r = um_pos;
+                        break; // only align once
+                    }
+                }
+            }
+        }
+
+        // Compute block widths to be the maximum node width among the block members.
+        B.block_width.reserve(n);
+        std::unordered_set<int> visited;
+        for (int v = 0; v < n; v++) {
+            if (visited.count(v) > 0) continue;
+            int root_id = B.root[v];
+            double width = g.nodes[root_id]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            int cur_id = B.align[root_id];
+            while (cur_id != root_id) {
+                visited.insert(cur_id);
+                width = std::max(width, g.nodes[cur_id]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH);
+                cur_id = B.align[cur_id];
+            }
+
+            for (int cur_id = root_id; ; cur_id = B.align[cur_id]) {
+                B.block_width[cur_id] = width;
+                if (B.align[cur_id] == root_id) break;
+            }
+        }
+
+
+        return B;
+    }
+
+    // ── place_block function in the paper ─────────────────────────────────────────────────────
+
+    void placeBlock(const G2& g, const BlockList& B, int v, std::vector<int>& sink, std::vector<double>& shift, std::vector<double>& x, int hdir) {
+        if (x[v] != std::numeric_limits<double>::lowest()) return; // already placed
+        x[v] = 0.0;
+        int w = v;
+        do {
+            int layer_of_w = g.nodes[w]->getLayer();
+            // Look at the predecessor of w in its layer
+            if ((hdir == 1 && g.pos[w] == 0) ||
+                (hdir == -1 && g.pos[w] == static_cast<int>(g.layers[layer_of_w].size()) - 1)) {
+                break; // w is the leftmost (for hdir=+1) or rightmost (for hdir=-1) node in its layer, no predecessor
+            }
+
+            // Predecessor in horizontal direction
+            int pred_pos = (hdir == 1) ? g.pos[w] - 1 : g.pos[w] + 1;
+
+            int u = B.root[g.layers[layer_of_w][pred_pos]];
+            placeBlock(g, B, u, sink, shift, x, hdir);
+            if (sink[v] == v) sink[v] = sink[u];
+
+            double sep = (B.block_width[v] + B.block_width[u]) * 0.5 + MIN_BLOCK_SEP;
+
+            if (sink[v] != sink[u]) {
+                if (hdir == 1)
+                    shift[sink[u]] = std::min(shift[sink[u]], x[v] - x[u] - sep);
+                else
+                    shift[sink[u]] = std::max(shift[sink[u]], x[v] - x[u] + sep);
+            }
+            else {
+                // Same class: direct constraint
+                if (hdir == 1)
+                    x[v] = std::max(x[v], x[u] + sep);
+                else
+                    x[v] = std::min(x[v], x[u] - sep);
+            }
+            w = B.align[w];
+        } while (w != v);
+    }
+
+
+
+    // ── Algorithm 3: Horizontal compaction ────────────────────────────────────────────────────────────────
+
+    std::vector<double> horizontalCompaction(const G2& g, const BlockList& B, int vdir, int hdir) {
+        int n = static_cast<int>(g.nodes.size());
+
+        // sink[v]: the sink of the class containing v's block
+        // shift[v]: shift of the class whose defining sink is v
+        // x[v]: coordinate of the root of v's block (relative to sink)
+        std::vector<int> sink(n);
+        for (int v = 0; v < n; v++) sink[v] = v;
+        std::vector<double> shift(n, std::numeric_limits<double>::max());
+        std::vector<double> x(n, std::numeric_limits<double>::lowest());
+
+
+        // calculate class relative coordinates for all roots
+        for (int i = ((vdir == 1) ? 1 : g.num_layers - 2);
+            i != ((vdir == 1) ? g.num_layers : -1); i += vdir) {
+            const auto& cur_layer = g.layers[i];
+            int L = static_cast<int>(cur_layer.size());
+            for (int k = ((hdir == 1) ? 0 : L - 1);
+                k != (hdir == 1) ? L : -1; k += hdir) {
+                int v = cur_layer[k];
+
+                if (B.root[v] == v)
+                    placeBlock(g, B, v, sink, shift, x, hdir);
+            }
+        }
+
+        // Apply shifting globally
+        double d = 0;
+        for (int i = ((vdir == 1) ? 1 : g.num_layers - 2);
+            i != ((vdir == 1) ? g.num_layers : -1); i += vdir) {
+            const auto& cur_layer = g.layers[i];
+            int v = cur_layer[(hdir == 1) ? 0 : static_cast<int>(cur_layer.size()) - 1];
+
+            if (v == sink[B.root[v]]) {
+                double oldShift = shift[v];
+                if (oldShift < std::numeric_limits<double>::max()) {
+                    shift[v] += d;
+                    d += oldShift;
+                }
+                else {
+                    shift[v] = 0;
+                }
+            }
+        }
+        for (int v = 0; v < n; v++) {
+            x[v] = x[B.root[v]];
+            if (shift[sink[B.root[v]]] != std::numeric_limits<double>::max()) {
+                x[v] += shift[sink[B.root[v]]];
+            }
+        }
+        return x;
+    }
+
+    // ── Algorithm 4: Horizontal coordinate assignment ─────────────────────────────────────────────
+
+    std::vector<double> assignHorizontalCoordinates(G2& g) {
+        std::vector<double> x(g.nodes.size(), 0.0);
+        markType1Conflicts(g);
+
+        std::array<std::vector<double>, 4> layouts{};
+        std::array<std::vector<double>, 4> block_widths{};
+        int count = 0;
+        for (int vdir : {1, -1}) {
+            for (int hdir : {1, -1}) {
+                BlockList B = verticalAlignment(g, vdir, hdir);
+                layouts[count] = horizontalCompaction(g, B, vdir, hdir);
+                block_widths[count] = B.block_widths;
+                count++;
+            }
+        }
+
+        // Calculate min/max x coordinate for each layout and therefore
+        // min/max block width for each layout, which is used to determine
+        // the reference layout for balancing.
+        std::array<double, 4> min_x{}, max_x{}, layout_width{};
+        int min_width_layout = 0;
+        for (int i = 0; i < 4; i++) {
+            min_x[i] = std::numeric_limits<double>::max();
+            max_x[i] = std::numeric_limits<double>::lowest();
+        }
+
+        for (int k = 0; k < 4; ++k) {
+            for (int v = 0; v < static_cast<int>(g.nodes.size()); v++) {
+                double bw = block_widths[k][v] * 0.5;
+                double xp = layouts[k][v] - bw;
+                if (min_x[k] > xp) min_x[k] = xp;
+                xp = layouts[k][v] + bw;
+                if (max_x[k] < xp) max_x[k] = xp;
+            }
+            layout_width[k] = max_x[k] - min_x[k];
+            if (layout_width[k] < layout_width[min_width_layout]) {
+                min_width_layout = k;
+            }
+        }
+
+
+        // Compute the shift for each layout so that they align with the minimum width 
+        // layout hdir=+1, align leftmost (min-x); hdir=-1, align rightmost (max-x)
+        std::array<double, 4> shifts{};
+        for (int k = 0; k < 4; ++k) {
+            if (k % 2 == 0) { // hdir==+1 for k=0,2
+                shifts[k] = min_x[min_width_layout] - min_x[k];
+            }
+            else { // hdir==-1 for k=1,3
+                shifts[k] = max_x[min_width_layout] - max_x[k];
+            }
+        }
+
+        // Shift all layouts and use the median average coordinate for each node as
+        // the final coordinate. This balances the four layouts while respecting the
+        // separations of the minimum-width layout.
+        for (int v = 0; v < static_cast<int>(g.nodes.size()); v++) {
+            for (int k = 0; k < 4; k++) {
+                layouts[k][v] += shifts[k];
+            }
+            double c[4] = {
+                layouts[0][v], layouts[1][v],
+                layouts[2][v], layouts[3][v]
+            };
+            std::sort(c, c + 4);
+            x.push_back((c[1] + c[2]) * 0.5); // average median
+        }
+
+        return x;
+    }
+
+} // namespace bk_internal
+
+// ============================================================================
+// GraphicalHypergraph::assignCoordinates
+// ============================================================================
+namespace hypergraph_logic {
+
+    void GraphicalHypergraph::assignCoordinates() {
+        if (getLayers().empty()) return;
+
+        using namespace bk_internal;
+
+        // 1. Build the binary-edge view of the hypergraph
+        G2 g = buildG2(layers_);
+        if (g.nodes.empty()) return;
+
+        // 2. Run BK
+        std::vector<double> x = assignHorizontalCoordinates(g);
+
+        // 3. Write results into node_x_
+        node_x_.clear();
+        for (int id = 0; id < static_cast<int>(g.nodes.size()); id++)
+            node_x_[g.nodes[id]] = x[id];
+    }
+
+    double GraphicalHypergraph::getX(const NodePtr& node) const {
+        auto it = node_x_.find(node.get());
+        return (it != node_x_.end()) ? it->second : 0.0;
+    }
+
+} // namespace hypergraph_logic
