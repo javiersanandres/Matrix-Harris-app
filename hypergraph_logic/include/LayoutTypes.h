@@ -25,8 +25,8 @@ namespace hypergraph_logic {
     // Default width assigned to a real node box.
     inline constexpr double NODE_WIDTH = 80.0;
 
-	// Default height assigned to a real node box.
-	inline constexpr double NODE_HEIGHT = 40.0;
+    // Default height assigned to a real node box.
+    inline constexpr double NODE_HEIGHT = 40.0;
 
     // Dummy nodes are invisible bend-points on edges. Their layout width is
     // zero so they never contribute to block width or separation.

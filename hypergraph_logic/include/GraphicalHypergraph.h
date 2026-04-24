@@ -64,6 +64,7 @@ namespace hypergraph_logic {
         // Assigns an x-coordinate to every node in the graph.
         // Coordinates are in logical pixels (see LayoutTypes.h for constants).
         void assignCoordinates();
+        double getX(const NodePtr& node) const;
 
     private:
 		std::unordered_map<Node*, double> node_layout_; // Map from node pointer to its assigned x coordinate in the layout.

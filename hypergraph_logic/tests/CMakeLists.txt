@@ -6,7 +6,7 @@ add_executable(hypergraph_logic_tests
     test_node.cpp
     test_hyperedge.cpp
     test_connection_management.cpp
-    test_hypergraph_internals.cpp "test_minimize_crossings.cpp" "test_minimize_crossings_hypergraph.cpp")
+    test_hypergraph_internals.cpp "test_minimize_crossings.cpp" "test_minimize_crossings_hypergraph.cpp" "test_horizontal_coordinates.cpp")
 
 target_include_directories(hypergraph_logic_tests
     PRIVATE
@@ -19,6 +19,8 @@ target_link_libraries(hypergraph_logic_tests
         GTest::gtest
         GTest::gtest_main
 )
+
+target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST)
 
 # Discover and register all tests
 include(GoogleTest)

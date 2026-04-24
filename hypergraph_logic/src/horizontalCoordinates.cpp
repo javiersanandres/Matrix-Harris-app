@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <limits>
 #include <unordered_map>
+#include <array>
 
 // ====================================================================================
 // Implementation of the Brandes–Köpf horizontal coordinate assignment as
@@ -32,16 +33,19 @@ namespace bk_internal {
     G2 buildG2(const std::map<int, LayerData>& layers) {
         G2 g;
 
+		std::map<Node*, int> node_to_g2; // Temporary mapping from original Node* to G2 id for building upper/lower adjacency.
+
         g.num_layers = static_cast<int>(layers.size());
 		g.layers.resize(g.num_layers);
         int id_counter = 0;
         for (const auto& [layer, data] : layers) {
             for (int i = 0; i < static_cast<int>(data.nodes.size()); ++i) {
                 auto node = data.nodes[i].get();
-                int id = id_counter++;
                 g.nodes.push_back(node);
-                g.layers[layer].push_back(id);
+                g.layers[layer].push_back(id_counter);
                 g.pos.push_back(i);
+				node_to_g2[node] = id_counter;
+                id_counter++;
             }
         }
         int n = static_cast<int>(g.nodes.size());
@@ -53,10 +57,10 @@ namespace bk_internal {
             if (layer == static_cast<int>(layers.size()) - 1) continue; // No outgoing edges from the last layer
             for (const auto& edge : data.outgoing_edges) {
                 for (const auto& src : edge->getSources()) {
-                    int src_id = g.node_to_g2.at(src.get());
+                    int src_id = node_to_g2.at(src.get());
 
                     for (const auto& tgt : edge->getTargets()) {
-                        int tgt_id = g.node_to_g2.at(tgt.get());
+                        int tgt_id = node_to_g2.at(tgt.get());
 
                         g.upper[tgt_id].push_back(src_id);
                         g.lower[src_id].push_back(tgt_id);
@@ -66,17 +70,11 @@ namespace bk_internal {
         }
 
         // Sort upper and lower neighbours by position.
-        for (auto& node : g.nodes) {
-            int node_id = g.node_to_g2.at(node);
-
+        for (int node_id = 0; node_id < n; ++node_id) {
             std::sort(g.upper[node_id].begin(), g.upper[node_id].end(),
-                [&](int a, int b) {
-                    return g.pos[a] < g.pos[b];
-                });
+                [&](int a, int b) { return g.pos[a] < g.pos[b]; });
             std::sort(g.lower[node_id].begin(), g.lower[node_id].end(),
-                [&](int a, int b) {
-                    return g.pos[a] < g.pos[b];
-                });
+                [&](int a, int b) { return g.pos[a] < g.pos[b]; });
         }
 
         return g;
@@ -113,24 +111,24 @@ namespace bk_internal {
             int l = 0;
             for (int l1 = 0; l1 < L1; ++l1) {
                 int v = lower_layer[l1];
-                bool incident_to_inner = (upper[v].size() == 1 && isInnerSegment(upper[v][0], v));
+                bool incident_to_inner = (g.upper[v].size() == 1 && isInnerSegment(g, g.upper[v][0], v));
 
                 if (l1 == L1 - 1 || incident_to_inner) {
                     // Mark all non-inner segments from lower[l..l1] that cross
                     // any inner segment in the window [k0, k1].
                     int k1 = static_cast<int>(g.layers[i].size());
                     if (incident_to_inner) {
-                        k1 = g.pos[upper[v][0]];
+                        k1 = g.pos[g.upper[v][0]];
                     }
 
                     while (l <= l1) {
                         int w = lower_layer[l];
                         auto& parents = g.upper[w];
-                        for (int k = 0; k < k0 && k < static_cast<int>(parents.size()); k++) {
-                            g.marked.insert({ parents[k], w });
-                        }
-                        for (int k = k1 + 1; k < static_cast<int>(parents.size()); k++) {
-                            g.marked.insert({ parents[k], w });
+                        for (int parent : parents) {
+							if (g.pos[parent] < k0 || g.pos[parent] > k1) {
+                                g.marked.insert({ parent, w });
+                            }
+
                         }
                         ++l;
                     }
@@ -140,6 +138,22 @@ namespace bk_internal {
         }
     }
 
+    // We compute the width of the block that contains v by the maximum node width among the
+	// block members. To make it faster, we stop whenever we find a real node, since real nodes 
+    // have the maximum width. This is used in placeBlock to compute the separation between blocks.
+    double computeBlockWidth(const G2& g, const BlockList& B, int v) {
+        #ifdef BK_TEST // This is only for testing purposes, for testing without having to rely on a Hypergraph implementation.
+            if (g.nodes[v] == nullptr) return NODE_WIDTH;
+        #endif
+
+		if (!g.nodes[v]->isDummy()) return NODE_WIDTH; // If v is real, we can stop immediately.
+        int cur_id = B.align[v];
+        while (cur_id != v) {
+			if (!g.nodes[cur_id]->isDummy()) return NODE_WIDTH; // If we find a real node, we can stop immediately.
+            cur_id = B.align[cur_id];
+        }
+        return DUMMY_NODE_WIDTH;
+	}
 
     // ── Algorithm 2: Vertical alignment ──────────────────────────────────────────────────
 
@@ -148,21 +162,22 @@ namespace bk_internal {
         BlockList B;
         B.root.resize(n);
         B.align.resize(n);
+        B.block_widths.resize(n);
         for (int v = 0; v < n; v++) {
             B.root[v] = v;
             B.align[v] = v;
         }
 
         // Iterate over layers in the direction of vdir
-        for (int i = (vdir == 1) ? 1 : g.num_layers - 2;
-            i != (vdir == 1) ? g.num_layers : -1; i += vdir) {
+        for (int i = (vdir == 1) ? 0 : g.num_layers - 1;
+            i != ((vdir == 1) ? g.num_layers : -1); i += vdir) {
             int r = (hdir == 1) ? -1 : INT_MAX;
             const auto& cur_layer = g.layers[i];
             int L = static_cast<int>(cur_layer.size());
 
             // Process left-to-right for hdir=+1, right-to-left for hdir=-1
             for (int k = (hdir == 1) ? 0 : L - 1;
-                k != (hdir == 1) ? L : -1; k += hdir) {
+                k != ((hdir == 1) ? L : -1); k += hdir) {
                 int v = cur_layer[k];
                 if (B.align[v] != v) continue; // v already aligned
 
@@ -172,7 +187,7 @@ namespace bk_internal {
                 if (neighbours.empty()) continue;
 
                 int d = static_cast<int>(neighbours.size());
-                int median_left = (d - 1) / 2;  // 0-based floor
+                int median_left = (d - 1) / 2;   // 0-based floor
                 int median_right = d / 2;        // 0-based ceil
 
                 // For leftmost (hdir=+1) we try left then right;
@@ -206,25 +221,16 @@ namespace bk_internal {
         }
 
         // Compute block widths to be the maximum node width among the block members.
-        B.block_width.reserve(n);
         std::unordered_set<int> visited;
         for (int v = 0; v < n; v++) {
-            if (visited.count(v) > 0) continue;
-            int root_id = B.root[v];
-            double width = g.nodes[root_id]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
-            int cur_id = B.align[root_id];
-            while (cur_id != root_id) {
-                visited.insert(cur_id);
-                width = std::max(width, g.nodes[cur_id]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH);
-                cur_id = B.align[cur_id];
-            }
-
+            if (visited.insert(B.root[v]).second == false) continue;
+			double width = computeBlockWidth(g, B, v);
+			int root_id = B.root[v];
             for (int cur_id = root_id; ; cur_id = B.align[cur_id]) {
-                B.block_width[cur_id] = width;
+                B.block_widths[cur_id] = width;
                 if (B.align[cur_id] == root_id) break;
             }
         }
-
 
         return B;
     }
@@ -236,34 +242,47 @@ namespace bk_internal {
         x[v] = 0.0;
         int w = v;
         do {
-            int layer_of_w = g.nodes[w]->getLayer();
+            #ifdef BK_TEST // This is only for testing purposes, for testing without having to rely on a Hypergraph implementation.
+                int layer_of_w = 0;
+                if (g.nodes[w] == nullptr) {
+                    layer_of_w = [&]() {
+                        for (int i = 0; i < g.num_layers; ++i)
+                            for (int id : g.layers[i])
+                                if (id == w) return i;
+                        return -1;
+                        }();
+                }
+                else {
+				    layer_of_w = g.nodes[w]->getLayer();
+                }
+            #else
+                int layer_of_w = g.nodes[w]->getLayer();
+            #endif
             // Look at the predecessor of w in its layer
-            if ((hdir == 1 && g.pos[w] == 0) ||
-                (hdir == -1 && g.pos[w] == static_cast<int>(g.layers[layer_of_w].size()) - 1)) {
-                break; // w is the leftmost (for hdir=+1) or rightmost (for hdir=-1) node in its layer, no predecessor
-            }
+            if ((hdir == 1 && g.pos[w] > 0) ||
+                (hdir == -1 && g.pos[w] < static_cast<int>(g.layers[layer_of_w].size()) - 1)) {
+                // Predecessor in horizontal direction
+                int pred_pos = (hdir == 1) ? g.pos[w] - 1 : g.pos[w] + 1;
 
-            // Predecessor in horizontal direction
-            int pred_pos = (hdir == 1) ? g.pos[w] - 1 : g.pos[w] + 1;
+                int u = B.root[g.layers[layer_of_w][pred_pos]];
+                placeBlock(g, B, u, sink, shift, x, hdir);
+                if (sink[v] == v) sink[v] = sink[u];
 
-            int u = B.root[g.layers[layer_of_w][pred_pos]];
-            placeBlock(g, B, u, sink, shift, x, hdir);
-            if (sink[v] == v) sink[v] = sink[u];
+                double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + MIN_BLOCK_SEP;
 
-            double sep = (B.block_width[v] + B.block_width[u]) * 0.5 + MIN_BLOCK_SEP;
-
-            if (sink[v] != sink[u]) {
-                if (hdir == 1)
-                    shift[sink[u]] = std::min(shift[sink[u]], x[v] - x[u] - sep);
-                else
-                    shift[sink[u]] = std::max(shift[sink[u]], x[v] - x[u] + sep);
-            }
-            else {
-                // Same class: direct constraint
-                if (hdir == 1)
-                    x[v] = std::max(x[v], x[u] + sep);
-                else
-                    x[v] = std::min(x[v], x[u] - sep);
+                if (sink[v] != sink[u]) {
+                    if (hdir == 1)
+                        shift[sink[u]] = std::min(shift[sink[u]], x[v] - x[u] - sep);
+                    else
+                        shift[sink[u]] = std::max(shift[sink[u]], x[v] - x[u] + sep);
+                }
+                else {
+                    // Same class: direct constraint
+                    if (hdir == 1)
+                        x[v] = std::max(x[v], x[u] + sep);
+                    else
+                        x[v] = std::min(x[v], x[u] - sep);
+                }
             }
             w = B.align[w];
         } while (w != v);
@@ -286,12 +305,12 @@ namespace bk_internal {
 
 
         // calculate class relative coordinates for all roots
-        for (int i = ((vdir == 1) ? 1 : g.num_layers - 2);
+        for (int i = ((vdir == 1) ? 0 : g.num_layers - 1);
             i != ((vdir == 1) ? g.num_layers : -1); i += vdir) {
             const auto& cur_layer = g.layers[i];
             int L = static_cast<int>(cur_layer.size());
             for (int k = ((hdir == 1) ? 0 : L - 1);
-                k != (hdir == 1) ? L : -1; k += hdir) {
+                k != ((hdir == 1) ? L : -1); k += hdir) {
                 int v = cur_layer[k];
 
                 if (B.root[v] == v)
@@ -301,7 +320,7 @@ namespace bk_internal {
 
         // Apply shifting globally
         double d = 0;
-        for (int i = ((vdir == 1) ? 1 : g.num_layers - 2);
+        for (int i = ((vdir == 1) ? 0 : g.num_layers - 1);
             i != ((vdir == 1) ? g.num_layers : -1); i += vdir) {
             const auto& cur_layer = g.layers[i];
             int v = cur_layer[(hdir == 1) ? 0 : static_cast<int>(cur_layer.size()) - 1];
@@ -319,17 +338,18 @@ namespace bk_internal {
         }
         for (int v = 0; v < n; v++) {
             x[v] = x[B.root[v]];
-            if (shift[sink[B.root[v]]] != std::numeric_limits<double>::max()) {
-                x[v] += shift[sink[B.root[v]]];
-            }
         }
+        for (int v = 0; v < n; v++) {
+            x[v] += shift[sink[B.root[v]]];
+		}
+
         return x;
     }
 
     // ── Algorithm 4: Horizontal coordinate assignment ─────────────────────────────────────────────
 
     std::vector<double> assignHorizontalCoordinates(G2& g) {
-        std::vector<double> x(g.nodes.size(), 0.0);
+        std::vector<double> x;
         markType1Conflicts(g);
 
         std::array<std::vector<double>, 4> layouts{};
@@ -384,6 +404,7 @@ namespace bk_internal {
         // Shift all layouts and use the median average coordinate for each node as
         // the final coordinate. This balances the four layouts while respecting the
         // separations of the minimum-width layout.
+		x.reserve(g.nodes.size());
         for (int v = 0; v < static_cast<int>(g.nodes.size()); v++) {
             for (int k = 0; k < 4; k++) {
                 layouts[k][v] += shifts[k];
@@ -418,15 +439,14 @@ namespace hypergraph_logic {
         // 2. Run BK
         std::vector<double> x = assignHorizontalCoordinates(g);
 
-        // 3. Write results into node_x_
-        node_x_.clear();
+        // 3. Write results into node_layout_
+        node_layout_.clear();
         for (int id = 0; id < static_cast<int>(g.nodes.size()); id++)
-            node_x_[g.nodes[id]] = x[id];
+            node_layout_[g.nodes[id]] = x[id];
     }
 
     double GraphicalHypergraph::getX(const NodePtr& node) const {
-        auto it = node_x_.find(node.get());
-        return (it != node_x_.end()) ? it->second : 0.0;
+		return node_layout_.at(node.get());
     }
 
 } // namespace hypergraph_logic

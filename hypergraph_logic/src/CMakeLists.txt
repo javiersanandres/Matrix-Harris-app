@@ -67,6 +67,7 @@ add_library(graphical_hypergraph)
 target_sources(graphical_hypergraph
     PRIVATE
         minimizeCrossings.cpp
+        horizontalCoordinates.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -81,6 +82,11 @@ target_include_directories(graphical_hypergraph
 target_link_libraries(graphical_hypergraph
     PUBLIC hypergraph
 )
+
+# Enable BK_TEST when building tests
+if(BUILD_TESTING)
+    target_compile_definitions(graphical_hypergraph PRIVATE BK_TEST)
+endif()
 
 # For efficiency measures, keep them separate from the core libraries.
 add_subdirectory(efficiencyMeasures/minimizeCrossings)

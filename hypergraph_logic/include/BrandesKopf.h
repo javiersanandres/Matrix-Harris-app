@@ -39,6 +39,14 @@ namespace bk_internal {
     // 
     // layers[k] holds the ordered list of node ids in hypergraph layer k.
     // pos[i] is the 0-based index of node i within its layer.
+
+    // Hash for std::pair<int,int> used by G2::marked.
+    struct PairHash {
+        size_t operator()(const std::pair<int, int>& p) const {
+            return std::hash<long long>()(
+                (static_cast<long long>(p.first) << 32) | static_cast<unsigned>(p.second));
+        }
+    };
     struct G2 {
         std::vector<Node*> nodes;              // nodes[id] = original Node*
         std::vector<std::vector<int>> upper;   // upper[id] = parent ids, sorted by pos
@@ -50,19 +58,12 @@ namespace bk_internal {
         // Segments marked as type-1 conflicted during preprocessing.
         // A pair (u, v) in this set means the segment u->v must not be used
         // as an alignment edge (it is a non-inner segment crossing an inner one).
-        std::unordered_set<std::pair<int, int>,struct PairHash> marked;
+        std::unordered_set<std::pair<int, int>, PairHash> marked;
 
         bool isMarked(int u, int v) const { return marked.count({ u, v }) > 0; }
     };
 
-    // Hash for std::pair<int,int> used by G2::marked.
-    struct PairHash {
-        size_t operator()(const std::pair<int, int>& p) const {
-            return std::hash<long long>()(
-                (static_cast<long long>(p.first) << 32) | static_cast<unsigned>(p.second));
-        }
-    };
-
+   
     // ── BlockList ─────────────────────────────────────────────────────────────────
     //
     // Output of verticalAlignment. A "block" in BK is a maximal set of nodes
@@ -80,7 +81,7 @@ namespace bk_internal {
     struct BlockList {
         std::vector<int>    root;
         std::vector<int>    align;
-        std::vector<double> block_width;
+        std::vector<double> block_widths;
     };
 
     // ── buildG2 ──────────────────────────────────────────────────────────────────
