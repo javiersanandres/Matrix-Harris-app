@@ -88,5 +88,6 @@ if(BUILD_TESTING)
     target_compile_definitions(graphical_hypergraph PRIVATE BK_TEST)
 endif()
 
-# For efficiency measures, keep them separate from the core libraries.
-add_subdirectory(efficiencyMeasures/minimizeCrossings)
+# Keep the analysis separate from the core libraries.
+add_subdirectory(implementationAnalysis/minimizeCrossings)
+add_subdirectory(implementationAnalysis/horizontalCoordinates)

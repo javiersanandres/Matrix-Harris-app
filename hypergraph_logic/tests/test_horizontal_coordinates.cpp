@@ -397,8 +397,8 @@ namespace hypergraph_logic {
                 EXPECT_NEAR(g.getX(A), g.getX(D), 1e-9);
                 EXPECT_NEAR(g.getX(B), g.getX(E), 1e-9);
                 EXPECT_NEAR(g.getX(C), g.getX(F), 1e-9);
-                EXPECT_NEAR(g.getX(B) - g.getX(A), 96.0, 1e-9);
-                EXPECT_NEAR(g.getX(C) - g.getX(B), 96.0, 1e-9);
+                EXPECT_NEAR(g.getX(B) - g.getX(A), NODE_WIDTH + MIN_BLOCK_SEP, 1e-9);
+                EXPECT_NEAR(g.getX(C) - g.getX(B), NODE_WIDTH + MIN_BLOCK_SEP, 1e-9);
             }
 
 
@@ -406,7 +406,7 @@ namespace hypergraph_logic {
 				G2 g2 = buildPaperExampleG2();
 				BlockList B = verticalAlignment(g2, 1, 1);
 				ASSERT_EQ(B.root.size(), g2.nodes.size());
-				for (int i : {0, 1, 3, 4, 5, 6, 7, 8, 9, 10, 15, 17, 18 })
+				for (int i : {0, 1, 3, 5, 6, 7, 8, 9, 10, 15, 17, 18 })
 					ASSERT_EQ(B.root[i], i);
 
                 ASSERT_EQ(B.root[2], 0);
@@ -524,7 +524,7 @@ namespace hypergraph_logic {
 				ASSERT_EQ(x[9], 7 * sep);
 				ASSERT_EQ(x[10], sep);
 				ASSERT_EQ(x[15], 8 * sep);
-				ASSERT_EQ(x[17], 2*sep);
+				ASSERT_EQ(x[17], 2 * sep);
 				ASSERT_EQ(x[18], 3 * sep);
             }
 
@@ -876,8 +876,7 @@ namespace hypergraph_logic {
 
                 for (int col = 0; col + 1 < 4; ++col)
                     EXPECT_NEAR(
-                        g.getX(grid[0][col + 1]) - g.getX(grid[0][col]), 96.0, 1e-9)
-                    << "Column spacing should be exactly 96";
+                        g.getX(grid[0][col + 1]) - g.getX(grid[0][col]), NODE_WIDTH + MIN_BLOCK_SEP, 1e-9);
             }
 
             // ============================================================================

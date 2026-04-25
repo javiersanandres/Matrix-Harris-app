@@ -20,7 +20,7 @@ namespace hypergraph_logic {
     // in the same layer, after block-width has been accounted for.
     // Formula used in BK compaction:
     //   sep(a, b) = (blockWidth(a) + blockWidth(b)) / 2 + MIN_BLOCK_SEP
-    inline constexpr double MIN_BLOCK_SEP = 16.0;
+    inline constexpr double MIN_BLOCK_SEP = 25.0;
 
     // Default width assigned to a real node box.
     inline constexpr double NODE_WIDTH = 80.0;

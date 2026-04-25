@@ -1,6 +1,6 @@
 #pragma once
 
-// ============================================================================
+// ==================================================================================
 // BrandesKopf.h
 //
 // Internal data structures and helper functions for the Brandes–Köpf
@@ -11,7 +11,15 @@
 //   In: Graph Drawing (GD 2001), LNCS 2265, pp. 31–44. Springer.
 //   DOI: 10.1007/978-3-540-45848-7_3
 //
-// ============================================================================
+// IMPORTANT: The original paper had some mistakes which dealt into wrong layouts.
+// I have fixed these mistakes as stated in: 
+//   Brandes, U., Walter, J., & Zink, J. (2021). "Erratum: Fast and
+//   Simple Horizontal Coordinate Assignment."
+//   In: Graph Drawing and Network Visualization (GD 2020),
+//   LNCS 12590, pp. 433–435. Springer.
+//   DOI: 10.1007/978-3-030-68766-3_32
+// 
+// ==================================================================================
 
 #include "GraphicalHypergraph.h"
 #include "LayoutTypes.h"

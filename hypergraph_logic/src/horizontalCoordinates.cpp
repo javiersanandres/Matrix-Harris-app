@@ -21,6 +21,14 @@
 // definition, as explained below, but the overall intent is the same: to identify
 // the "spines" of long edges and preferentially keep them vertical.
 // 
+// IMPORTANT: The original paper had some mistakes which dealt into wrong layouts.
+// I have fixed these mistakes as stated in: 
+//   Brandes, U., Walter, J., & Zink, J. (2021). "Erratum: Fast and
+//   Simple Horizontal Coordinate Assignment."
+//   In: Graph Drawing and Network Visualization (GD 2020),
+//   LNCS 12590, pp. 433–435. Springer.
+//   DOI: 10.1007/978-3-030-68766-3_32
+// 
 // ====================================================================================
 
 namespace bk_internal {
@@ -243,18 +251,12 @@ namespace bk_internal {
         int w = v;
         do {
             #ifdef BK_TEST // This is only for testing purposes, for testing without having to rely on a Hypergraph implementation.
-                int layer_of_w = 0;
-                if (g.nodes[w] == nullptr) {
-                    layer_of_w = [&]() {
-                        for (int i = 0; i < g.num_layers; ++i)
-                            for (int id : g.layers[i])
-                                if (id == w) return i;
-                        return -1;
-                        }();
-                }
-                else {
-				    layer_of_w = g.nodes[w]->getLayer();
-                }
+                int layer_of_w = [&]() {
+                    for (int i = 0; i < g.num_layers; ++i)
+                        for (int id : g.layers[i])
+                            if (id == w) return i;
+                    return -1;
+                    }();
             #else
                 int layer_of_w = g.nodes[w]->getLayer();
             #endif
@@ -267,16 +269,8 @@ namespace bk_internal {
                 int u = B.root[g.layers[layer_of_w][pred_pos]];
                 placeBlock(g, B, u, sink, shift, x, hdir);
                 if (sink[v] == v) sink[v] = sink[u];
-
                 double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + MIN_BLOCK_SEP;
-
-                if (sink[v] != sink[u]) {
-                    if (hdir == 1)
-                        shift[sink[u]] = std::min(shift[sink[u]], x[v] - x[u] - sep);
-                    else
-                        shift[sink[u]] = std::max(shift[sink[u]], x[v] - x[u] + sep);
-                }
-                else {
+                if (sink[v] == sink[u]) {
                     // Same class: direct constraint
                     if (hdir == 1)
                         x[v] = std::max(x[v], x[u] + sep);
@@ -286,6 +280,12 @@ namespace bk_internal {
             }
             w = B.align[w];
         } while (w != v);
+
+        while (B.align[w] != v) {
+            w = B.align[w];
+            x[w] = x[v];
+            sink[w] = sink[v];
+        }
     }
 
 
@@ -300,7 +300,7 @@ namespace bk_internal {
         // x[v]: coordinate of the root of v's block (relative to sink)
         std::vector<int> sink(n);
         for (int v = 0; v < n; v++) sink[v] = v;
-        std::vector<double> shift(n, std::numeric_limits<double>::max());
+        std::vector<double> shift(n, (hdir == 1) ? std::numeric_limits<double>::max() : std::numeric_limits<double>::lowest());
         std::vector<double> x(n, std::numeric_limits<double>::lowest());
 
 
@@ -318,30 +318,44 @@ namespace bk_internal {
             }
         }
 
-        // Apply shifting globally
-        double d = 0;
+        // Correctly calculate class offsets
         for (int i = ((vdir == 1) ? 0 : g.num_layers - 1);
             i != ((vdir == 1) ? g.num_layers : -1); i += vdir) {
             const auto& cur_layer = g.layers[i];
-            int v = cur_layer[(hdir == 1) ? 0 : static_cast<int>(cur_layer.size()) - 1];
+            int first = cur_layer[((hdir == 1) ? 0 : static_cast<int>(cur_layer.size()) - 1)];
+            if (sink[first] == first) {
+                if (shift[sink[first]] == ((hdir == 1) ? std::numeric_limits<double>::max() : std::numeric_limits<double>::lowest())) {
+                    shift[sink[first]] = 0;
+                }
+                int j = i;
+                int k = (hdir == 1) ? 0 : static_cast<int>(cur_layer.size()) - 1;
+                int v = g.layers[j][k];
+                do {
+                    v = g.layers[j][k];
+                    while (B.align[v] != B.root[v]) {
+                        v = B.align[v];
+                        j += vdir;
+                        if ((hdir == 1 && g.pos[v] > 0) ||
+                            (hdir == -1 && g.pos[v] < static_cast<int>(g.layers[j].size()) - 1)) {                 
+                            int u = g.layers[j][((hdir == 1) ? g.pos[v] - 1 : g.pos[v] + 1)]; // predecessor
+                            
+                            double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + MIN_BLOCK_SEP;
+                            if (hdir == 1)
+                                shift[sink[u]] = std::min(shift[sink[u]], shift[sink[v]] + x[v] - x[u] - sep);
+                            else
+                                shift[sink[u]] = std::max(shift[sink[u]], shift[sink[v]] + x[v] - x[u] + sep);
+                        }
+                    }
 
-            if (v == sink[B.root[v]]) {
-                double oldShift = shift[v];
-                if (oldShift < std::numeric_limits<double>::max()) {
-                    shift[v] += d;
-                    d += oldShift;
-                }
-                else {
-                    shift[v] = 0;
-                }
+                    k = g.pos[v] + hdir;
+                } while (((hdir == 1 && k < static_cast<int>(g.layers[j].size())) || (hdir == -1 && k >= 0)) 
+                          && (sink[v] == sink[g.layers[j][k]]));
             }
         }
+
         for (int v = 0; v < n; v++) {
-            x[v] = x[B.root[v]];
+            x[v] = x[v] + shift[sink[v]];
         }
-        for (int v = 0; v < n; v++) {
-            x[v] += shift[sink[B.root[v]]];
-		}
 
         return x;
     }
