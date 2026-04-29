@@ -3,10 +3,23 @@
 
 namespace hypergraph_logic {
 
-    struct HyperedgeLayout {
-        double y = 0.0;                                 // horizontal line y-coord
-        std::unordered_map<Node*, double> source_x;     // source port x coordinates
-		std::unordered_map<Node*, double> target_x;     // target port x coordinates
+    // ── Port ──────────────────────────────────────────────────────────────────────
+    //
+    // A single connection point between a node and a hyperedge, carrying the
+    // x-coordinate at which the vertical segment of the edge leaves or arrives
+    // at the node.
+    struct Port {
+        Hyperedge* edge = nullptr;  // The hyperedge this port belongs to.
+        double x = 0.0;             // Assigned x coordinate on the node's top/bottom edge.
+    };
+
+    // ── NodeLayout ────────────────────────────────────────────────────────────────
+    //
+    // All layout data associated with a single node.
+    struct NodeLayout {
+		double x = 0.0;                 // Assigned x coordinate of the node centre by Brandes-Köpf.
+		std::vector<Port> source_ports; // Ports for edges leaving this node (going downward).
+		std::vector<Port> target_ports; // Ports for edges arriving at this node (from above).
     };
 
 
@@ -16,10 +29,10 @@ namespace hypergraph_logic {
     // Extends Hypergraph with all necessary functionality to support graphical 
     // layout and rendering. This includes:
     // 1) Crossing minimization via Global Sifting.
-	// 2) Node coordinate assignment via Brandes-Köpf algorithm.
-    // 3) Computing the order of hyperedges in each layer with an MIP.
-    // 4) Assgining ports to the hyperedges with another MIP.
-    // 5) Assinging a y coordinate for the horizontal line of hyperedges.
+    // 2) Node coordinate assignment via Brandes-Köpf algorithm.
+    // 3) Removing horizontal overlapping of hyperedges in each layer with an MIP.
+    // 4) Assigning ports to the hyperedges and removing vertical overlapping.
+    // 5) Assigning y coordinate for the horizontal span of hyperedges.
     // 
     // 
     // Since all 5 algorithms are independent and can be applied in any order,
@@ -42,33 +55,40 @@ namespace hypergraph_logic {
     public:
         using Hypergraph::Hypergraph;
 
-        // Run Global Sifting crossing minimization.
+        // ── Stage 1: crossing minimisation ────────────────────────────────────────
         //
-        // sifting_rounds : maximum number of full passes over all blocks.
-        //                  Terminates early if no improvement is found.
-        //                  The default is 10, due to empirical observations.
-        // start_layer    : first hypergraph layer to include in the sifted region.
-        //                  Layers below start_layer are treated as fixed anchors
-        //                  (their edges still count toward crossings but those
-        //                  nodes are never moved).  Pass 0 to sift the whole graph.
-        //                  This way, we can prevent the whole graph from being processed
-        //                  and only focus on the affected region after a change, which is
-		//                  more consisting with an interactive workflow.
-		//                  The default is 0, which means that the whole graph is sifted.
+        // Runs Global Sifting to reorder nodes within each layer so as to
+        // minimise the total number of edge crossings.
+        //
+        //   sifting_rounds — maximum number of full passes over all nodes.
+        //                    Terminates early when no improvement is found.
+        //                    Default: 10 (empirical).
+        //   start_layer    — first layer included in the sifted region.
+        //                    Layers below start_layer are fixed anchors whose
+        //                    edges still count toward crossings but whose nodes
+        //                    are never moved. Pass 0 to sift the whole graph.
         //
         // Returns the total crossing count of the final ordering.
         int minimizeCrossings(int sifting_rounds = 10, int start_layer = 0);
 
-		// Run Horizontal coordinate assignment (Brandes–Köpf).
-        // 
-        // Assigns an x-coordinate to every node in the graph.
-        // Coordinates are in logical pixels (see LayoutTypes.h for constants).
+        // ── Stage 2: node x-coordinates ───────────────────────────────────────────
+        //
+        // Assigns an x-coordinate to every node using the Brandes-Köpf algorithm.
+        // Coordinates are in logical pixels (constants defined in LayoutTypes.h).
         void assignCoordinates();
         double getX(const NodePtr& node) const;
 
-    private:
-		std::unordered_map<Node*, double> node_layout_; // Map from node pointer to its assigned x coordinate in the layout.
-		std::unordered_map<Hyperedge*, HyperedgeLayout> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate, port assignments, etc.)
+        // ── Stage 4: port assignment ───────────────────────────────────────────────
+        //
+        // Iterates over every layer pair (0->1, 1->2,..., n-2->n-1), building and
+        // spacing ports then resolving vertical-segment overlaps for each pair in
+        // turn. After this call every node in the graph has fully populated and
+        // non-overlapping source_ports and target_ports.
+        void assignPorts();
+
+    protected:
+        std::unordered_map<Node*, NodeLayout> node_layout_; // Map from node pointer to its layout data.
+        std::unordered_map<Hyperedge*, double> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate).
     };
 
 } // namespace hypergraph_logic

@@ -20,15 +20,21 @@ namespace hypergraph_logic {
     // in the same layer, after block-width has been accounted for.
     // Formula used in BK compaction:
     //   sep(a, b) = (blockWidth(a) + blockWidth(b)) / 2 + MIN_BLOCK_SEP
-    inline constexpr double MIN_BLOCK_SEP = 25.0;
+    inline constexpr double MIN_BLOCK_SEP = 30.0;
 
     // Default width assigned to a real node box.
-    inline constexpr double NODE_WIDTH = 80.0;
+    inline constexpr double NODE_WIDTH = 100.0;
 
     // Default height assigned to a real node box.
-    inline constexpr double NODE_HEIGHT = 40.0;
+    inline constexpr double NODE_HEIGHT = 50.0;
 
-    // Dummy nodes are invisible bend-points on edges. Their layout width is
-    // zero so they never contribute to block width or separation.
-    inline constexpr double DUMMY_NODE_WIDTH = 0.0;
+    // Dummy nodes are invisible bend-points on edges. Due to vertical overlap
+    // issues, we need to assing them a width for the port assignment step.
+    inline constexpr double DUMMY_NODE_WIDTH = 10.0;
+
+    // Minimum vertical gap between the vertical segments of two hyperedges
+    // in the same layer. This is used just as a reference. There might be 
+    // cases in which this distance is not respected, but it is a reference
+    // to decide when there are overlapping conflicts after port assignemnt.
+	inline constexpr double MIN_VERTICAL_SEP = 10.0; 
 } // namespace hypergraph_logic

@@ -68,6 +68,7 @@ target_sources(graphical_hypergraph
     PRIVATE
         minimizeCrossings.cpp
         horizontalCoordinates.cpp
+        portAssignment.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include

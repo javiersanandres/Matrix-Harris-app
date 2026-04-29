@@ -455,12 +455,15 @@ namespace hypergraph_logic {
 
         // 3. Write results into node_layout_
         node_layout_.clear();
-        for (int id = 0; id < static_cast<int>(g.nodes.size()); id++)
-            node_layout_[g.nodes[id]] = x[id];
+        for (int id = 0; id < static_cast<int>(g.nodes.size()); id++) {
+			NodeLayout layout;
+            layout.x = x[id];
+			node_layout_[g.nodes[id]] = layout;
+        }
     }
 
     double GraphicalHypergraph::getX(const NodePtr& node) const {
-		return node_layout_.at(node.get());
+		return node_layout_.at(node.get()).x;
     }
 
 } // namespace hypergraph_logic

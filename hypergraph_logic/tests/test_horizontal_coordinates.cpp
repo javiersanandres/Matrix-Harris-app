@@ -104,15 +104,6 @@ namespace hypergraph_logic {
                 return g;
             }
 
-            // Build a minimal BlockList where every node is its own singleton block.
-            static BlockList makeSingletonBlockList(int n) {
-                BlockList B;
-                B.root.resize(n); B.align.resize(n); B.block_widths.resize(n);
-                for (int i = 0; i < n; ++i) { B.root[i] = i; B.align[i] = i; }
-                return B;
-            }
-
-
             static G2 buildPaperExampleG2() {
 				G2 g2;
                 g2.num_layers = 5;

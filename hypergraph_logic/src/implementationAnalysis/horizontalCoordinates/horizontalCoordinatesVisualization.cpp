@@ -405,7 +405,7 @@ protected:
 
 private:
     // ── constants ─────────────────────────────────────────────────────────────
-    static constexpr double LAYER_GAP = 200.0;  // px between layer centre-lines at zoom=1
+    static constexpr double LAYER_GAP = 225.0;  // px between layer centre-lines at zoom=1
     static constexpr double ZOOM_STEP = 1.15;
     static constexpr double ZOOM_MIN = 0.15;
     static constexpr double ZOOM_MAX = 6.0;
