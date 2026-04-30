@@ -45,7 +45,7 @@ namespace hypergraph_logic {
 		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
 		NodePtr createSource(const std::string& label, int layer_position, const HyperedgePtr& edge);
 		NodePtr createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge);
-		void addConnection(const NodePtr& parent, const NodePtr& child);
+		HyperedgePtr addConnection(const NodePtr& parent, const NodePtr& child);
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
 		void removeNode(const NodePtr& node);

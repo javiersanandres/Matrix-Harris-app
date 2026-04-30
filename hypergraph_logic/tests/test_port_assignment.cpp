@@ -209,21 +209,6 @@ namespace hypergraph_logic {
             }
 
 
-            // ════════════════════════════════════════════════════════════════════════
-            // The mandatory A,B,C,D example from the task description
-            //
-            // Layer 0: [A] [B]     (A at position 0, B at position 1)
-            // Layer 1: [C] [D]     (C child of A, D child of B)
-            //
-            // After assignCoordinates():
-            //   xA < xB  and  xC < xD  (by layer ordering)
-            //   xB - xA >= 96  (real-real separation)
-            //
-            // Edges: A->C  (order 0) and B->D  (order 1), but due to how
-            // createNode works the edges are A->C and B->D independently.
-            // No crossing in this configuration, so no conflict should be raised.
-            // ════════════════════════════════════════════════════════════════════════
-
             TEST(ABCD, GraphBuildsAndCoordinatesAssigned) {
                 TestGraph g("ABCD");
                 NodePtr A = g.createNode("A", 0, nullptr);

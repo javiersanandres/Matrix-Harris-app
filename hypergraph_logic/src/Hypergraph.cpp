@@ -321,8 +321,8 @@ namespace hypergraph_logic {
 		return node;
 	}
 
-	void Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child) {
-		if (!child || !parent) return;
+	HyperedgePtr Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child) {
+		if (!child || !parent) return nullptr;
 		if (child == parent) {
 			throw std::invalid_argument("A node cannot be connected to itself.");
 		}
@@ -357,14 +357,15 @@ namespace hypergraph_logic {
 
 		int parent_layer = parent->getLayer();
 		int child_layer = child->getLayer();
+		HyperedgePtr edge;
 		if (parent_layer == child_layer - 1) {
 			// Easiest case: just add the new hyperedge and update the layer data
-			createHyperedge({ parent }, { child }, parent_layer);
+			edge = createHyperedge({ parent }, { child }, parent_layer);
 		}
 		else if (parent_layer < child_layer) {
 			// The parent is in a layer above the child, so the child's layer does not need to be updated, but we need 
 			// to add the new hyperedge, split it and add the necessary dummy nodes in the intermediate layers.
-			HyperedgePtr edge = createHyperedge({ parent }, { child }, -1);
+			edge = createHyperedge({ parent }, { child }, -1);
 
 			// Rewire the connection from parent to child with the new dummy nodes and split the hyperedge.
 			splitLongEdge(edge);
@@ -372,10 +373,11 @@ namespace hypergraph_logic {
 		else {
 			// Worst case: the child layer needs to be updated. This automatically implies that the new layer
 			// number is the parent_layer + 1 and this should propagate down to all the descendants of the child.
-			HyperedgePtr edge = createHyperedge({ parent }, { child }, parent_layer);
+			edge = createHyperedge({ parent }, { child }, parent_layer);
 
 			applyRelocationAndPropagate({ {child, parent_layer + 1} });
 		}
+		return edge;
 	}
 
 	void Hypergraph::addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) {

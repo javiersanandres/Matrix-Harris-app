@@ -78,6 +78,16 @@ namespace hypergraph_logic {
         void assignCoordinates();
         double getX(const NodePtr& node) const;
 
+        // ── Stage 3: horizontal order of hyperedge bars ───────────────────────────
+        //
+        // Solves the MIP (equations 26–30, Fridman et al. 2021) for the given layer
+        // to find the vertical ordering of hyperedge horizontal bars that minimises
+        // the number of crossings. outgoing_edges is re-sorted in-place so that a
+        // lower index corresponds to a higher bar on the canvas.
+        //
+        // Must be called after assignCoordinates() and before assignPorts().
+        void orderHyperedges(int layer);
+
         // ── Stage 4: port assignment ───────────────────────────────────────────────
         //
         // Iterates over every layer pair (0->1, 1->2,..., n-2->n-1), building and
