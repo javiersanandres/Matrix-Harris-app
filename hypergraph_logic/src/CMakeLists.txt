@@ -137,3 +137,4 @@ endif()
 # Keep the analysis separate from the core libraries.
 add_subdirectory(implementationAnalysis/minimizeCrossings)
 add_subdirectory(implementationAnalysis/horizontalCoordinates)
+add_subdirectory(implementationAnalysis/horizontalOrder)
