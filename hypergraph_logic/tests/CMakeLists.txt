@@ -25,7 +25,7 @@ target_link_libraries(hypergraph_logic_tests
         GTest::gtest_main
 )
 
-target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST)
+target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST GS_TEST)
 
 # Discover and register all tests
 include(GoogleTest)

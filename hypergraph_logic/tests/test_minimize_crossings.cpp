@@ -13,6 +13,100 @@ namespace hypergraph_logic {
             using namespace sifting_internal;
 
             // ============================================================================
+            // TestGlobalSifter
+            //
+            // Subclass of GlobalSifter that uses the TESTING-only no-op constructor
+            // so that S_ and B_ can be set directly. layers_ is bound to a static dummy
+            // that is never read by any sifting method.
+            //
+            // Free functions below match the call signatures used in the tests exactly,
+            // routing each call through a temporary TestGlobalSifter.
+            // ============================================================================
+
+            struct TestGlobalSifter : GlobalSifter {
+                TestGlobalSifter(SiftState S, BlockList B) : GlobalSifter() {
+                    S_ = std::move(S);
+                    B_ = std::move(B);
+                }
+
+                void callSortAdjacencies() { sortAdjacencies(); }
+                int  callSiftingSwap(int a, int b) { return siftingSwap(a, b); }
+                int  callSiftingStep(int a) { return siftingStep(a); }
+                void callOrderLayers() { orderLayersByBlockOrder(); }
+                int  callCountCrossings() { return countCrossings(); }
+
+                static int staticUswap(const SiftState& S,
+                    const std::vector<int>& Na, const std::vector<int>& Nb,
+                    const std::vector<int>& pi)
+                {
+                    return uswap(S, Na, Nb, pi);
+                }
+                static int staticGetNodeAtLevel(const SiftState& S, Block& blk, int layer)
+                {
+                    return getNodeAtLevel(S, blk, layer);
+                }
+                static int staticCountBilayer(const std::vector<int>& l1,
+                    const std::vector<int>& l2, const std::vector<std::vector<int>>& out)
+                {
+                    return countBilayerCrossings(l1, l2, out);
+                }
+            };
+
+            // ── Free-function shims ───────────────────────────────────────────────────
+
+            static void sortAdjacencies(SiftState& S, BlockList& B) {
+                TestGlobalSifter g(S, B);
+                g.callSortAdjacencies();
+                S = g.S_; B = g.B_;
+            }
+
+            static int siftingSwap(SiftState& S, int a, int b) {
+                TestGlobalSifter g(S, {});
+                int r = g.callSiftingSwap(a, b);
+                S = g.S_;
+                return r;
+            }
+
+            static int siftingStep(SiftState& S, BlockList& B, int a) {
+                TestGlobalSifter g(S, B);
+                int r = g.callSiftingStep(a);
+                S = g.S_; B = g.B_;
+                return r;
+            }
+
+            static void orderLayersByBlockOrder(SiftState& S, BlockList& B) {
+                TestGlobalSifter g(S, B);
+                g.callOrderLayers();
+                S = g.S_; B = g.B_;
+            }
+
+            static int countTotalCrossings(SiftState& S, BlockList& B) {
+                TestGlobalSifter g(S, B);
+                int r = g.callCountCrossings();
+                S = g.S_; B = g.B_;
+                return r;
+            }
+
+            static int uswap(const SiftState& S,
+                const std::vector<int>& Na, const std::vector<int>& Nb,
+                const std::vector<int>& pi)
+            {
+                return TestGlobalSifter::staticUswap(S, Na, Nb, pi);
+            }
+
+            static int getNodeAtLevel(const SiftState& S, Block& blk, int layer)
+            {
+                return TestGlobalSifter::staticGetNodeAtLevel(S, blk, layer);
+            }
+
+            static int countBilayerCrossings(const std::vector<int>& l1,
+                const std::vector<int>& l2, const std::vector<std::vector<int>>& out)
+            {
+                return TestGlobalSifter::staticCountBilayer(l1, l2, out);
+            }
+
+
+            // ============================================================================
             // State-building helpers
             // ============================================================================
 
@@ -109,12 +203,12 @@ namespace hypergraph_logic {
                 for (int i = 0; i < 3; i++) {
                     S.g1_nodes.emplace_back(nullptr, 0);
                     S.g1_layers[0].push_back(i);
-					S.blocks.emplace_back(std::vector<int>{i});
+                    S.blocks.emplace_back(std::vector<int>{i});
                     S.g1_nodes[i].block_id = i;
                 }
                 for (int i = 3; i < 7; i++) {
                     S.g1_nodes.emplace_back(nullptr, i - 2);
-					S.g1_layers[i - 2].push_back(i);
+                    S.g1_layers[i - 2].push_back(i);
                     S.blocks.emplace_back(std::vector<int>{i});
                     S.g1_nodes[i].block_id = i;
                 }
@@ -133,10 +227,10 @@ namespace hypergraph_logic {
                 S.blocks.emplace_back(std::vector<int>{7, 9});
                 S.g1_nodes[7].block_id = 7;
                 S.g1_nodes[9].block_id = 7;
-				S.blocks.emplace_back(std::vector<int>{8, 10, 12});
-				S.g1_nodes[8].block_id = 8;
-				S.g1_nodes[10].block_id = 8;
-				S.g1_nodes[12].block_id = 8;
+                S.blocks.emplace_back(std::vector<int>{8, 10, 12});
+                S.g1_nodes[8].block_id = 8;
+                S.g1_nodes[10].block_id = 8;
+                S.g1_nodes[12].block_id = 8;
                 S.blocks.emplace_back(std::vector<int>{11});
                 S.g1_nodes[11].block_id = 9;
 
@@ -145,7 +239,7 @@ namespace hypergraph_logic {
                     {7, 9}, {3, 4}, {8, 10},
                     {9, 5}, {4, 5}, {4, 11}, { 10, 12 },
                     {5, 6}, {11, 6}, {12, 6},
-				};
+                };
 
                 S.g1_in.assign(S.g1_nodes.size(), {});
                 S.g1_out.assign(S.g1_nodes.size(), {});
@@ -155,8 +249,8 @@ namespace hypergraph_logic {
                     S.g1_in[tgt].push_back(src);
                 }
 
-				S.pi.resize(S.blocks.size(), 0);
-				for (int i = 0; i < static_cast<int>(S.blocks.size()); i++) {
+                S.pi.resize(S.blocks.size(), 0);
+                for (int i = 0; i < static_cast<int>(S.blocks.size()); i++) {
                     S.pi[i] = i;
                 }
                 return S;
@@ -481,21 +575,21 @@ namespace hypergraph_logic {
             }
 
             TEST(SortAdjacencies, PaperExample) {
-				SiftState S = buildPaperState();
+                SiftState S = buildPaperState();
                 BlockList B;
 
                 for (int i = 0; i < static_cast<int>(S.blocks.size()); ++i)
                     B.push_back(i);
 
-				sortAdjacencies(S, B);
+                sortAdjacencies(S, B);
 
                 Block& blk = S.blocks[0];
                 EXPECT_EQ(blk.N_minus.size(), 0);
                 EXPECT_EQ(blk.I_minus.size(), 0);
                 EXPECT_EQ(blk.N_plus.size(), 1);
                 EXPECT_EQ(blk.N_plus[0], 7);
-				EXPECT_EQ(blk.I_plus.size(), 1);
-				EXPECT_EQ(blk.I_plus[0], 0);
+                EXPECT_EQ(blk.I_plus.size(), 1);
+                EXPECT_EQ(blk.I_plus[0], 0);
                 blk = S.blocks[1];
                 EXPECT_EQ(blk.N_minus.size(), 0);
                 EXPECT_EQ(blk.I_minus.size(), 0);
@@ -530,7 +624,7 @@ namespace hypergraph_logic {
                 EXPECT_EQ(blk.I_minus[0], 0);
                 EXPECT_EQ(blk.N_plus.size(), 2);
                 EXPECT_EQ(blk.N_plus[0], 5);
-                EXPECT_EQ(blk.N_plus[1], 11);    
+                EXPECT_EQ(blk.N_plus[1], 11);
                 EXPECT_EQ(blk.I_plus.size(), 2);
                 EXPECT_EQ(blk.I_plus[0], 0);
                 EXPECT_EQ(blk.I_plus[1], 0);
@@ -538,11 +632,11 @@ namespace hypergraph_logic {
                 EXPECT_EQ(blk.N_minus.size(), 3);
                 EXPECT_EQ(blk.N_minus[0], 5);
                 EXPECT_EQ(blk.N_minus[1], 12);
-				EXPECT_EQ(blk.N_minus[2], 11);
+                EXPECT_EQ(blk.N_minus[2], 11);
                 EXPECT_EQ(blk.I_minus.size(), 3);
                 EXPECT_EQ(blk.I_minus[0], 0);
                 EXPECT_EQ(blk.I_minus[1], 0);
-				EXPECT_EQ(blk.I_minus[2], 0);
+                EXPECT_EQ(blk.I_minus[2], 0);
                 EXPECT_EQ(blk.N_plus.size(), 0);
                 EXPECT_EQ(blk.I_plus.size(), 0);
                 blk = S.blocks[7];
@@ -736,10 +830,10 @@ namespace hypergraph_logic {
             TEST(SiftingSwap, PaperExample) {
                 SiftState S = buildPaperState();
                 BlockList B;
-				for (int i = 0; i < static_cast<int>(S.blocks.size());i++)
-					B.push_back(i);
-				sortAdjacencies(S, B);
-				int delta = siftingSwap(S, 7, 8);
+                for (int i = 0; i < static_cast<int>(S.blocks.size()); i++)
+                    B.push_back(i);
+                sortAdjacencies(S, B);
+                int delta = siftingSwap(S, 7, 8);
                 EXPECT_EQ(delta, 2);
                 Block& blk = S.blocks[0];
                 EXPECT_EQ(blk.N_minus.size(), 0);
@@ -861,10 +955,10 @@ namespace hypergraph_logic {
                 int delta = siftingSwap(S, 5, 8);
                 EXPECT_EQ(delta, 0);
 
-				std::swap(B[5], B[6]);
-				sortAdjacencies(S, B);
-				delta = siftingSwap(S, 4, 5);
-				EXPECT_EQ(delta, 0);
+                std::swap(B[5], B[6]);
+                sortAdjacencies(S, B);
+                delta = siftingSwap(S, 4, 5);
+                EXPECT_EQ(delta, 0);
             }
 
             // ============================================================================
@@ -1097,12 +1191,12 @@ namespace hypergraph_logic {
             // Check Minimization with the Paper Example
             // ============================================================================
             TEST(CrossingMinimization, PaperExample) {
-				SiftState S = buildPaperState();
+                SiftState S = buildPaperState();
                 BlockList B;
                 for (int i = 0; i < static_cast<int>(S.blocks.size()); ++i)
-					B.push_back(i);
+                    B.push_back(i);
 
-				int before = countTotalCrossings(S, B);
+                int before = countTotalCrossings(S, B);
                 sortAdjacencies(S, B);
 
                 int numblocks = static_cast<int>(B.size());
@@ -1113,7 +1207,7 @@ namespace hypergraph_logic {
                         chi += siftingStep(S, B, snapshot[i]);
                 }
 
-				EXPECT_LE(countTotalCrossings(S, B), before) << "Should be able to reduce crossings";
+                EXPECT_LE(countTotalCrossings(S, B), before) << "Should be able to reduce crossings";
             }
             TEST(CrossingMinimization, PaperExample2) {
                 SiftState S = buildPaperState();
@@ -1137,7 +1231,7 @@ namespace hypergraph_logic {
 
             // ── orderBlocks ─────────────────────────────────────────────-────────────────
             //
-			// This is the equivalent of the buildBlockOrder in minimizeCrossings.cpp, but 
+            // This is the equivalent of the buildBlockOrder in minimizeCrossings.cpp, but 
             // adapted to work with the SiftState and its g1_layers structure.
 
             static BlockList orderBlocksByLayerPropagation(SiftState& S) {
@@ -1201,7 +1295,7 @@ namespace hypergraph_logic {
 
             TEST(CrossingMinimization, PaperExampleWithGoodInitialOrder) {
                 SiftState S = buildPaperState();
-				BlockList B = orderBlocksByLayerPropagation(S);
+                BlockList B = orderBlocksByLayerPropagation(S);
 
                 int before = countTotalCrossings(S, B);
                 sortAdjacencies(S, B);
@@ -1213,7 +1307,7 @@ namespace hypergraph_logic {
                     for (int i = S.fixed_position_count; i < numblocks; i++)
                         chi += siftingStep(S, B, snapshot[i]);
                 }
-				EXPECT_EQ(countTotalCrossings(S, B), 0) << "Should already be optimal with good initial order";
+                EXPECT_EQ(countTotalCrossings(S, B), 0) << "Should already be optimal with good initial order";
 
                 EXPECT_LE(countTotalCrossings(S, B), before) << "Should be able to reduce crossings";
             }

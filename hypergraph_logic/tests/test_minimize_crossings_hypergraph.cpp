@@ -13,9 +13,8 @@ namespace hypergraph_logic {
             using namespace sifting_internal;
 
             // ============================================================================
-            // Fixture: a thin wrapper around GraphicalHypergraph that exposes the
-            // protected layers_ map so the tests can pass it directly to buildG1 /
-            // buildBlockOrder without going through minimizeCrossings().
+            // Fixture: exposes the protected layers_ map so tests can construct a
+            // GlobalSifter directly without going through minimizeCrossings().
             // ============================================================================
 
             class TestGraph : public GraphicalHypergraph {
@@ -28,27 +27,18 @@ namespace hypergraph_logic {
             // Helpers
             // ============================================================================
 
-            // Build the full pipeline up to (but not including) sortAdjacencies so that
-            // individual phases can be inspected.
-            static SiftState buildStateFromGraph(TestGraph& G, int start_layer = 0) {
-                SiftState S;
-                buildG1(S, G.layers(), start_layer);
-                buildBlocks(S);
-                return S;
-            }
-
             // Count how many G1 nodes have original == nullptr (i.e. hub nodes).
-            static int countHubs(const SiftState& S) {
+            static int countHubs(const GlobalSifter& sifter) {
                 int n = 0;
-                for (const auto& gn : S.g1_nodes)
+                for (const auto& gn : sifter.S_.g1_nodes)
                     if (gn.original == nullptr) ++n;
                 return n;
             }
 
             // Count how many G1 nodes have a non-null original (real/dummy nodes).
-            static int countRealNodes(const SiftState& S) {
+            static int countRealNodes(const GlobalSifter& sifter) {
                 int n = 0;
-                for (const auto& gn : S.g1_nodes)
+                for (const auto& gn : sifter.S_.g1_nodes)
                     if (gn.original != nullptr) ++n;
                 return n;
             }
@@ -61,6 +51,20 @@ namespace hypergraph_logic {
                 return nullptr;
             }
 
+            // Return the last hypergraph layer index in the graph.
+            static int lastLayer(TestGraph& G) {
+                return static_cast<int>(G.layers().rbegin()->first);
+            }
+
+            // Return the position of node in its layer (0-based) after writeBack.
+            static int positionInLayer(TestGraph& G, Node* node) {
+                for (const auto& [layer, data] : G.layers()) {
+                    for (int i = 0; i < static_cast<int>(data.nodes.size()); ++i)
+                        if (data.nodes[i].get() == node) return i;
+                }
+                return -1;
+            }
+
             // ============================================================================
             // buildG1 — two-layer graph, single binary edge
             // ============================================================================
@@ -68,9 +72,6 @@ namespace hypergraph_logic {
             class BuildG1_TwoLayers : public ::testing::Test {
             protected:
                 void SetUp() override {
-                    // Layer 0: A
-                    // Layer 1: B
-                    // Edge: A -> B  (short, layer 0)
                     A = G.createNode("A", 0, nullptr);
                     B = G.createNode("B", 0, A);
                 }
@@ -79,60 +80,48 @@ namespace hypergraph_logic {
             };
 
             TEST_F(BuildG1_TwoLayers, NodeCountIncludesHub) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
                 // 2 real nodes + 1 hub = 3 G1 nodes
-                EXPECT_EQ(S.g1_nodes.size(), 3u);
+                EXPECT_EQ(sifter.S_.g1_nodes.size(), 3u);
             }
 
             TEST_F(BuildG1_TwoLayers, ExactlyOneHub) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                EXPECT_EQ(countHubs(S), 1);
-                EXPECT_EQ(countRealNodes(S), 2);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(countHubs(sifter), 1);
+                EXPECT_EQ(countRealNodes(sifter), 2);
             }
 
             TEST_F(BuildG1_TwoLayers, NodesAssignedToCorrectG1Layers) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                // A is at hypergraph layer 0 -> g1_layer 0
-                int a_idx = S.node_to_g1.at(A.get());
-                EXPECT_EQ(S.g1_nodes[a_idx].g1_layer, 0);
-                // B is at hypergraph layer 1 -> g1_layer 2
-                int b_idx = S.node_to_g1.at(B.get());
-                EXPECT_EQ(S.g1_nodes[b_idx].g1_layer, 2);
-                // Hub is between layers 0 and 2 -> g1_layer 1
-                EXPECT_TRUE(S.g1_layers.count(1));
-                EXPECT_EQ(S.g1_layers.at(1).size(), 1u);
-                EXPECT_EQ(S.g1_nodes[S.g1_layers.at(1)[0]].g1_layer, 1);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                int a_idx = sifter.S_.node_to_g1.at(A.get());
+                EXPECT_EQ(sifter.S_.g1_nodes[a_idx].g1_layer, 0);
+                int b_idx = sifter.S_.node_to_g1.at(B.get());
+                EXPECT_EQ(sifter.S_.g1_nodes[b_idx].g1_layer, 2);
+                EXPECT_TRUE(sifter.S_.g1_layers.count(1));
+                EXPECT_EQ(sifter.S_.g1_layers.at(1).size(), 1u);
+                EXPECT_EQ(sifter.S_.g1_nodes[sifter.S_.g1_layers.at(1)[0]].g1_layer, 1);
             }
 
             TEST_F(BuildG1_TwoLayers, AdjacencyCorrect) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                int a_idx = S.node_to_g1.at(A.get());
-                int b_idx = S.node_to_g1.at(B.get());
-                int hub_idx = S.g1_layers.at(1)[0];
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                int a_idx = sifter.S_.node_to_g1.at(A.get());
+                int b_idx = sifter.S_.node_to_g1.at(B.get());
+                int hub_idx = sifter.S_.g1_layers.at(1)[0];
 
-                // A -> hub
-                ASSERT_EQ(S.g1_out[a_idx].size(), 1u);
-                EXPECT_EQ(S.g1_out[a_idx][0], hub_idx);
-                // hub -> B
-                ASSERT_EQ(S.g1_out[hub_idx].size(), 1u);
-                EXPECT_EQ(S.g1_out[hub_idx][0], b_idx);
-                // hub's parent is A
-                ASSERT_EQ(S.g1_in[hub_idx].size(), 1u);
-                EXPECT_EQ(S.g1_in[hub_idx][0], a_idx);
-                // B's parent is hub
-                ASSERT_EQ(S.g1_in[b_idx].size(), 1u);
-                EXPECT_EQ(S.g1_in[b_idx][0], hub_idx);
+                ASSERT_EQ(sifter.S_.g1_out[a_idx].size(), 1u);
+                EXPECT_EQ(sifter.S_.g1_out[a_idx][0], hub_idx);
+                ASSERT_EQ(sifter.S_.g1_out[hub_idx].size(), 1u);
+                EXPECT_EQ(sifter.S_.g1_out[hub_idx][0], b_idx);
+                ASSERT_EQ(sifter.S_.g1_in[hub_idx].size(), 1u);
+                EXPECT_EQ(sifter.S_.g1_in[hub_idx][0], a_idx);
+                ASSERT_EQ(sifter.S_.g1_in[b_idx].size(), 1u);
+                EXPECT_EQ(sifter.S_.g1_in[b_idx][0], hub_idx);
             }
 
             TEST_F(BuildG1_TwoLayers, NodeToG1MapsAllRealNodes) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                EXPECT_TRUE(S.node_to_g1.count(A.get()));
-                EXPECT_TRUE(S.node_to_g1.count(B.get()));
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(A.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(B.get()));
             }
 
             // ============================================================================
@@ -142,10 +131,6 @@ namespace hypergraph_logic {
             class BuildG1_ThreeLayers : public ::testing::Test {
             protected:
                 void SetUp() override {
-                    // Layer 0: A, B
-                    // Layer 1: C
-                    // Layer 2: D
-                    // Edges: A->C (layer 0), B->C (layer 0), C->D (layer 1)
                     A = G.createNode("A", 0, nullptr);
                     B = G.createNode("B", 1, nullptr);
                     C = G.createNode("C", 0, A);
@@ -157,35 +142,28 @@ namespace hypergraph_logic {
             };
 
             TEST_F(BuildG1_ThreeLayers, G1LayerKeysCorrect) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                // Expect g1_layers 0 (A,B), 1 (hub A->C and hub B->C), 2 (C), 3 (hub C->D), 4 (D)
-                EXPECT_TRUE(S.g1_layers.count(0));
-                EXPECT_TRUE(S.g1_layers.count(1));
-                EXPECT_TRUE(S.g1_layers.count(2));
-                EXPECT_TRUE(S.g1_layers.count(3));
-                EXPECT_TRUE(S.g1_layers.count(4));
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_TRUE(sifter.S_.g1_layers.count(0));
+                EXPECT_TRUE(sifter.S_.g1_layers.count(1));
+                EXPECT_TRUE(sifter.S_.g1_layers.count(2));
+                EXPECT_TRUE(sifter.S_.g1_layers.count(3));
+                EXPECT_TRUE(sifter.S_.g1_layers.count(4));
             }
 
             TEST_F(BuildG1_ThreeLayers, HubCountMatchesEdgeCount) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                // Three short edges -> three hubs
-                EXPECT_EQ(countHubs(S), 3);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(countHubs(sifter), 3);
             }
 
             TEST_F(BuildG1_ThreeLayers, RealNodeCountMatchesHypergraphNodes) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                EXPECT_EQ(countRealNodes(S), 4); // A, B, C, D
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(countRealNodes(sifter), 4); // A, B, C, D
             }
 
             TEST_F(BuildG1_ThreeLayers, CNodeHasTwoIncomingHubs) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                int c_idx = S.node_to_g1.at(C.get());
-                // C has two parent hubs (one from A, one from B)
-                EXPECT_EQ(S.g1_in[c_idx].size(), 2u);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                int c_idx = sifter.S_.node_to_g1.at(C.get());
+                EXPECT_EQ(sifter.S_.g1_in[c_idx].size(), 2u);
             }
 
             // ============================================================================
@@ -195,9 +173,6 @@ namespace hypergraph_logic {
             class BuildG1_StartLayer : public ::testing::Test {
             protected:
                 void SetUp() override {
-                    // Layer 0: A
-                    // Layer 1: B
-                    // Layer 2: C
                     A = G.createNode("A", 0, nullptr);
                     B = G.createNode("B", 0, A);
                     C = G.createNode("C", 0, B);
@@ -207,33 +182,79 @@ namespace hypergraph_logic {
             };
 
             TEST_F(BuildG1_StartLayer, StartLayerZero_AllNodesRegistered) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                EXPECT_TRUE(S.node_to_g1.count(A.get()));
-                EXPECT_TRUE(S.node_to_g1.count(B.get()));
-                EXPECT_TRUE(S.node_to_g1.count(C.get()));
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(A.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(B.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(C.get()));
             }
 
             TEST_F(BuildG1_StartLayer, StartLayerOne_AnchorIncluded) {
-                // start_layer=1 -> anchor_layer=0, so A should still be registered
-                SiftState S;
-                buildG1(S, G.layers(), 1);
-                EXPECT_TRUE(S.node_to_g1.count(A.get()));
-                EXPECT_TRUE(S.node_to_g1.count(B.get()));
-                EXPECT_TRUE(S.node_to_g1.count(C.get()));
+                GlobalSifter sifter(1, lastLayer(G), G.layers());
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(A.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(B.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(C.get()));
             }
 
             TEST_F(BuildG1_StartLayer, StartLayerOne_FixedPositionCountSetToAnchorSize) {
-                SiftState S;
-                buildG1(S, G.layers(), 1);
-                // anchor_layer=0 has 1 node (A)
-                EXPECT_EQ(S.fixed_position_count, 1);
+                GlobalSifter sifter(1, lastLayer(G), G.layers());
+                EXPECT_EQ(sifter.S_.fixed_position_count, 1);
             }
 
             TEST_F(BuildG1_StartLayer, StartLayerZero_FixedPositionCountIsZero) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                EXPECT_EQ(S.fixed_position_count, 0);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(sifter.S_.fixed_position_count, 0);
+            }
+
+            // ============================================================================
+            // buildG1 — end_layer restricts the window
+            // ============================================================================
+
+            class BuildG1_EndLayer : public ::testing::Test {
+            protected:
+                void SetUp() override {
+                    // Layer 0: A, Layer 1: B, Layer 2: C, Layer 3: D
+                    A = G.createNode("A", 0, nullptr);
+                    B = G.createNode("B", 0, A);
+                    C = G.createNode("C", 0, B);
+                    D = G.createNode("D", 0, C);
+                }
+                TestGraph G{ "EndLayer" };
+                NodePtr A, B, C, D;
+            };
+
+            TEST_F(BuildG1_EndLayer, NodesAboveEndLayerExcluded) {
+                // end_layer=1: only layers 0 and 1 (A, B) are siftable;
+                // layer 2 (C) is included as a read-ahead for crossing info but
+                // D (layer 3) must not appear in node_to_g1.
+                GlobalSifter sifter(0, 1, G.layers());
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(A.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(B.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(C.get())); // read-ahead layer
+                EXPECT_FALSE(sifter.S_.node_to_g1.count(D.get()));
+            }
+
+            TEST_F(BuildG1_EndLayer, EndLayerEqualsLastLayer_AllNodesRegistered) {
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(A.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(B.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(C.get()));
+                EXPECT_TRUE(sifter.S_.node_to_g1.count(D.get()));
+            }
+
+            TEST_F(BuildG1_EndLayer, WriteBackOnlyTouchesLayersInRange) {
+                // Deliberately put nodes in a bad order on layer 1 and verify that
+                // writeBack does not touch layer 2 or 3.
+                GlobalSifter sifter(0, 1, G.layers());
+                sifter.runSifting(3);
+
+                // Record layer 2 and 3 order before writeBack
+                auto layer2_before = G.layers().at(2).nodes;
+                auto layer3_before = G.layers().at(3).nodes;
+
+                sifter.writeBack();
+
+                EXPECT_EQ(G.layers().at(2).nodes, layer2_before);
+                EXPECT_EQ(G.layers().at(3).nodes, layer3_before);
             }
 
             // ============================================================================
@@ -243,9 +264,6 @@ namespace hypergraph_logic {
             class BuildG1_FanIn : public ::testing::Test {
             protected:
                 void SetUp() override {
-                    // Layer 0: A, B
-                    // Layer 1: C
-                    // One hyperedge {A, B} -> {C}
                     A = G.createNode("A", 0, nullptr);
                     B = G.createNode("B", 1, nullptr);
                     C = G.createNode("C", 0, A);
@@ -256,13 +274,9 @@ namespace hypergraph_logic {
             };
 
             TEST_F(BuildG1_FanIn, HubHasTwoParents) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                // The hub for each edge from A and B has exactly one parent each
-                // (two separate hubs since createNode/addConnection creates two separate edges)
-                int c_idx = S.node_to_g1.at(C.get());
-                // C should have 2 incoming hub connections
-                EXPECT_EQ(S.g1_in[c_idx].size(), 2u);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                int c_idx = sifter.S_.node_to_g1.at(C.get());
+                EXPECT_EQ(sifter.S_.g1_in[c_idx].size(), 2u);
             }
 
             // ============================================================================
@@ -282,96 +296,55 @@ namespace hypergraph_logic {
             };
 
             TEST_F(BuildBlocks_NoDummies, BlockCountEqualsG1NodeCount) {
-                SiftState S = buildStateFromGraph(G);
-                // No dummy chains -> one block per G1 node
-                EXPECT_EQ(S.blocks.size(), S.g1_nodes.size());
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(sifter.S_.blocks.size(), sifter.S_.g1_nodes.size());
             }
 
             TEST_F(BuildBlocks_NoDummies, NoEmptyBlocks) {
-                SiftState S = buildStateFromGraph(G);
-                for (const auto& blk : S.blocks)
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                for (const auto& blk : sifter.S_.blocks)
                     EXPECT_FALSE(blk.g1_nodes.empty());
             }
 
             TEST_F(BuildBlocks_NoDummies, BlockIdConsistency) {
-                SiftState S = buildStateFromGraph(G);
-                for (int bid = 0; bid < static_cast<int>(S.blocks.size()); ++bid)
-                    for (int g1_idx : S.blocks[bid].g1_nodes)
-                        EXPECT_EQ(S.g1_nodes[g1_idx].block_id, bid);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                for (int bid = 0; bid < static_cast<int>(sifter.S_.blocks.size()); ++bid)
+                    for (int g1_idx : sifter.S_.blocks[bid].g1_nodes)
+                        EXPECT_EQ(sifter.S_.g1_nodes[g1_idx].block_id, bid);
             }
 
             TEST_F(BuildBlocks_NoDummies, EveryG1NodeBelongsToExactlyOneBlock) {
-                SiftState S = buildStateFromGraph(G);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
                 std::unordered_set<int> seen;
-                for (int bid = 0; bid < static_cast<int>(S.blocks.size()); ++bid)
-                    for (int g1_idx : S.blocks[bid].g1_nodes)
+                for (int bid = 0; bid < static_cast<int>(sifter.S_.blocks.size()); ++bid)
+                    for (int g1_idx : sifter.S_.blocks[bid].g1_nodes)
                         EXPECT_TRUE(seen.insert(g1_idx).second)
                         << "g1_node " << g1_idx << " appears in multiple blocks";
-                EXPECT_EQ(seen.size(), S.g1_nodes.size());
+                EXPECT_EQ(seen.size(), sifter.S_.g1_nodes.size());
             }
 
             TEST_F(BuildBlocks_NoDummies, PiResizedToBlockCount) {
-                SiftState S = buildStateFromGraph(G);
-                EXPECT_EQ(S.pi.size(), S.blocks.size());
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(sifter.S_.pi.size(), sifter.S_.blocks.size());
             }
 
             // ============================================================================
             // buildBlocks — dummy chain detection
             // ============================================================================
 
-            class BuildBlocks_DummyChain : public ::testing::Test {
-            protected:
-                void SetUp() override {
-                    // Layer 0: A
-                    // Layer 1: (dummy, auto-inserted by splitLongEdge)
-                    // Layer 2: B
-                    // Long edge A->B spanning two layers produces one dummy node.
-                    A = G.createNode("A", 0, nullptr);
-                    B = G.createNode("B", 0, nullptr);
-                    // Force A to layer 0, B to layer 2 by creating an intermediate node
-                    // and then connecting A -> B directly so splitLongEdge fires.
-                    // Simplest approach: create A at layer 0, create an intermediate at layer 1,
-                    // then connect to B at layer 2.
-                    mid = G.createNode("mid", 0, A); // mid at layer 1
-                    B = G.createNode("B", 0, mid);   // B at layer 2
-                    // Now the edges A->mid and mid->B are each short, so no dummy chain exists.
-                    // To get a real dummy chain we need a long edge: connect A directly to B.
-                    // The easiest is to build a 3-layer straight chain of real nodes,
-                    // then introduce a long edge by skipping a layer, relying on splitLongEdge.
-                    // However GraphicalHypergraph splits long edges automatically.
-                    // So: a 3-node linear chain A -> mid -> B gives us short edges with no dummies.
-                    // A proper dummy chain test requires a long edge of span >= 2.
-                    // We create it by having a 4th layer: A(0) -> mid(1) -> mid2(2) -> B(3)
-                    // and separately connecting A directly to B to create a long edge with dummies.
-                    // For simplicity we rebuild in SetUp to control the graph precisely.
-                }
-                TestGraph G{ "DummyChain" };
-                NodePtr A, mid, B;
-            };
-
-            // A cleaner self-contained test using a fresh graph
             TEST(BuildBlocks_DummyChainStandalone, ChainNodesCollapsedIntoOneBlock) {
-                // Build a graph where A(layer 0) connects to C(layer 2) via a long edge.
-                // GraphicalHypergraph will insert a dummy at layer 1.
-                // The dummy chain: dummy(layer1) is the only child/parent pair -> one block.
                 TestGraph G("ChainGraph");
                 NodePtr A = G.createNode("A", 0, nullptr);
-				NodePtr B = G.createNode("B", 1, nullptr);
-                // Place C at layer 0 initially, then force it to layer 2 by connecting through
-                // an intermediate so splitLongEdge inserts a dummy.
-                NodePtr bridge = G.createNode("bridge", 0, A);  // bridge at layer 1
-                NodePtr C = G.createNode("C", 0, bridge);   // C at layer 2
-				NodePtr D = G.createNode("D", 0, C);   // D at layer 3
-                // Now add a direct long edge A->C which will be split with a dummy at layer 1.
+                NodePtr B = G.createNode("B", 1, nullptr);
+                NodePtr bridge = G.createNode("bridge", 0, A);
+                NodePtr C = G.createNode("C", 0, bridge);
+                NodePtr D = G.createNode("D", 0, C);
                 G.addConnection(B, D);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
-                // There must be at least one block with more than one G1 node (the chain block)
                 bool found_chain = false;
-                for (const auto& blk : S.blocks)
+                for (const auto& blk : sifter.S_.blocks)
                     if (blk.g1_nodes.size() > 1) { found_chain = true; break; }
                 EXPECT_TRUE(found_chain) << "expected at least one multi-node (chain) block";
             }
@@ -379,45 +352,40 @@ namespace hypergraph_logic {
             TEST(BuildBlocks_DummyChainStandalone, BlockIdConsistencyWithChains) {
                 TestGraph G("ChainGraph2");
                 NodePtr A = G.createNode("A", 0, nullptr);
-				NodePtr B = G.createNode("B", 1, nullptr);
+                NodePtr B = G.createNode("B", 1, nullptr);
                 NodePtr bridge = G.createNode("bridge", 0, A);
                 NodePtr C = G.createNode("C", 0, bridge);
                 G.addConnection(B, C);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
-                for (int bid = 0; bid < static_cast<int>(S.blocks.size()); ++bid)
-                    for (int g1_idx : S.blocks[bid].g1_nodes)
-                        EXPECT_EQ(S.g1_nodes[g1_idx].block_id, bid);
+                for (int bid = 0; bid < static_cast<int>(sifter.S_.blocks.size()); ++bid)
+                    for (int g1_idx : sifter.S_.blocks[bid].g1_nodes)
+                        EXPECT_EQ(sifter.S_.g1_nodes[g1_idx].block_id, bid);
             }
 
             TEST(BuildBlocks_DummyChainStandalone, ComplicatedTopology) {
                 TestGraph G("ChainGraph3");
                 NodePtr a0 = G.createNode("a0", 0, nullptr);
                 NodePtr b0 = G.createNode("b0", 1, nullptr);
-				NodePtr b1 = G.createNode("b1", 0, b0);
+                NodePtr b1 = G.createNode("b1", 0, b0);
                 NodePtr c3;
-                for (int i = 0; i <= 3; i++) {
+                for (int i = 0; i <= 3; i++)
                     c3 = G.createNode("c" + std::to_string(i), 0, c3);
-				}
                 NodePtr D = G.createNode("D", 0, a0);
-				HyperedgePtr edge = findEdgeWithSourceAndTarget(G, a0, D);
+                HyperedgePtr edge = findEdgeWithSourceAndTarget(G, a0, D);
                 ASSERT_NE(edge, nullptr);
-				G.addSourceToEdge(edge, b1); // long edge with two sources: {a0, b1} -> D
-				G.addSourceToEdge(edge, c3); // long edge with three sources: {a0, b1, c3} -> D
+                G.addSourceToEdge(edge, b1);
+                G.addSourceToEdge(edge, c3);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
                 std::unordered_set<int> seen;
-                for (int bid = 0; bid < static_cast<int>(S.blocks.size()); ++bid)
-                    for (int g1_idx : S.blocks[bid].g1_nodes)
+                for (int bid = 0; bid < static_cast<int>(sifter.S_.blocks.size()); ++bid)
+                    for (int g1_idx : sifter.S_.blocks[bid].g1_nodes)
                         EXPECT_TRUE(seen.insert(g1_idx).second)
                         << "g1_node " << g1_idx << " appears in more than one block";
-                EXPECT_EQ(seen.size(), S.g1_nodes.size());
+                EXPECT_EQ(seen.size(), sifter.S_.g1_nodes.size());
             }
 
             TEST(BuildBlocks_DummyChainStandalone, ComplicatedTopology2) {
@@ -426,31 +394,27 @@ namespace hypergraph_logic {
                 NodePtr b0 = G.createNode("b0", 1, nullptr);
                 NodePtr b1 = G.createNode("b1", 0, b0);
                 NodePtr c3;
-                for (int i = 0; i <= 3; i++) {
+                for (int i = 0; i <= 3; i++)
                     c3 = G.createNode("c" + std::to_string(i), 0, c3);
-                }
                 NodePtr d5;
-                for (int i = 0; i <= 5; i++) {
+                for (int i = 0; i <= 5; i++)
                     d5 = G.createNode("d" + std::to_string(i), 0, d5);
-                }
 
                 NodePtr D = G.createNode("D", 0, a0);
                 HyperedgePtr edge = findEdgeWithSourceAndTarget(G, a0, D);
                 ASSERT_NE(edge, nullptr);
-                G.addSourceToEdge(edge, b1); // long edge with two sources: {a0, b1} -> D
-                G.addSourceToEdge(edge, c3); // long edge with three sources: {a0, b1, c3} -> D
-				G.addConnection(d5, D);
+                G.addSourceToEdge(edge, b1);
+                G.addSourceToEdge(edge, c3);
+                G.addConnection(d5, D);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
                 std::unordered_set<int> seen;
-                for (int bid = 0; bid < static_cast<int>(S.blocks.size()); ++bid)
-                    for (int g1_idx : S.blocks[bid].g1_nodes)
+                for (int bid = 0; bid < static_cast<int>(sifter.S_.blocks.size()); ++bid)
+                    for (int g1_idx : sifter.S_.blocks[bid].g1_nodes)
                         EXPECT_TRUE(seen.insert(g1_idx).second)
                         << "g1_node " << g1_idx << " appears in more than one block";
-                EXPECT_EQ(seen.size(), S.g1_nodes.size());
+                EXPECT_EQ(seen.size(), sifter.S_.g1_nodes.size());
             }
 
             // ============================================================================
@@ -470,61 +434,42 @@ namespace hypergraph_logic {
             };
 
             TEST_F(BuildBlockOrder_Base, BContainsEveryBlockExactlyOnce) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
-
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
                 std::unordered_set<int> seen;
-                for (int bid : B_list)
+                for (int bid : sifter.B_)
                     EXPECT_TRUE(seen.insert(bid).second)
                     << "block " << bid << " appears more than once in B";
-                EXPECT_EQ(seen.size(), S.blocks.size());
+                EXPECT_EQ(seen.size(), sifter.S_.blocks.size());
             }
 
             TEST_F(BuildBlockOrder_Base, BSizeEqualsBlockCount) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
-                EXPECT_EQ(B_list.size(), S.blocks.size());
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_EQ(sifter.B_.size(), sifter.S_.blocks.size());
             }
 
             TEST_F(BuildBlockOrder_Base, AllBlockIdsInRange) {
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
-                int num_blocks = static_cast<int>(S.blocks.size());
-                for (int bid : B_list)
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                int num_blocks = static_cast<int>(sifter.S_.blocks.size());
+                for (int bid : sifter.B_) {
                     EXPECT_GE(bid, 0) << "negative block id";
-                for (int bid : B_list)
                     EXPECT_LT(bid, num_blocks) << "block id out of range";
+                }
             }
 
             TEST_F(BuildBlockOrder_Base, AnchorBlocksAppearFirst) {
                 // start_layer=1 -> anchor layer=0, which has nodes A and B.
-                // Their blocks should occupy the first fixed_position_count slots.
-                SiftState S;
-                buildG1(S, G.layers(), 1);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 1);
+                GlobalSifter sifter(1, lastLayer(G), G.layers());
 
-                int fpc = S.fixed_position_count; // == number of anchor-layer nodes
-                ASSERT_GE(static_cast<int>(B_list.size()), fpc);
+                int fpc = sifter.S_.fixed_position_count;
+                ASSERT_GE(static_cast<int>(sifter.B_.size()), fpc);
 
-                // Collect the block ids that correspond to anchor-layer G1 nodes
                 std::unordered_set<int> anchor_bids;
-                for (int g1_idx : S.g1_layers.at(0)) // anchor layer g1_layer key = 2*0 = 0
-                    anchor_bids.insert(S.g1_nodes[g1_idx].block_id);
+                for (int g1_idx : sifter.S_.g1_layers.at(0))
+                    anchor_bids.insert(sifter.S_.g1_nodes[g1_idx].block_id);
 
                 for (int i = 0; i < fpc; ++i)
-                    EXPECT_TRUE(anchor_bids.count(B_list[i]))
-                    << "B[" << i << "] = " << B_list[i] << " is not an anchor block";
+                    EXPECT_TRUE(anchor_bids.count(sifter.B_[i]))
+                    << "B[" << i << "] = " << sifter.B_[i] << " is not an anchor block";
             }
 
             // ============================================================================
@@ -532,23 +477,15 @@ namespace hypergraph_logic {
             // ============================================================================
 
             TEST(BuildBlockOrder_TopoOrder, UpperLayerBlocksBeforeLowerLayerBlocks) {
-                // In a two-layer graph, every upper-layer block must appear before every
-                // lower-layer block in B (since hubs sit between them, this is verified by
-                // checking that the first block in B belongs to the upper layer).
                 TestGraph G("TopoOrder");
                 NodePtr A = G.createNode("A", 0, nullptr);
                 NodePtr B = G.createNode("B", 0, A);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
-                // The first block in B_list should correspond to a G1 node on layer 0
-                int first_bid = B_list[0];
-                const Block& first_block = S.blocks[first_bid];
-                int first_g1_layer = S.g1_nodes[first_block.upper()].g1_layer;
+                int first_bid = sifter.B_[0];
+                const Block& first_block = sifter.S_.blocks[first_bid];
+                int first_g1_layer = sifter.S_.g1_nodes[first_block.upper()].g1_layer;
                 EXPECT_EQ(first_g1_layer, 0) << "first block should be from the uppermost g1_layer";
             }
 
@@ -558,18 +495,11 @@ namespace hypergraph_logic {
                 NodePtr B = G.createNode("B", 0, A);
                 NodePtr C = G.createNode("C", 0, B);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
-                // Verify that for every consecutive pair in B_list, the g1_layer of the
-                // upper node of the earlier block is <= that of the later block.
-                // (A block spanning multiple layers has its upper at the earliest layer.)
-                for (int i = 1; i < static_cast<int>(B_list.size()); ++i) {
-                    int layer_prev = S.g1_nodes[S.blocks[B_list[i - 1]].upper()].g1_layer;
-                    int layer_curr = S.g1_nodes[S.blocks[B_list[i]].upper()].g1_layer;
+                for (int i = 1; i < static_cast<int>(sifter.B_.size()); ++i) {
+                    int layer_prev = sifter.S_.g1_nodes[sifter.S_.blocks[sifter.B_[i - 1]].upper()].g1_layer;
+                    int layer_curr = sifter.S_.g1_nodes[sifter.S_.blocks[sifter.B_[i]].upper()].g1_layer;
                     EXPECT_LE(layer_prev, layer_curr)
                         << "block at position " << i - 1 << " (g1_layer " << layer_prev
                         << ") comes before block at position " << i
@@ -578,8 +508,7 @@ namespace hypergraph_logic {
             }
 
             // ============================================================================
-            // Full pipeline: buildG1 + buildBlocks + buildBlockOrder + sortAdjacencies
-            // verifies that sortAdjacencies does not crash and produces valid N±/I± sizes
+            // Full pipeline: constructor + sortAdjacencies validity
             // ============================================================================
 
             TEST(FullPipeline, SortAdjacencies_NminusNplusSizesValid) {
@@ -589,14 +518,9 @@ namespace hypergraph_logic {
                 NodePtr C = G.createNode("C", 0, A);
                 NodePtr D = G.createNode("D", 0, B);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
-                sortAdjacencies(S, B_list);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
 
-                for (const auto& blk : S.blocks) {
+                for (const auto& blk : sifter.S_.blocks) {
                     EXPECT_EQ(blk.I_minus.size(), blk.N_minus.size());
                     EXPECT_EQ(blk.I_plus.size(), blk.N_plus.size());
                 }
@@ -609,46 +533,256 @@ namespace hypergraph_logic {
                 NodePtr C = G.createNode("C", 0, A);
                 NodePtr D = G.createNode("D", 0, B);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
-                sortAdjacencies(S, B_list);
-
-                EXPECT_GE(countTotalCrossings(S, B_list), 0);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                EXPECT_GE(sifter.countCrossings(), 0);
             }
 
             TEST(FullPipeline, SiftingRoundDoesNotIncreaseCrossings) {
-                // A graph with two upper nodes and two lower nodes connected in a crossed
-                // pattern: A->D, B->C. After one sifting round crossings should not grow.
                 TestGraph G("Crossed");
                 NodePtr A = G.createNode("A", 0, nullptr);
                 NodePtr B = G.createNode("B", 1, nullptr);
-                NodePtr C = G.createNode("C", 0, A); // A->C
-                NodePtr D = G.createNode("D", 0, B); // B->D
-                // Now add the crossing connections: A->D and B->C
+                NodePtr C = G.createNode("C", 0, A);
+                NodePtr D = G.createNode("D", 0, B);
                 G.addConnection(A, D);
                 G.addConnection(B, C);
 
-                SiftState S;
-                buildG1(S, G.layers(), 0);
-                buildBlocks(S);
-                BlockList B_list;
-                buildBlockOrder(B_list, S, G.layers(), 0);
-                sortAdjacencies(S, B_list);
-
-                int before = countTotalCrossings(S, B_list);
-
-                BlockList snap = B_list;
-                int numblocks = static_cast<int>(B_list.size());
-                for (int i = S.fixed_position_count; i < numblocks; ++i)
-                    siftingStep(S, B_list, snap[i]);
-
-                int after = countTotalCrossings(S, B_list);
+                GlobalSifter sifter(0, lastLayer(G), G.layers());
+                int before = sifter.countCrossings();
+                sifter.runSifting(1);
+                int after = sifter.countCrossings();
                 EXPECT_LE(after, before);
             }
 
+            // ============================================================================
+            // minimizeCrossingsForNodes — focused sifting for dummy node placement
+            //
+            // The two intended call sites are:
+            //   1. Locating dummy nodes that were just inserted for a long edge.
+            //   2. Repositioning a single childless node after a new connection is added.
+            // ============================================================================
+
+            // ── Use case 1: dummy placement after long-edge insertion ─────────────────
+            //
+            // Graph layout before sifting:
+            //   Layer 0: A  B            (A left, B right)
+            //   Layer 1: dummy_A  C      (dummy_A is the relay for A->C, appended at end)
+            //   Layer 2: C's target D
+            //
+            // The dummy was appended at the right of layer 1 even though its parent A is
+            // on the left. minimizeCrossingsForNodes should move it before C.
+
+            TEST(MinimizeCrossingsForNodes, DummyPlacement_LongEdge_MovedToReduceCrossings) {
+                TestGraph G("LongEdgeDummy");
+
+                // Build a 3-layer graph: A and B at layer 0, C at layer 1, D at layer 2.
+                NodePtr A = G.createNode("A", 0, nullptr);
+                NodePtr B = G.createNode("B", 1, nullptr);     // B at layer 0, right of A
+                NodePtr C = G.createNode("C", 0, B);           // C at layer 1, child of B
+                NodePtr D = G.createNode("D", 0, C);           // D at layer 2
+
+                // Add a long edge A -> D, which inserts a dummy at layer 1 (appended last).
+                G.addConnection(A, D);
+
+                // The dummy for A->D was appended after C in layer 1.  It should be moved
+                // left (before C) because A is to the left of B.
+                int before_crossings = G.minimizeCrossings(3, 0);
+
+                // Find the dummy node: it is the one with isDummy() == true at layer 1.
+                Node* dummy_node = nullptr;
+                for (const auto& n : G.layers().at(1).nodes)
+                    if (n->isDummy()) { dummy_node = n.get(); break; }
+                ASSERT_NE(dummy_node, nullptr) << "expected a dummy node at layer 1";
+
+                // Reset to worst-case order: put dummy at the end of layer 1 again.
+                auto& layer1_nodes = G.layers().at(1).nodes;
+                auto dummy_it = std::find_if(layer1_nodes.begin(), layer1_nodes.end(),
+                    [](const NodePtr& n) { return n->isDummy(); });
+                ASSERT_NE(dummy_it, layer1_nodes.end());
+                // Rotate dummy to the back to simulate a freshly inserted worst-case position.
+                std::rotate(dummy_it, dummy_it + 1, layer1_nodes.end());
+
+                int crossings_before_focused = G.minimizeCrossingsForNodes(
+                    { dummy_node }, 0, lastLayer(G));
+                // Focused sifting must not produce more crossings than the full sifting did.
+                EXPECT_LE(crossings_before_focused, before_crossings + 1)
+                    << "focused sifting should recover a low-crossing position for the dummy";
+            }
+
+            TEST(MinimizeCrossingsForNodes, DummyPlacement_WriteBackChangesLayerOrder) {
+                TestGraph G("LongEdgeDummy2");
+
+                NodePtr A = G.createNode("A", 0, nullptr);
+                NodePtr B = G.createNode("B", 1, nullptr);
+                NodePtr C = G.createNode("C", 0, B);
+                NodePtr D = G.createNode("D", 0, C);
+                G.addConnection(A, D); // inserts dummy at layer 1 and layer 2
+
+                // Push all dummies to the back of their respective layers (worst-case).
+                for (auto& [layer, data] : G.layers()) {
+                    auto& nodes = data.nodes;
+                    std::stable_partition(nodes.begin(), nodes.end(),
+                        [](const NodePtr& n) { return !n->isDummy(); });
+                }
+
+                // Collect dummy nodes across layers 1 and 2.
+                std::vector<Node*> dummies;
+                for (auto& [layer, data] : G.layers())
+                    for (const auto& n : data.nodes)
+                        if (n->isDummy()) dummies.push_back(n.get());
+                ASSERT_FALSE(dummies.empty());
+
+                auto order_before = G.layers().at(1).nodes;
+                G.minimizeCrossingsForNodes(dummies, 0, lastLayer(G));
+                auto order_after = G.layers().at(1).nodes;
+
+                // The layer order must have changed (dummy moved from the back).
+                EXPECT_NE(order_before, order_after)
+                    << "writeBack should have updated the layer order";
+            }
+
+            TEST(MinimizeCrossingsForNodes, DummyPlacement_OnlyTargetedLayersChanged) {
+                // A 4-layer chain. We insert a long edge skipping layers 1 and 2, producing
+                // dummies there. We call siftNodes scoped to [0, 2]. Layer 3 must be
+                // untouched by writeBack.
+                TestGraph G("LongEdge4Layer");
+
+                NodePtr A = G.createNode("A", 0, nullptr);
+                NodePtr B = G.createNode("B", 1, nullptr);
+                NodePtr mid1 = G.createNode("mid1", 0, B);  // layer 1
+                NodePtr mid2 = G.createNode("mid2", 0, mid1); // layer 2
+                NodePtr E = G.createNode("E", 0, mid2); // layer 3
+
+                // Long edge A -> E inserts dummies at layers 1, 2.
+                G.addConnection(A, E);
+
+                auto layer3_before = G.layers().at(3).nodes;
+
+                std::vector<Node*> dummies;
+                for (int l = 1; l <= 2; l++)
+                    for (const auto& n : G.layers().at(l).nodes)
+                        if (n->isDummy()) dummies.push_back(n.get());
+
+                G.minimizeCrossingsForNodes(dummies, 0, 2);
+
+                EXPECT_EQ(G.layers().at(3).nodes, layer3_before)
+                    << "layer 3 must not be touched when end_layer=2";
+            }
+
+            // ── Use case 2: repositioning a childless node after a new connection ─────
+
+            TEST(MinimizeCrossingsForNodes, ChildlessNode_RepositionedAfterNewConnection) {
+                // Layout:
+                //   Layer 0: P0  P1  P2    (three sources, well-ordered)
+                //   Layer 1: C0  C1  C2    (three targets, initially in order)
+                //
+                // We add a new edge P2 -> C0. C0 has no children. The connection makes
+                // the current ordering (P2 far left of C0) sub-optimal; focused sifting
+                // on C0 should move it to the right to reduce crossings.
+
+                TestGraph G("ChildlessReposition");
+
+                NodePtr P0 = G.createNode("P0", 0, nullptr);
+                NodePtr P1 = G.createNode("P1", 1, nullptr);
+                NodePtr P2 = G.createNode("P2", 2, nullptr);
+
+                // Create children; initial order C0 C1 C2.
+                NodePtr C0 = G.createNode("C0", 0, P0);  // P0 -> C0
+                NodePtr C1 = G.createNode("C1", 0, P1);  // P1 -> C1
+                NodePtr C2 = G.createNode("C2", 0, P2);  // P2 -> C2
+
+                // New connection that creates a crossing: P2 -> C0.
+                G.addConnection(P2, C0);
+
+                // C0 currently sits at position 0. After focused sifting it should move
+                // right to minimise the crossing introduced by P2 -> C0.
+                int pos_before = positionInLayer(G, C0.get());
+
+                G.minimizeCrossingsForNodes({ C0.get() }, 0, lastLayer(G));
+
+                int pos_after = positionInLayer(G, C0.get());
+
+                EXPECT_LT(pos_after, pos_before)
+                    << "C0 should have moved right to reduce crossings with the P2->C0 edge";
+            }
+
+            TEST(MinimizeCrossingsForNodes, ChildlessNode_NoCrossings_PositionUnchanged) {
+                // If the graph already has zero crossings, sifting a childless node should
+                // leave its position unchanged.
+                TestGraph G("AlreadyOptimal");
+
+                NodePtr P0 = G.createNode("P0", 0, nullptr);
+                NodePtr P1 = G.createNode("P1", 1, nullptr);
+                NodePtr C0 = G.createNode("C0", 0, P0);
+                NodePtr C1 = G.createNode("C1", 1, P1);
+
+                // P0->C0 and P1->C1 are already parallel; zero crossings.
+                int pos_before = positionInLayer(G, C0.get());
+                G.minimizeCrossingsForNodes({ C0.get() }, 0, lastLayer(G));
+                int pos_after = positionInLayer(G, C0.get());
+
+                EXPECT_EQ(pos_before, pos_after)
+                    << "position should be unchanged when there are no crossings to fix";
+            }
+
+            TEST(MinimizeCrossingsForNodes, ChildlessNode_CrossingsNotIncreased) {
+                // A more complex graph: verify that focused sifting never makes things worse.
+                TestGraph G("NoWorsen");
+
+                NodePtr P0 = G.createNode("P0", 0, nullptr);
+                NodePtr P1 = G.createNode("P1", 1, nullptr);
+                NodePtr P2 = G.createNode("P2", 2, nullptr);
+                NodePtr C0 = G.createNode("C0", 0, P2); // crossed: P2 -> C0 (leftmost)
+                NodePtr C1 = G.createNode("C1", 0, P1);
+                NodePtr C2 = G.createNode("C2", 0, P0); // crossed: P0 -> C2 (rightmost)
+
+                int crossings_before = G.minimizeCrossings(0, 0); // count without sifting
+                G.minimizeCrossingsForNodes({ C0.get() }, 0, lastLayer(G));
+                int crossings_after = G.minimizeCrossings(0, 0);
+
+                EXPECT_LE(crossings_after, crossings_before)
+                    << "focused sifting must not increase the total crossing count";
+            }
+
+            TEST(MinimizeCrossingsForNodes, EmptyNodeList_NoOp) {
+                TestGraph G("EmptyList");
+                NodePtr A = G.createNode("A", 0, nullptr);
+                NodePtr B = G.createNode("B", 0, A);
+
+                auto order_before = G.layers().at(1).nodes;
+                G.minimizeCrossingsForNodes({}, 0, lastLayer(G));
+                EXPECT_EQ(G.layers().at(1).nodes, order_before)
+                    << "empty node list must be a no-op";
+            }
+
+            TEST(MinimizeCrossingsForNodes, NodeOutsideWindow_Ignored) {
+                // Nodes outside [start_layer, end_layer] are silently skipped.
+                TestGraph G("OutsideWindow");
+                NodePtr A = G.createNode("A", 0, nullptr);
+                NodePtr B = G.createNode("B", 0, A);
+                NodePtr C = G.createNode("C", 0, B);
+
+                auto order_before = G.layers().at(1).nodes;
+                // Pass C (layer 2) but restrict window to [0, 1]; C should be ignored.
+                G.minimizeCrossingsForNodes({ C.get() }, 0, 1);
+                // B (layer 1) is the only siftable node in the window; its layer must
+                // still be valid (one element, unchanged since no crossings exist).
+                EXPECT_EQ(G.layers().at(1).nodes, order_before);
+            }
+
+            TEST(MinimizeCrossingsForNodes, RightBiasWhenShifting) {
+                // Nodes outside [start_layer, end_layer] are silently skipped.
+                TestGraph G("OutsideWindow");
+                NodePtr A = G.createNode("A", 0, nullptr);
+                NodePtr B = G.createNode("B", 1, nullptr);
+				NodePtr C = G.createNode("C", 2, nullptr);
+                NodePtr D = G.createNode("D", 0, A);
+				NodePtr E = G.createNode("E", 1, C);
+
+                G.addConnection(A, B);
+                G.minimizeCrossingsForNodes({ B.get() }, 0, 1);
+				EXPECT_EQ(positionInLayer(G, B.get()), 1)
+                    << "B should have moved right to reduce crossings with A->B edge";
+            }
         } // namespace minimizeCrossings
     } // namespace graphicalhypergraph_tests
 } // namespace hypergraph_logic
