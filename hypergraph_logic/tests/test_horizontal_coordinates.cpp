@@ -15,6 +15,71 @@ namespace hypergraph_logic {
             using namespace bk_internal;
 
             // ============================================================================
+            // TestBrandesKopf
+            // ============================================================================
+
+            struct TestBrandesKopf : BrandesKopf {
+                explicit TestBrandesKopf(const std::map<int, LayerData>& layers)
+                    : BrandesKopf(layers) {
+                }
+
+                explicit TestBrandesKopf(G2 g) : BrandesKopf(dummyLayers_()) {
+                    g_ = std::move(g);
+                }
+
+                void               callMarkType1Conflicts() { markType1Conflicts(); }
+                BlockList          callVerticalAlignment(int vdir, int hdir) const
+                {
+                    return verticalAlignment(vdir, hdir);
+                }
+                static bool        callIsInnerSegment(const G2& g, int u, int v)
+                {
+                    return isInnerSegment(g, u, v);
+                }
+                static std::vector<double> callHorizontalCompaction(
+                    const G2& g, const BlockList& B, int vdir, int hdir)
+                {
+                    return horizontalCompaction(g, B, vdir, hdir);
+                }
+            private:
+                static const std::map<int, LayerData>& dummyLayers_() {
+                    static std::map<int, LayerData> d;
+                    return d;
+                }
+            };
+
+            // ── Free-function shims ───────────────────────────────────────────────────
+            // Each matches the original free-function signature exactly so no test body
+            // needs to change.
+
+            static G2 buildG2(const std::map<int, LayerData>& layers) {
+                return TestBrandesKopf(layers).g_;
+            }
+
+            static bool isInnerSegment(const G2& g, int u, int v) {
+                return TestBrandesKopf::callIsInnerSegment(g, u, v);
+            }
+
+            // markType1Conflicts mutates g, so we inject it, call the method, then
+            // copy the mutated g_ back out.
+            static void markType1Conflicts(G2& g) {
+                TestBrandesKopf t(g);
+                t.callMarkType1Conflicts();
+                g = std::move(t.g_);
+            }
+
+            static BlockList verticalAlignment(const G2& g, int vdir, int hdir) {
+                return TestBrandesKopf(g).callVerticalAlignment(vdir, hdir);
+            }
+
+            static std::vector<double> horizontalCompaction(
+                const G2& g, const BlockList& B, int vdir, int hdir)
+            {
+                return TestBrandesKopf::callHorizontalCompaction(g, B, vdir, hdir);
+            }
+
+
+            // ============================================================================
             // Key layout constants (defined in BrandesKopf.h):
             //   NODE_WIDTH       = 80.0   real node box width
             //   DUMMY_NODE_WIDTH =  0.0   bend-point dummy width
@@ -105,25 +170,25 @@ namespace hypergraph_logic {
             }
 
             static G2 buildPaperExampleG2() {
-				G2 g2;
+                G2 g2;
                 g2.num_layers = 5;
                 g2.nodes.assign(26, nullptr);
                 g2.layers.resize(5);
                 g2.layers[0] = { 0, 1 };
                 g2.layers[1] = { 2, 3, 4, 5, 6, 7, 8, 9 };
-				g2.layers[2] = { 10, 11, 12, 13, 14, 15 };
-				g2.layers[3] = { 16, 17, 18, 19, 20, 21, 22 };
-				g2.layers[4] = { 23, 24, 25 };
+                g2.layers[2] = { 10, 11, 12, 13, 14, 15 };
+                g2.layers[3] = { 16, 17, 18, 19, 20, 21, 22 };
+                g2.layers[4] = { 23, 24, 25 };
 
                 std::vector<std::pair<int, int>> edges = {
                     {0, 2 }, { 0, 7 }, { 0, 9 }, {1, 4}, { 1, 6},
                     { 3,11 }, { 4,11 }, { 5,11 }, { 6,12 }, { 7,13 }, { 8,11 },{8, 15},{9,11},{9,14},
                     {10,16 }, {10,17 }, {10,21 }, {12,19 }, {13,20 }, {14,21 }, {15, 18 }, {15, 22},
-					{16,23 }, {16,24 }, {17,24 }, {18, 23}, {19, 25}, {20, 25 }, {21, 25 }, {22, 25 }
-				};
+                    {16,23 }, {16,24 }, {17,24 }, {18, 23}, {19, 25}, {20, 25 }, {21, 25 }, {22, 25 }
+                };
 
-				g2.upper.assign(26, {});
-				g2.lower.assign(26, {});
+                g2.upper.assign(26, {});
+                g2.lower.assign(26, {});
                 for (const auto& [u, v] : edges) {
                     g2.upper[v].push_back(u);
                     g2.lower[u].push_back(v);
@@ -134,7 +199,7 @@ namespace hypergraph_logic {
                     0, 1, 2, 3, 4, 5,
                     0, 1, 2, 3, 4, 5, 6,
                     0, 1, 2
-				};
+                };
 
                 g2.marked.insert({ 8, 11 });
                 g2.marked.insert({ 9, 11 });
@@ -216,7 +281,7 @@ namespace hypergraph_logic {
                 NodePtr A = g.createNode("A", 0, nullptr);
                 NodePtr d1 = g.createNode("d1", 0, A);
                 NodePtr d2 = g.createNode("d2", 0, d1);
-				NodePtr d3 = g.createNode("d3", 0, d2);
+                NodePtr d3 = g.createNode("d3", 0, d2);
                 NodePtr B = g.createNode("B", 0, nullptr);
                 g.addConnection(B, d3);
 
@@ -394,11 +459,11 @@ namespace hypergraph_logic {
 
 
             TEST(Alignment, PaperExampleBlockAlignmentLeftDown) {
-				G2 g2 = buildPaperExampleG2();
-				BlockList B = verticalAlignment(g2, 1, 1);
-				ASSERT_EQ(B.root.size(), g2.nodes.size());
-				for (int i : {0, 1, 3, 5, 6, 7, 8, 9, 10, 15, 17, 18 })
-					ASSERT_EQ(B.root[i], i);
+                G2 g2 = buildPaperExampleG2();
+                BlockList B = verticalAlignment(g2, 1, 1);
+                ASSERT_EQ(B.root.size(), g2.nodes.size());
+                for (int i : {0, 1, 3, 5, 6, 7, 8, 9, 10, 15, 17, 18 })
+                    ASSERT_EQ(B.root[i], i);
 
                 ASSERT_EQ(B.root[2], 0);
                 ASSERT_EQ(B.root[4], 1);
@@ -442,7 +507,7 @@ namespace hypergraph_logic {
                 G2 g2 = buildPaperExampleG2();
                 BlockList B = verticalAlignment(g2, -1, 1);
                 ASSERT_EQ(B.root.size(), g2.nodes.size());
-                for (int i : {23, 24, 25, 18, 20,21,22,11, 2, 4, 5, 9, 1})
+                for (int i : {23, 24, 25, 18, 20, 21, 22, 11, 2, 4, 5, 9, 1})
                     ASSERT_EQ(B.root[i], i);
 
                 ASSERT_EQ(B.root[16], 23);
@@ -457,10 +522,10 @@ namespace hypergraph_logic {
                 ASSERT_EQ(B.root[6], 25);
                 ASSERT_EQ(B.root[7], 20);
                 ASSERT_EQ(B.root[8], 22);
-				ASSERT_EQ(B.root[0], 20);
+                ASSERT_EQ(B.root[0], 20);
             }
 
-			TEST(Alignment, PaperExampleBlockAlignmentRightUp) {
+            TEST(Alignment, PaperExampleBlockAlignmentRightUp) {
                 G2 g2 = buildPaperExampleG2();
                 BlockList B = verticalAlignment(g2, -1, -1);
                 ASSERT_EQ(B.root.size(), g2.nodes.size());
@@ -485,38 +550,38 @@ namespace hypergraph_logic {
             // horizontalCompaction
             // ============================================================================
             TEST(horizontalCompaction, PaperExampleBlockAlignmentLeftDown) {
-				double sep = NODE_WIDTH + MIN_BLOCK_SEP;
+                double sep = NODE_WIDTH + MIN_BLOCK_SEP;
                 G2 g2 = buildPaperExampleG2();
                 BlockList B = verticalAlignment(g2, 1, 1);
-				auto x = horizontalCompaction(g2, B, 1, 1);
-				ASSERT_EQ(x.size(), g2.nodes.size());
-				ASSERT_EQ(x[0], x[2]);
-				ASSERT_EQ(x[1], x[4]);
-				ASSERT_EQ(x[5], x[11]);
-				ASSERT_EQ(x[6], x[12]);
-				ASSERT_EQ(x[6], x[19]);
-				ASSERT_EQ(x[7], x[13]);
-				ASSERT_EQ(x[7], x[20]);
-				ASSERT_EQ(x[7], x[25]);
-				ASSERT_EQ(x[9], x[14]);
-				ASSERT_EQ(x[9], x[21]);
-				ASSERT_EQ(x[10], x[16]);
+                auto x = horizontalCompaction(g2, B, 1, 1);
+                ASSERT_EQ(x.size(), g2.nodes.size());
+                ASSERT_EQ(x[0], x[2]);
+                ASSERT_EQ(x[1], x[4]);
+                ASSERT_EQ(x[5], x[11]);
+                ASSERT_EQ(x[6], x[12]);
+                ASSERT_EQ(x[6], x[19]);
+                ASSERT_EQ(x[7], x[13]);
+                ASSERT_EQ(x[7], x[20]);
+                ASSERT_EQ(x[7], x[25]);
+                ASSERT_EQ(x[9], x[14]);
+                ASSERT_EQ(x[9], x[21]);
+                ASSERT_EQ(x[10], x[16]);
                 ASSERT_EQ(x[10], x[23]);
                 ASSERT_EQ(x[15], x[22]);
                 ASSERT_EQ(x[17], x[24]);
 
-				ASSERT_EQ(x[0], 0.0);
-                ASSERT_EQ(x[1], 2*sep);
-				ASSERT_EQ(x[3], sep);
-				ASSERT_EQ(x[5], 3 * sep);
-				ASSERT_EQ(x[6], 4 * sep);
+                ASSERT_EQ(x[0], 0.0);
+                ASSERT_EQ(x[1], 2 * sep);
+                ASSERT_EQ(x[3], sep);
+                ASSERT_EQ(x[5], 3 * sep);
+                ASSERT_EQ(x[6], 4 * sep);
                 ASSERT_EQ(x[7], 5 * sep);
-				ASSERT_EQ(x[8], 6 * sep);
-				ASSERT_EQ(x[9], 7 * sep);
-				ASSERT_EQ(x[10], sep);
-				ASSERT_EQ(x[15], 8 * sep);
-				ASSERT_EQ(x[17], 2 * sep);
-				ASSERT_EQ(x[18], 3 * sep);
+                ASSERT_EQ(x[8], 6 * sep);
+                ASSERT_EQ(x[9], 7 * sep);
+                ASSERT_EQ(x[10], sep);
+                ASSERT_EQ(x[15], 8 * sep);
+                ASSERT_EQ(x[17], 2 * sep);
+                ASSERT_EQ(x[18], 3 * sep);
             }
 
             TEST(horizontalCompaction, PaperExampleBlockAlignmentRightDown) {
@@ -541,13 +606,13 @@ namespace hypergraph_logic {
 
                 ASSERT_EQ(x[0], -sep);
                 ASSERT_EQ(x[1], 0.0);
-                ASSERT_EQ(x[8], -2*sep);
+                ASSERT_EQ(x[8], -2 * sep);
                 ASSERT_EQ(x[14], -3 * sep);
                 ASSERT_EQ(x[7], -4 * sep);
                 ASSERT_EQ(x[6], -5 * sep);
                 ASSERT_EQ(x[5], -6 * sep);
                 ASSERT_EQ(x[18], -6 * sep);
-                ASSERT_EQ(x[4], -7*sep);
+                ASSERT_EQ(x[4], -7 * sep);
                 ASSERT_EQ(x[10], -7 * sep);
                 ASSERT_EQ(x[3], -8 * sep);
                 ASSERT_EQ(x[16], -8 * sep);
@@ -581,7 +646,7 @@ namespace hypergraph_logic {
                 ASSERT_EQ(x[4], 3 * sep);
                 ASSERT_EQ(x[5], 4 * sep);
                 ASSERT_EQ(x[6], 5 * sep);
-                ASSERT_EQ(x[0], 6*sep);
+                ASSERT_EQ(x[0], 6 * sep);
                 ASSERT_EQ(x[1], 7 * sep);
                 ASSERT_EQ(x[14], 7 * sep);
                 ASSERT_EQ(x[8], 8 * sep);

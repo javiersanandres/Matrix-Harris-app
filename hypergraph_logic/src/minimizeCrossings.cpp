@@ -284,7 +284,7 @@ namespace sifting_internal {
 				if (visited.insert(block_id).second) B_.push_back(block_id);
 			}
 
-			upper_layer_order = std::move(lower_layer_order);
+			upper_layer_order = lower_layer_order;
 			incoming_edges = data.outgoing_edges;
 		}
 	}

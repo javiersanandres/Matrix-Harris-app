@@ -34,6 +34,50 @@ using namespace hypergraph_logic;
 
 static constexpr int SIFTING_ROUNDS = 10;
 
+// ── Sifting shims (GS_TEST subclass) ─────────────────────────────────────────
+
+struct VizSifter : sifting_internal::GlobalSifter {
+    VizSifter(sifting_internal::SiftState S, sifting_internal::BlockList B) {
+        S_ = std::move(S);
+        B_ = std::move(B);
+    }
+    void callSortAdjacencies() { sortAdjacencies(); }
+    int  callSiftingStep(int a) { return siftingStep(a); }
+    int  callCountCrossings() { return countCrossings(); }
+};
+
+static void sortAdjacencies(sifting_internal::SiftState& S,
+    sifting_internal::BlockList& B) {
+    VizSifter g(S, B); g.callSortAdjacencies(); S = g.S_; B = g.B_;
+}
+
+static int siftingStep(sifting_internal::SiftState& S,
+    sifting_internal::BlockList& B, int a) {
+    VizSifter g(S, B); int r = g.callSiftingStep(a); S = g.S_; B = g.B_; return r;
+}
+
+static int countTotalCrossings(sifting_internal::SiftState& S,
+    sifting_internal::BlockList& B) {
+    VizSifter g(S, B); int r = g.callCountCrossings(); S = g.S_; B = g.B_; return r;
+}
+
+// ── BK shim ───────────────────────────────────────────────────────────────────
+
+struct VizBK : bk_internal::BrandesKopf {
+    explicit VizBK(bk_internal::G2 g) : BrandesKopf(dummyLayers_()) {
+        g_ = std::move(g);
+    }
+    static const std::map<int, hypergraph_logic::LayerData>& dummyLayers_() {
+        static std::map<int, hypergraph_logic::LayerData> d;
+        return d;
+    }
+};
+
+static std::vector<double> assignHorizontalCoordinates(bk_internal::G2& g) {
+    return VizBK(g).run();
+}
+
+
 // ============================================================================
 // Parser
 // ============================================================================

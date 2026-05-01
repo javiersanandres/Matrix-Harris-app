@@ -14,4 +14,5 @@ target_include_directories(minimizeCrossingsResults
 target_compile_definitions(minimizeCrossingsResults
     PRIVATE
         INSTANCES_DIR="${CMAKE_SOURCE_DIR}/hypergraph_logic/src/implementationAnalysis/minimizeCrossings/AllInstances"
+        GS_TEST
 )

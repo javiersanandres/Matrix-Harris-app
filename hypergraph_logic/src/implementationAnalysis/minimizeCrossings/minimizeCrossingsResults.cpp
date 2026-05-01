@@ -50,6 +50,45 @@
 namespace fs = std::filesystem;
 using namespace sifting_internal;
 
+
+// ============================================================================
+// TestGlobalSifter
+//
+// Subclass of GlobalSifter using the GS_TEST no-op constructor so that S_ and
+// B_ can be injected directly. Exposes protected methods as free-function shims
+// matching the call signatures used throughout this file.
+// ============================================================================
+
+struct ResultsSifter : GlobalSifter {
+    ResultsSifter(SiftState S, BlockList B) {
+        S_ = std::move(S);
+        B_ = std::move(B);
+    }
+    void callSortAdjacencies() { sortAdjacencies(); }
+    int  callSiftingStep(int a) { return siftingStep(a); }
+    int  callCountCrossings() { return countCrossings(); }
+};
+
+static void sortAdjacencies(SiftState& S, BlockList& B) {
+    ResultsSifter g(S, B);
+    g.callSortAdjacencies();
+    S = g.S_; B = g.B_;
+}
+
+static int siftingStep(SiftState& S, BlockList& B, int a) {
+    ResultsSifter g(S, B);
+    int r = g.callSiftingStep(a);
+    S = g.S_; B = g.B_;
+    return r;
+}
+
+static int countTotalCrossings(SiftState& S, BlockList& B) {
+    ResultsSifter g(S, B);
+    int r = g.callCountCrossings();
+    S = g.S_; B = g.B_;
+    return r;
+}
+
 static constexpr int SIFTING_ROUNDS = 10;
 static constexpr int RANDOM_RUNS = 50;
 static constexpr int RNG_SEED = 42;
@@ -405,7 +444,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Global Sifting — Efficiency Measurements\n";
+    std::cout << "Global Sifting - Efficiency Measurements\n";
     std::cout << "Instances  : " << fs::absolute(dir) << "\n";
     std::cout << "Rounds     : " << SIFTING_ROUNDS << "\n";
     std::cout << "Random runs: " << RANDOM_RUNS << "  (seed " << RNG_SEED << ")\n\n";

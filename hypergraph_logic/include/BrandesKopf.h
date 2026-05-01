@@ -55,12 +55,13 @@ namespace bk_internal {
                 (static_cast<long long>(p.first) << 32) | static_cast<unsigned>(p.second));
         }
     };
+
     struct G2 {
         std::vector<Node*> nodes;              // nodes[id] = original Node*
         std::vector<std::vector<int>> upper;   // upper[id] = parent ids, sorted by pos
         std::vector<std::vector<int>> lower;   // lower[id] = child ids,  sorted by pos
         std::vector<std::vector<int>> layers;  // layers[layer_key] = ordered node ids
-		int num_layers = 0;                    // number of layers in the original hypergraph
+        int num_layers = 0;                    // number of layers in the original hypergraph
         std::vector<int> pos;                  // pos[id] = position within its layer
 
         // Segments marked as type-1 conflicted during preprocessing.
@@ -71,7 +72,6 @@ namespace bk_internal {
         bool isMarked(int u, int v) const { return marked.count({ u, v }) > 0; }
     };
 
-   
     // ── BlockList ─────────────────────────────────────────────────────────────────
     //
     // Output of verticalAlignment. A "block" in BK is a maximal set of nodes
@@ -92,98 +92,68 @@ namespace bk_internal {
         std::vector<double> block_widths;
     };
 
-    // ── buildG2 ──────────────────────────────────────────────────────────────────
+    // ── BrandesKopf ──────────────────────────────────────────────────────────────
     //
-    // Constructs G2 from the hypergraph layer map.
-    // For each short hyperedge e = (S, T) in layer k, inserts a binary edge
-    // (u, v) for every u in S, v in T. This "insertion" is purely conceptual:
-    // the connection is reflected in the upper and lower adjacency lists.
-    G2 buildG2(const std::map<int, LayerData>& layers);
+    // Encapsulates all state and algorithms required to run a full Brandes–Köpf
+    // horizontal coordinate assignment pass over a hypergraph layer map.
+    struct BrandesKopf {
+        explicit BrandesKopf(const std::map<int, LayerData>& layers);
 
-    // ── isInnerSegment ────────────────────────────────────────────────────────────
-    //
-    // Returns true iff the G2 edge u->v qualifies as an inner segment.
-    //
-    // In the paper an inner segment is a dummy->dummy edge. Because of the way
-    // our splitting works, a dummy node can have multiple real parents. We
-    // therefore define an inner segment more precisely:
-    //   (u -> v)  is an inner segment  iff
-    //       u is dummy  AND  v is dummy  AND
-    //       u has exactly one child (v)  AND
-    //       v has exactly one parent (u).
-    // This matches the paper's intent: such a chain forms the "spine" of a long
-    // edge and should be kept vertical.
-    bool isInnerSegment(const G2& g, int u, int v);
+        // Run the full BK pipeline (Algorithms 1–4) and return the final
+        // x-coordinate for every node, indexed by G2 id.
+        std::vector<double> run();
 
-    // ── markType1Conflicts ────────────────────────────────────────────────────────
-    //
-    // Algorithm 1 from the paper.
-    //
-    // Scans interior layers left-to-right and marks every non-inner segment that
-    // crosses an inner segment, inserting the pair (u, v) into g.marked.
-    // Marked segments are skipped during vertical alignment so that inner
-    // segments (the spines of long edges) are preferentially kept vertical.
-    void markType1Conflicts(G2& g);
+        // G2 is public so that the public entry point (assignCoordinates) can
+        // read g_.nodes to map G2 ids back to original Node pointers.
+        G2 g_;
 
-    // ── verticalAlignment ─────────────────────────────────────────────────────────
-    //
-    // Algorithm 2 from the paper.
-    //
-    // Computes a BlockList encoding the vertical alignment of nodes.
-    // Each node is aligned with its median neighbour in the adjacent layer,
-    // subject to the constraint that no two alignment edges cross and no marked
-    // segment is used.
-    //
-    // vdir = +1 : align upward   (process layers top-down, look at upper neighbours)
-    // vdir = -1 : align downward (process layers bottom-up, look at lower neighbours)
-    // hdir = +1 : leftmost  preference (try left median first, advance r leftward)
-    // hdir = -1 : rightmost preference (try right median first, advance r rightward)
-    //
-    // Also computes block_width for each node in the returned BlockList.
-    BlockList verticalAlignment(const G2& g, int vdir, int hdir);
+    protected:
+        // ── Algorithm 1 ──────────────────────────────────────────────────────────
+        //
+        // Scans interior layers left-to-right and marks every non-inner segment
+        // that crosses an inner segment, inserting the pair (u, v) into g_.marked.
+        void markType1Conflicts();
 
-    // ── placeBlock ────────────────────────────────────────────────────────────────
-    //
-    // Recursive sub-routine of horizontalCompaction (Algorithm 3).
-    //
-    // Places the block rooted at v by walking its cyclic chain and, for each
-    // member w, examining the predecessor of w in its layer.  It is intended
-    // to impose separation contraints between blocks of different classes and also
-	// direct constraints between blocks of the same class.
-    // Here, our minimum separation constraint for two blocks a and b is:
-	//   sep(a,b) = (blockWidth(a) + blockWidth(b)) / 2  +  MIN_BLOCK_SEP
-    void placeBlock(const G2& g,
-                    const BlockList& B,
-                    int v,
-                    std::vector<int>& sink,
-                    std::vector<double>& shift,
-                    std::vector<double>& x,
-                    int hdir);
+        // ── Inner-segment test ────────────────────────────────────────────────────
+        //
+        // Returns true iff the G2 edge u->v qualifies as an inner segment:
+        //   u and v are both dummy, u has exactly one child (v), and v has exactly
+        //   one parent (u). This matches the paper's intent for hypergraphs.
+        static bool isInnerSegment(const G2& g, int u, int v);
 
-    // ── horizontalCompaction ──────────────────────────────────────────────────────
-    //
-    // Algorithm 3 from the paper.
-    //
-    // Given the vertical alignment encoded in B, assigns an absolute x-coordinate
-    // to every node in G2.  Nodes in the same block receive the same coordinate.
-    //
-    // hdir = +1 : pack toward the left  (roots are placed at the smallest valid x)
-    // hdir = -1 : pack toward the right (roots are placed at the largest valid x)
-    //
-    // The vdir parameter controls the traversal order over layers, which must
-    // match the direction used in the preceding verticalAlignment call so that
-    // roots are encountered before their block members.
-    std::vector<double> horizontalCompaction(const G2& g, const BlockList& B, int vdir, int hdir);
+        // ── Block-width helper ────────────────────────────────────────────────────
+        //
+        // Returns the visual width of the block containing v: NODE_WIDTH if any
+        // member is a real node, DUMMY_NODE_WIDTH if all members are dummies.
+        static double computeBlockWidth(const G2& g, const BlockList& B, int v);
 
-    // ── assignHorizontalCoordinates ───────────────────────────────────────────────
-    //
-    // Algorithm 4 from the paper. 
-    //
-    // Runs markType1Conflicts once, then runs verticalAlignment +
-    // horizontalCompaction for all four (vdir, hdir) combinations.  The four
-    // resulting layouts are aligned to the one with the smallest total width and
-    // the final coordinate of each node is the average of the two median values
-    // among its four candidates (the "average median" of the paper).
-    std::vector<double> assignHorizontalCoordinates(G2& g);
+        // ── Algorithm 2 ──────────────────────────────────────────────────────────
+        //
+        // Computes a BlockList encoding the vertical alignment of nodes.
+        // vdir = +1 : top-down   hdir = +1 : leftmost preference
+        // vdir = -1 : bottom-up  hdir = -1 : rightmost preference
+        BlockList verticalAlignment(int vdir, int hdir) const;
+
+        // ── Algorithm 3 helpers ───────────────────────────────────────────────────
+        //
+        // placeBlock: recursive sub-routine of horizontalCompaction that places the
+        //   block rooted at v by walking its cyclic chain and imposing separation
+        //   constraints with its predecessor block.
+        //
+        // horizontalCompaction: given the vertical alignment encoded in B, assigns
+        //   an absolute x-coordinate to every node in G2.
+        static void placeBlock(const G2& g,
+            const BlockList& B,
+            int v,
+            std::vector<int>& sink,
+            std::vector<double>& shift,
+            std::vector<double>& x,
+            int hdir);
+
+        static std::vector<double> horizontalCompaction(const G2& g,
+            const BlockList& B,
+            int vdir,
+            int hdir);
+    };
 
 } // namespace bk_internal

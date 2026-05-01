@@ -19,6 +19,25 @@
 using namespace hypergraph_logic;
 using namespace bk_internal;
 
+// ── BrandesKopf shim ─────────────────────────────────────────────────────────
+// The constructor now takes a layer map; for visualization we build G2 manually
+// so we subclass, inject g_ directly (it is public), and call run().
+
+struct VisBK : bk_internal::BrandesKopf {
+    explicit VisBK(bk_internal::G2 g) : BrandesKopf(dummyLayers_()) {
+        g_ = std::move(g);
+    }
+    static const std::map<int, hypergraph_logic::LayerData>& dummyLayers_() {
+        static std::map<int, hypergraph_logic::LayerData> d;
+        return d;
+    }
+};
+
+static std::vector<double> assignHorizontalCoordinates(bk_internal::G2& g) {
+    return VisBK(g).run();
+}
+
+
 // ============================================================================
 // Example descriptor
 //

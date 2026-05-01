@@ -52,6 +52,7 @@ target_include_directories(minCrossHorizCoord
 target_compile_definitions(minCrossHorizCoord
     PRIVATE
         BK_TEST
+        GS_TEST
         INSTANCES_DIR="${CMAKE_SOURCE_DIR}/hypergraph_logic/src/implementationAnalysis/minimizeCrossings/AllInstances"
 )
 
