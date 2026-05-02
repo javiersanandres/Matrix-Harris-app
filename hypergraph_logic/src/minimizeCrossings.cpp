@@ -618,9 +618,59 @@ namespace sifting_internal {
 			combinations *= static_cast<double>(nb - S_.fixed_position_count - i);
 			combinations /= static_cast<double>(i + 1);
 			if (combinations > 1e6) {
-				buildBlockOrder(true);
-				sortAdjacencies();
-				runSifting(10);
+				// The computation is too large, so we skip the exhaustive search and run regular
+				// sifting instead. The only difference is that we do not move all blocks within
+				// the window [start_layer_, end_layer_], but only those that are not partially
+				// cut dummy chains.
+				// 
+				// A dummy-chain block can extend beyond end_layer_ when siftNodes is called
+				// with a window smaller than the full graph. Its lower G1 node sits at virtual
+				// layer 2*L where L > end_layer_, meaning the chain continues past the window
+				// we are allowed to touch. Moving such a block would corrupt the ordering of
+				// layers outside the window, so we remove it from the movable set.
+				//
+				// We only need to check the lower end: the anchor layer at start_layer_-1
+				// already pins any chain that enters the window from above, so cut chains at
+				// the top are never added to movable_set in the first place.
+
+				for (int bid : B_) {
+					if (S_.pi[bid] < S_.fixed_position_count) continue; // anchor, never move
+					if (movable_set.count(bid)) continue;                // already movable
+
+					const std::vector<int>& block_nodes = S_.blocks[bid].g1_nodes;
+
+					// Find the deepest G1 node in the block.
+					int deepest_g1 = block_nodes[0];
+					int deepest_layer = S_.g1_nodes[deepest_g1].g1_layer;
+					for (int g1_idx : block_nodes) {
+						if (S_.g1_nodes[g1_idx].g1_layer > deepest_layer) {
+							deepest_layer = S_.g1_nodes[g1_idx].g1_layer;
+							deepest_g1 = g1_idx;
+						}
+					}
+					const G1Node& deepest = S_.g1_nodes[deepest_g1];
+
+					// Non-dummy blocks carry no chain risk.
+					if (deepest.original == nullptr || !deepest.original->isDummy() || deepest_layer < 2 * end_layer_) {
+						movable_set.insert(bid);
+						continue;
+					}
+
+					// Dummy block whose deepest node cannot start a further chain.
+					if (!isDummyChainStart(deepest.original))
+						movable_set.insert(bid);
+				}
+
+				// Sift only the movable blocks. Use a snapshot of B_ so that
+				// modifications inside siftingStep do not corrupt the iteration.
+				int numblocks = static_cast<int>(B_.size());
+				for (int round = 0; round < 10; round++) {
+					BlockList snapshot = B_;
+					for (int j = S_.fixed_position_count; j < numblocks; j++) {
+						if (movable_set.count(snapshot[j]))
+							siftingStep(snapshot[j]);
+					}
+				}
 				return;
 			}
 		}
