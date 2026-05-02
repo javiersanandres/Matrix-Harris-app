@@ -40,54 +40,230 @@ namespace hypergraph_logic {
 		// Node management
 		// ====================================================================
 
-		/// Create a new real node and add it to the graph
-		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent);
-		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
-		NodePtr createSource(const std::string& label, int layer_position, const HyperedgePtr& edge);
-		NodePtr createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge);
-		HyperedgePtr addConnection(const NodePtr& parent, const NodePtr& child);
-		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
-		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
-		void removeNode(const NodePtr& node);
-		void removeConnection(const NodePtr& parent, const NodePtr& child);
-		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove, bool relocation);
-		void removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation);
-		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_label);
-		
-
-		/// Get all nodes at a specific layer
+		// ── getNodesAt ───────────────────────────────────────────────────────────────────────────────
+		//
+		// Returns the ordered list of nodes belonging to the given layer number.
+		// If the layer does not exist, an empty vector is returned.
+		//
 		std::vector<NodePtr> getNodesAt(int layer) const;
 
-		/// Get all nodes in the graph
+		// ── getAllNodes ───────────────────────────────────────────────────────────────────────────────
+		//
+		// Returns all nodes currently owned by the graph, in insertion order.
+		// This includes both real nodes and dummy nodes created during edge splitting.
+		//
 		std::vector<NodePtr> getAllNodes() const;
+
+		// ============================================================================
+		// Hyperedge management
+		// ============================================================================
+
+		// ── getAllHyperedges ──────────────────────────────────────────────────────────────────────────
+		//
+		// Returns every hyperedge owned by the graph: both original (non-segment)
+		// edges and all segment edges that were created when splitting long edges.
+		// The original edge always appears before its segments in the returned vector.
+		//
+		std::vector<HyperedgePtr> getAllHyperedges() const;
 
 		// ====================================================================
 		// Layer queries
 		// ====================================================================
 
-		/// Get the number of layers in the graph
+		// ── getLayerCount ────────────────────────────────────────────────────────────────────────────
+		//
+		// Returns the number of distinct layers currently present in the graph.
+		// Empty layers (which are cleaned up automatically) are not counted.
+		//
 		int getLayerCount() const;
 
-		/// Get all layers with their associated data
+		// ── getLayers ────────────────────────────────────────────────────────────────────────────────
+		//
+		// Returns a const reference to the internal layer map, keyed by layer number.
+		// Each entry holds the ordered list of nodes and outgoing hyperedges for that layer.
+		// The map is ordered by layer number, so iteration proceeds from shallowest to deepest.
+		//
 		const std::map<int, LayerData>& getLayers() const;
 
-		/// Get layer data for a specific layer
+		// ── getLayerData ─────────────────────────────────────────────────────────────────────────────
+		//
+		// Returns a const reference to the LayerData for a specific layer number.
+		// If the requested layer does not exist, a reference to a static empty LayerData is returned.
+		//
 		const LayerData& getLayerData(int layer) const;
 
 		// ====================================================================
-		// Hyperedge management
+		// Connection addition management
 		// ====================================================================
 
-		/// Create a hyperedge with the given sources and targets
-		HyperedgePtr createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer);
-		HyperedgePtr createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer);
+		// ── createNode (with parent) ──────────────────────────────────────────────────────────────────
+		//
+		// Creates a new real node with the given label and inserts it into the graph.
+		// If no parent is provided, the node is placed at layer 0 in position layer_position.
+		// If a parent is provided, the node is placed at layer parent->layer + 1 and a new
+		// short hyperedge from parent to the new node is created automatically.
+		// layer_position controls where within the target layer the node is inserted;
+		// out-of-bounds values cause the node to be appended at the end of the layer.
+		//
+		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent);
 
-		/// Get all hyperedges
-		std::vector<HyperedgePtr> getAllHyperedges() const;
+		// ── createNode (into edge) ────────────────────────────────────────────────────────────────────
+		//
+		// Creates a new real node and inserts it as an intermediate node on an existing hyperedge.
+		// The original edge is effectively split into two: one from the edge's sources to the new node,
+		// and one from the new node to the edge's original targets, which are pushed one layer deeper.
+		// This is the main mechanism for adding structure to an existing connection.
+		//
+		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
 
-		/// Check if an edge is "short" (connects layer k to layer k+1).
-		/// Returns the source layer k if true, -1 if the edge is not short or invalid.
-		int edgeIsShort(const HyperedgePtr& edge);
+		// ── createSource ─────────────────────────────────────────────────────────────────────────────
+		//
+		// Creates a new real node and registers it as an additional source of an existing hyperedge.
+		// The new node is always placed at layer 0 at position layer_position. Since a source at layer 0
+		// can never violate the layering invariant or introduce cycles, no relocation is needed.
+		// If the edge was previously short and the new source makes it long, the edge is re-split
+		// into segments with the appropriate dummy nodes.
+		//
+		NodePtr createSource(const std::string& label, int layer_position, const HyperedgePtr& edge);
+
+		// ── createTarget ─────────────────────────────────────────────────────────────────────────────
+		//
+		// Creates a new real node and registers it as an additional target of an existing hyperedge.
+		// The new node is placed at layer max(source layers) + 1, guaranteeing the layering invariant.
+		// Parent-child relationships are wired from all existing sources to the new node.
+		// If the edge was previously short and the new target placement makes it long, it is re-split.
+		//
+		NodePtr createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge);
+
+		// ── addConnection ────────────────────────────────────────────────────────────────────────────
+		//
+		// Adds a new directed connection (hyperedge) from parent to child, enforcing several invariants:
+		//   1. Self-loops are rejected.
+		//   2. Redundant connections (where parent is already an ancestor of child) are rejected.
+		//   3. Cycle-forming connections are detected and rejected via DFS before any permanent change.
+		//   4. Any pre-existing connections that become transitively redundant due to the new edge are
+		//      removed, preserving the Hasse-diagram property of the partial order.
+		//
+		// Depending on the relative layers of parent and child, three cases are handled:
+		//   - parent_layer == child_layer - 1: the new edge is already short, inserted directly.
+		//   - parent_layer < child_layer:      the child stays where it is, but the edge is long and
+		//                                      must be split with dummy nodes through intermediate layers.
+		//   - parent_layer >= child_layer:     the child must be pushed to parent_layer + 1, triggering
+		//                                      applyRelocationAndPropagate for it and all its descendants.
+		//
+		// Returns the newly created hyperedge (before any splitting).
+		//
+		HyperedgePtr addConnection(const NodePtr& parent, const NodePtr& child);
+
+		// ── addSourceToEdge ───────────────────────────────────────────────────────────────────────────
+		//
+		// Adds an existing real node as an additional source to an existing hyperedge.
+		// The function enforces that no self-connections are created (source == target) and that
+		// no cycles would result from the change.
+		//
+		// A special grouping policy handles the case where the new source already has a connection
+		// to some of the edge's targets through a different single-source hyperedge: in that case,
+		// those targets are migrated into the current edge (the old edge is cleaned up). If the
+		// pre-existing edge has multiple sources, the operation is rejected as ambiguous.
+		//
+		// After the source is added, targets may need to be relocated downward (since the new source
+		// might be in a deeper layer than the existing ones), and the edge may need to be re-split.
+		//
+		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
+
+		// ── addTargetToEdge ───────────────────────────────────────────────────────────────────────────
+		//
+		// Adds an existing real node as an additional target to an existing hyperedge.
+		// Rejects self-connections and cycles, and checks for redundancy similarly to addSourceToEdge.
+		//
+		// After adding the target, if its current layer is shallower than max(source layers) + 1,
+		// it must be relocated downward via applyRelocationAndPropagate; otherwise the edge is
+		// re-evaluated for shortness and split if necessary.
+		//
+		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
+
+		// ====================================================================
+		// Removal management
+		// ====================================================================
+
+		// ── removeNode ───────────────────────────────────────────────────────────────────────────────
+		//
+		// Removes a node from the graph entirely, handling three structural cases:
+		//   - Leaf node (no children): simply removed from all hyperedges where it appears as a target.
+		//   - Root node (no parents): removed from all source positions; its former targets are
+		//     relocated upward since they may no longer need to be as deep.
+		//   - Internal node (has both parents and children): parents inherit the node's children by
+		//     creating a new hyperedge from parents to children, so no structural information is lost.
+		//     The new edge is split or relocated as needed.
+		//
+		// In all cases the node is erased from all_nodes_ and from its layer, and a cleanUp is
+		// performed to remove any layers that become empty as a result.
+		//
+		void removeNode(const NodePtr& node);
+
+		// ── removeConnection ─────────────────────────────────────────────────────────────────────────
+		//
+		// Removes the directed connection between parent and child by finding the hyperedge
+		// that contains parent as a source and child as a target, and extracting child from it.
+		// If parent was the only source on that edge, the edge is deleted; otherwise, the remaining
+		// sources are preserved in a new edge that is re-split or re-layered as needed.
+		// The child is not relocated: the assumption is that keeping the child at its current depth
+		// is the intended behaviour after a connection removal.
+		//
+		void removeConnection(const NodePtr& parent, const NodePtr& child);
+
+		// ── removeSourcesFromHyperedge ────────────────────────────────────────────────────────────────
+		//
+		// Removes a set of source nodes from an existing original (non-segment) hyperedge and
+		// propagates the structural consequences through the segment decomposition of that edge.
+		//
+		// The propagation works top-down: a segment becomes "dead" when all of its sources have
+		// been removed or are themselves dead dummy nodes. Dead segments and their dummy nodes are
+		// collected and erased from LayerData and all_nodes_ in a single pass.
+		//
+		// If no sources remain at all, the entire edge (including all segments) is dissolved.
+		// If the remaining sources all live in the layer immediately above the targets, the edge
+		// is now short and the segments can be dissolved without dummy nodes.
+		//
+		// The relocation flag controls whether the targets of the edge are subsequently relocated
+		// upward (some of them may now be deeper than necessary if their deepest parent was removed).
+		//
+		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove, bool relocation);
+
+		// ── removeTargetsFromHyperedge ────────────────────────────────────────────────────────────────
+		//
+		// Symmetric counterpart to removeSourcesFromHyperedge, but propagation goes bottom-up:
+		// a segment becomes "dead" when all of its targets have been removed or are dead dummies.
+		// Dead dummy sources that only existed to feed those targets are collected and erased.
+		//
+		// If no targets remain, the entire edge is dissolved. If the edge becomes short after the
+		// removal, segments are dissolved and the edge is registered at the correct layer.
+		//
+		// The relocation flag controls whether the remaining targets are subsequently relocated upward,
+		// since some of them may have fewer parents and could legally sit in a shallower layer.
+		//
+		void removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation);
+
+		// ============================================================================
+		// Node fusion management
+		// ============================================================================
+
+		// ── fuseNodes ────────────────────────────────────────────────────────────────────────────────
+		//
+		// Merges node2 into node1, transferring all of node2's parent and child relationships to node1
+		// and then deleting node2. The merged node is renamed to new_label.
+		//
+		// The fusion is first attempted tentatively: if unifying the neighbourhoods of the two nodes
+		// would introduce a cycle, the operation is rolled back and an exception is thrown.
+		//
+		// After the structural merge, all hyperedges that referenced node2 (as source or target,
+		// in originals or segments) are updated to reference node1 instead. If this produces
+		// duplicate hyperedges (same source set and target set), the duplicates are dissolved.
+		//
+		// Finally, node1 is relocated if its optimal layer changed as a result of inheriting
+		// node2's parents; all its descendants are propagated accordingly.
+		//
+		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_label);
 
 	protected:
 		std::string name_;
@@ -104,43 +280,246 @@ namespace hypergraph_logic {
 			}
 		};
 
-		// All hyperedges owned by this graph
+		// All hyperedges owned by this graph.
+		// The key is the original (non-segment) hyperedge; the value is the list of segment
+		// hyperedges created when the original edge spans more than one layer.
+		// A short edge has an empty segment list.
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> all_hyperedges_;
 
+		// ============================================================================
+		// Node management
+		// ============================================================================
+
+		// ── addNodeToLayer ───────────────────────────────────────────────────────────────────────────
+		//
+		// Inserts a node into the specified layer at the given position, creating the layer entry
+		// if it does not yet exist. If position is out of bounds, the node is appended at the end.
+		// The node's internal layer field is updated to match. No-ops if the node is already present
+		// in that layer.
+		//
 		void addNodeToLayer(int layer, int position, const NodePtr& node);
+
+		// ── removeNodeFromLayer (single) ──────────────────────────────────────────────────────────────
+		//
+		// Removes a single node from the LayerData of the given layer. Does not update any
+		// parent/child relationships or hyperedge membership — it is a pure bookkeeping operation
+		// intended to be called after the structural changes have already been applied.
+		//
 		void removeNodeFromLayer(int layer, const NodePtr& node);
-		/// Remove all nodes in the set from the specified layer
+
+		// ── removeNodeFromLayer (batch) ───────────────────────────────────────────────────────────────
+		//
+		// Batch variant of removeNodeFromLayer that removes all nodes in the given set from the
+		// specified layer in a single pass. More efficient than calling the single-node overload
+		// repeatedly when many nodes must be removed at once (e.g. dead dummies after edge dissolution).
+		//
 		void removeNodeFromLayer(int layer, const std::unordered_set<Node*>& nodes);
 
+		// ============================================================================
+		// Hyperedge management
+		// ============================================================================
+
+		// ── createHyperedge (no origin) ───────────────────────────────────────────────────────────────
+		//
+		// Creates a new original (non-segment) hyperedge with the given sources and targets,
+		// registers it in all_hyperedges_ with an empty segment list, and adds it to the specified
+		// layer's outgoing_edges (if layer >= 0).
+		//
+		// Parent/child relationships are wired between every (source, target) pair, but only for
+		// real (non-dummy) nodes, since dummy nodes are internal routing artefacts that real nodes
+		// should have no knowledge of.
+		//
+		HyperedgePtr createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer);
+
+		// ── createHyperedge (with origin) ────────────────────────────────────────────────────────────
+		//
+		// Creates a segment hyperedge that belongs to an existing original edge (its origin).
+		// The new segment is appended to the origin's segment list in all_hyperedges_ and added
+		// to the specified layer's outgoing_edges.
+		//
+		// Parent/child wiring follows more nuanced rules to keep real nodes unaware of the dummy
+		// routing infrastructure:
+		//   - dummy → dummy: both parent and child links are established.
+		//   - dummy → real:  only the dummy's child link is set (the real node already knows its parents).
+		//   - real  → dummy: only the dummy's parent link is set (the real node already knows its children).
+		//   - real  → real:  no links are added here; they were already established on the original edge.
+		//
+		HyperedgePtr createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer);
+
+		// ── addHyperedgeToLayer ───────────────────────────────────────────────────────────────────────
+		//
+		// Registers an existing hyperedge in the outgoing_edges list of the specified layer,
+		// creating the layer entry if necessary. Updates the edge's internal layer field.
+		// No-ops if the edge is already registered in that layer.
+		//
 		void addHyperedgeToLayer(int layer, const HyperedgePtr& edge);
+
+		// ── removeHyperedgeFromLayer (single) ────────────────────────────────────────────────────────
+		//
+		// Removes a single hyperedge from the outgoing_edges list of the specified layer and
+		// resets the edge's internal layer field to -1. Pure bookkeeping: structural changes
+		// must be handled separately by the caller.
+		//
 		void removeHyperedgeFromLayer(int layer, const HyperedgePtr& edge);
 
-		/// Remove all hyperedges in the set from the specified layer
+		// ── removeHyperedgeFromLayer (batch) ─────────────────────────────────────────────────────────
+		//
+		// Batch variant that removes all hyperedges in the given set from the specified layer in
+		// a single pass. All removed edges have their internal layer field reset to -1.
+		// More efficient than repeated single-edge removal when cleaning up after edge dissolution.
+		//
 		void removeHyperedgeFromLayer(int layer, const std::unordered_set<Hyperedge*>& edges);
-		bool relocateNodes(const std::vector<NodePtr>& nodes);
-		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations);
 
-		//NodePtr createNode(const NodePtr& parent, const NodePtr& oldChild); -- to be implemented when the ordering is figured out
+		// ── edgeIsShort ───────────────────────────────────────────────────────────────────────────────
+		//
+		// Checks whether a hyperedge is "short", meaning every (source, target) pair spans
+		// exactly one layer (i.e. target_layer == source_layer + 1 for all pairs).
+		//
+		// Returns the source layer k if the edge is short, or -1 if the edge is long, empty, or null.
+		// This is the key predicate used throughout the graph to decide whether an edge needs to
+		// be split into segments with dummy nodes or can be stored directly.
+		//
+		int edgeIsShort(const HyperedgePtr& edge);
+
+		// ============================================================================
+		// Helper methods for connection management
+		// ============================================================================
+
+		// ── splitLongEdge ────────────────────────────────────────────────────────────────────────────
+		//
+		// Decomposes a long hyperedge into a chain of short segment edges, inserting dummy nodes
+		// in every intermediate layer so that the layering invariant is satisfied.
+		//
+		// The algorithm groups sources and targets by layer, then iterates layer-by-layer from the
+		// shallowest source to the deepest target. For each step L → L+1, a segment edge is created
+		// whose sources are the real sources at layer L (if any) plus a carry dummy produced by the
+		// previous segment, and whose targets are the real targets at layer L+1 (if any) plus a new
+		// carry dummy that will feed the next segment. This carry dummy threads the signal through
+		// layers that have neither real sources nor real targets.
+		//
+		// If the edge was already split (segments exist), the old segments are dissolved before
+		// splitting again, ensuring the segment list always reflects the current node positions.
+		//
 		void splitLongEdge(const HyperedgePtr& long_edge);
 
+		// ── dissolveSegments ─────────────────────────────────────────────────────────────────────────
+		//
+		// Removes all segment edges and their associated dummy nodes for the given set of original
+		// edges. The original edges themselves are left intact; only the segment decomposition is
+		// torn down so that the edges can be treated as un-split (i.e. their segment list becomes
+		// empty again).
+		//
+		// All dummy sources and targets belonging to any of the segments are collected, removed from
+		// their layers, and erased from all_nodes_ in a single batch for efficiency.
+		//
 		void dissolveSegments(const std::unordered_set<Hyperedge*>& long_edges);
 
+		// ── removeTransitiveConnections ───────────────────────────────────────────────────────────────
+		//
+		// Given a set of parents and a set of children that are about to be linked by a new edge,
+		// finds and removes all pre-existing hyperedge connections that the new edge makes redundant
+		// by transitivity.
+		//
+		// Specifically, for every existing edge whose sources are ancestors of (or equal to) the
+		// new parents AND whose targets are descendants of (or equal to) the new children, the
+		// overlapping (source, target) combinations are redundant. The ancestor sources are removed
+		// from those edges; if the remaining targets of those sources are still needed, a new trimmed
+		// edge is created to preserve that non-redundant information.
+		//
+		// This enforces the Hasse-diagram invariant: no connection exists if it can be inferred by
+		// following other connections transitively.
+		//
 		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children);
 
-		/// Remove specified targets from a hyperedge and all its segments, cleaning up unused dummies
-		//void removeTargetsFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<NodePtr>& targets_to_remove);
+		// ── relocateNodes ────────────────────────────────────────────────────────────────────────────
+		//
+		// Determines whether any of the given nodes are sitting at a layer that disagrees with their
+		// correct depth (max(parent layers) + 1, or 0 if they have no parents). Any node that needs
+		// to move is collected and handed off to applyRelocationAndPropagate.
+		//
+		// Returns true if at least one relocation was performed, false otherwise.
+		// Callers use this return value to skip redundant edge-splitting when the targets of a newly
+		// created edge have already been moved by relocation.
+		//
+		bool relocateNodes(const std::vector<NodePtr>& nodes);
 
-		/// Check if a node is in the ancestors of this node
+		// ── applyRelocationAndPropagate ───────────────────────────────────────────────────────────────
+		//
+		// Moves each node in the relocation list to its new target layer and then propagates
+		// the structural consequences through three phases:
+		//
+		//   Phase 1 – Move nodes and fix incoming edges:
+		//     All relocated nodes are moved in LayerData. Every original edge that has a relocated
+		//     node as a target is re-evaluated: if it is now short it is placed at the correct layer
+		//     (dissolving any old segments); if it is still long it is re-split.
+		//
+		//   Phase 2 – Propagate depth changes to descendants:
+		//     All descendants of the relocated nodes are collected. For each descendant whose correct
+		//     depth (max parent layer + 1) no longer matches its current layer, the node is moved to
+		//     the correct layer. Nodes are processed in ascending layer order so that when a node is
+		//     re-evaluated all of its parents have already been updated.
+		//
+		//   Phase 3 – Rebuild edges for affected descendants:
+		//     Every original edge that touches a node whose layer actually changed in Phase 2 is
+		//     re-evaluated for shortness and split or relocated as needed.
+		//
+		// A cleanUp call at the end removes any layers that have become empty.
+		//
+		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations);
+
+		// ── cleanUp ──────────────────────────────────────────────────────────────────────────────────
+		//
+		// Scans the layer map and erases any entries whose node list and outgoing edge list are both
+		// empty. Called after structural modifications to prevent the layer map from accumulating
+		// stale entries for layers that no longer contain any content.
+		//
+		void cleanUp();
+
+		// ── parentIsInAncestors ───────────────────────────────────────────────────────────────────────
+		//
+		// Returns true if the given parent node can be reached by traversing upward (towards shallower
+		// layers) from any of the given children nodes. Uses a pruned DFS that skips branches that are
+		// provably shallower than the parent's layer, avoiding a full ancestor traversal.
+		//
+		// Used to detect redundant connections before they are added (if the parent is already an
+		// ancestor, the connection adds no new structural information).
+		//
 		bool parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent);
+
+		// ── childIsInDescendants ──────────────────────────────────────────────────────────────────────
+		//
+		// Symmetric counterpart to parentIsInAncestors. Returns true if the given child node can be
+		// reached by traversing downward (towards deeper layers) from any of the given parent nodes.
+		// Branches deeper than the child's layer are pruned for efficiency.
+		//
 		bool childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child);
 
-		/// Check for cycles in the graph starting from a given node.
-		bool checkCycles(const NodePtr& node);
-
+		// ── getAllAncestors ───────────────────────────────────────────────────────────────────────────
+		//
+		// Returns the set of all strict ancestors of the given nodes (i.e. every node reachable by
+		// following parent links upward, excluding the input nodes themselves). Uses a recursive DFS
+		// with a visited set to avoid revisiting nodes in graphs with shared ancestry.
+		//
 		std::unordered_set<Node*> getAllAncestors(const std::vector<NodePtr>& nodes);
+
+		// ── getAllDescendants ─────────────────────────────────────────────────────────────────────────
+		//
+		// Returns the set of all strict descendants of the given nodes (i.e. every node reachable by
+		// following child links downward, excluding the input nodes themselves). Uses a recursive DFS
+		// with a visited set to avoid revisiting nodes in graphs with shared descendants.
+		//
 		std::unordered_set<Node*> getAllDescendants(const std::vector<NodePtr>& nodes);
 
-		void cleanUp();
+		// ── checkCycles ───────────────────────────────────────────────────────────────────────────────
+		//
+		// Checks whether the subgraph reachable from the given node (following child links) contains
+		// any directed cycle. Uses the standard DFS back-edge detection algorithm: a node is on the
+		// current DFS path (tracked in a hash set for O(1) lookup); if a child is already on the path,
+		// a cycle exists.
+		//
+		// Called before permanently committing any structural change that adds new parent/child links,
+		// so that the graph can be rolled back if a cycle would be introduced.
+		//
+		bool checkCycles(const NodePtr& node);
 	};
-
 } // namespace hypergraph_logic

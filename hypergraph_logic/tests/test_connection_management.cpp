@@ -25,6 +25,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash>& rawEdges() {
             return all_hyperedges_;
         }
+		int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
     };
 
     // =============================================================================
@@ -56,7 +57,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
 
     static bool shortEdgesAreConsistentWithAdjacency(TestableHypergraph& g) {
         for (const auto& e : g.getAllHyperedges()) {
-            int k = g.edgeIsShort(e);
+            int k = g.pub_edgeIsShort(e);
             if (k < 0) continue;
             if (k != e->getLayer()) return false;
             const auto& layer_edges = g.getLayerData(k).outgoing_edges;

@@ -288,8 +288,8 @@ namespace hypergraph_logic {
                 NodePtr C = g.createNode("C", 0, nullptr); // will be connected below
                 NodePtr D = g.createNode("D", 1, nullptr);
                 // e1: A->D, e2: B->C
-                HyperedgePtr e1 = g.createHyperedge({ A }, { D }, 0);
-                HyperedgePtr e2 = g.createHyperedge({ B }, { C }, 0);
+                HyperedgePtr e1 = g.addConnection({ A }, { D });
+                HyperedgePtr e2 = g.addConnection({ B }, { C });
                 EXPECT_NO_THROW(runPipeline(g));
             }
 
@@ -299,8 +299,8 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr C = g.createNode("C", 0, nullptr);
                 NodePtr D = g.createNode("D", 1, nullptr);
-                g.createHyperedge({ A }, { D }, 0);
-                g.createHyperedge({ B }, { C }, 0);
+                g.addConnection({ A }, { D });
+                g.addConnection({ B }, { C });
                 runPipeline(g);
                 checkAllInvariants(g);
             }

@@ -1083,7 +1083,7 @@ namespace hypergraph_logic {
 	}
 	
 	// ============================================================================
-	// Protected helper methods for connection management
+	// Helper methods for connection management
 	// ============================================================================
 	void Hypergraph::splitLongEdge(const HyperedgePtr& long_edge) {
 		if (long_edge->isSegment()) return;

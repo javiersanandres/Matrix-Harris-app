@@ -43,6 +43,13 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         // Edge management
         void pub_splitLongEdge(const HyperedgePtr& e) { splitLongEdge(e); }
         void pub_dissolveSegments(const std::unordered_set<Hyperedge*>& es) { dissolveSegments(es); }
+        HyperedgePtr pub_createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
+            return createHyperedge(sources, targets, layer);
+        }
+        HyperedgePtr pub_createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
+            return createHyperedge(origin, sources, targets, layer);
+		}
+		int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
 
         // Relocation
         void pub_applyRelocationAndPropagate(const NodePtr& n, int layer) { applyRelocationAndPropagate({ {n, layer} }); }
@@ -221,7 +228,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     TEST_F(HypergraphInternalsTest, AddHyperedgeToLayer_CreatesLayerOnDemand) {
         auto p = g.createNode("p", 0, nullptr);
         auto c = g.createNode("c", 0, p);
-        auto edge = g.createHyperedge({ p }, { c }, -1);
+        auto edge = g.pub_createHyperedge({ p }, { c }, -1);
         g.pub_addHyperedgeToLayer(7, edge);
         EXPECT_EQ(edge->getLayer(), 7);
         EXPECT_EQ(countEdgesInLayer(g, 7), 1);
@@ -271,7 +278,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     TEST_F(HypergraphInternalsTest, CreateHyperedge_NonSegment_RegisteredAsOriginal) {
         auto p = g.createNode("p", 0, nullptr);
         auto c = g.createNode("c", 0, nullptr);
-        auto edge = g.createHyperedge({ p }, { c }, -1);
+        auto edge = g.pub_createHyperedge({ p }, { c }, -1);
         EXPECT_FALSE(edge->isSegment());
         bool found = false;
         for (const auto& e : g.getAllHyperedges()) if (e == edge) { found = true; break; }
@@ -281,7 +288,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     TEST_F(HypergraphInternalsTest, CreateHyperedge_WithLayer_RegisteredInLayerData) {
         auto p = g.createNode("p", 0, nullptr);
         auto c = g.createNode("c", 0, nullptr);
-        auto edge = g.createHyperedge({ p }, { c }, 0);
+        auto edge = g.pub_createHyperedge({ p }, { c }, 0);
         EXPECT_EQ(edge->getLayer(), 0);
         auto& edges = g.getLayerData(0).outgoing_edges;
         EXPECT_NE(std::find(edges.begin(), edges.end(), edge), edges.end());
@@ -292,7 +299,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto c = std::make_shared<Node>("c");
         g.rawNodes().push_back(c);
         g.pub_addNodeToLayer(1, -1, c);
-        g.createHyperedge({ p }, { c }, 0);
+        g.pub_createHyperedge({ p }, { c }, 0);
         auto p_children = p->getChildren();
         auto c_parents = c->getParents();
         EXPECT_NE(std::find(p_children.begin(), p_children.end(), c), p_children.end());
@@ -320,7 +327,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto p = g.createNode("p", 0, nullptr);
         auto c = g.createNode("c", 0, p);
         auto edge = g.getLayerData(0).outgoing_edges.front();
-        EXPECT_EQ(g.edgeIsShort(edge), 0);
+        EXPECT_EQ(g.pub_edgeIsShort(edge), 0);
     }
 
     TEST_F(HypergraphInternalsTest, EdgeIsShort_LongEdge_ReturnsMinusOne) {
@@ -328,12 +335,12 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto c = std::make_shared<Node>("c");
         g.rawNodes().push_back(c);
         g.pub_addNodeToLayer(2, -1, c);
-        auto edge = g.createHyperedge({ p }, { c }, -1);
-        EXPECT_EQ(g.edgeIsShort(edge), -1);
+        auto edge = g.pub_createHyperedge({ p }, { c }, -1);
+        EXPECT_EQ(g.pub_edgeIsShort(edge), -1);
     }
 
     TEST_F(HypergraphInternalsTest, EdgeIsShort_NullEdge_ReturnsMinusOne) {
-        EXPECT_EQ(g.edgeIsShort(nullptr), -1);
+        EXPECT_EQ(g.pub_edgeIsShort(nullptr), -1);
     }
 
     // =============================================================================
@@ -396,7 +403,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto n1 = g.createNode("n1", 0, r);
         auto n2 = g.createNode("n2", 0, n1);
         auto r2 = g.createNode("r2", 0, nullptr);
-        auto edge = g.createHyperedge({ r2 }, { n2 }, -1);
+        auto edge = g.pub_createHyperedge({ r2 }, { n2 }, -1);
         r2->addChild(n2); n2->addParent(r2);
         g.pub_splitLongEdge(edge);
         EXPECT_GE(countDummyNodesInLayer(g, 1), 1);
@@ -424,7 +431,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto n1 = g.createNode("n1", 0, r);
         auto n2 = g.createNode("n2", 0, n1);
         auto r2 = g.createNode("r2", 0, nullptr);
-        auto edge = g.createHyperedge({ r2 }, { n2 }, -1);
+        auto edge = g.pub_createHyperedge({ r2 }, { n2 }, -1);
         r2->addChild(n2); n2->addParent(r2);
         g.pub_splitLongEdge(edge);
         bool found = false;
@@ -809,7 +816,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto r2 = g.createNode("r2", 0, nullptr);
 
         // Create a long edge spanning 5 layers
-        auto edge = g.createHyperedge({ r2 }, { n5 }, -1);
+        auto edge = g.pub_createHyperedge({ r2 }, { n5 }, -1);
         r2->addChild(n5); n5->addParent(r2);
         g.pub_splitLongEdge(edge);
 
@@ -830,7 +837,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto t1 = g.createNode("t1", 0, m2);
         auto t2 = g.createNode("t2", 0, m2);
 
-        auto edge = g.createHyperedge({ s1, s2 }, { t1, t2 }, -1);
+        auto edge = g.pub_createHyperedge({ s1, s2 }, { t1, t2 }, -1);
         s1->addChild(t1); s1->addChild(t2);
         s2->addChild(t1); s2->addChild(t2);
         t1->addParent(s1); t1->addParent(s2);
@@ -1106,7 +1113,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto e = g.createNode("e", 0, d);
 
         // Create direct a->e (bypassing validation for test purposes)
-        auto direct_ae = g.createHyperedge({ a }, { e }, -1);
+        auto direct_ae = g.pub_createHyperedge({ a }, { e }, -1);
 
         g.pub_removeTransitiveConnections({ a }, { e });
 
@@ -1141,8 +1148,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto c2 = g.createNode("c2", 0, m);
 
         // Create direct (now transitive) edges p1->c1 and p2->c2
-        g.createHyperedge({ p1 }, { c1 }, -1);
-        g.createHyperedge({ p2 }, { c2 }, -1);
+        g.pub_createHyperedge({ p1 }, { c1 }, -1);
+        g.pub_createHyperedge({ p2 }, { c2 }, -1);
 
         g.pub_removeTransitiveConnections({ p1, p2 }, { c1, c2 });
 
@@ -1166,7 +1173,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         auto r2 = g.createNode("r2", 0, nullptr);
 
         // Create a long edge and split it
-        auto long_edge = g.createHyperedge({ r2 }, { n3 }, -1);
+        auto long_edge = g.pub_createHyperedge({ r2 }, { n3 }, -1);
         r2->addChild(n3); n3->addParent(r2);
         g.pub_splitLongEdge(long_edge);
 
