@@ -32,9 +32,11 @@ namespace hypergraph_logic {
 	//   - parents_  are weak_ptr to break ownership cycles entirely.
 	// ============================================================================
 	class Hypergraph;  // Forward declaration
+	class GraphicalHypergraph;  // Forward declaration
 
 	class Node : public std::enable_shared_from_this<Node> {
 		friend class Hypergraph;  // Allow Hypergraph to set layer
+		friend class GraphicalHypergraph;  // Allow GraphicalHypergraph to access layout data
 	public:
 		// ── Node (real) ───────────────────────────────────────────────────────────────────────────────
 		//

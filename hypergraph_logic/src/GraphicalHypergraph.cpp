@@ -92,7 +92,7 @@ namespace hypergraph_logic {
 			// back (most negative) toward index 0 (least negative) and take the first
 			// (least negative) slot that has no x-overlap.  If every slot conflicts we
 			// push a new level one HORIZONTAL_SEP further negative.
-			const double first_y = ;
+			const double first_y = layer_layout_[layer_idx - 1] - NODE_HEIGHT / 2 - LAYER_GAP;
 			std::vector<YLevel> y_levels{ { first_y, {} } };
 
 			for (const auto& edge : incoming_edges) {
@@ -156,6 +156,59 @@ namespace hypergraph_logic {
 		assignYCoordinates();
 	}
 
+	void GraphicalHypergraph::relocateNodeInLayer(const NodePtr& node, double new_x_coordinate) {
+		LayerData& layer_data = layers_[node->getLayer()];
+		bool minimize_crossings = false;
+		bool no_children = node->getChildren().empty();
+		double current_x = node_layout_[node.get()].x;
 
+		// Find the iterator to the node being moved once, used in both branches.
+		auto node_it = std::find(layer_data.nodes.begin(), layer_data.nodes.end(), node);
+
+		if (new_x_coordinate < current_x) {
+			// Moving left: find the rightmost neighbour to the left that the node has crossed.
+			for (auto it = layer_data.nodes.rbegin(); it != layer_data.nodes.rend(); ++it) {
+				if (node_layout_[it->get()].x >= current_x) {
+					// Skip nodes that are currently to the right of the node being moved.
+					continue;
+				}
+				if (node_layout_[it->get()].x > new_x_coordinate) {
+					if (!no_children && !(*it)->getChildren().empty()) {
+						// Both have children, so we will need to run the crossing minimisation
+						// algorithm after the swap, to ensure the new layout is as good as possible.
+						minimize_crossings = true;
+					}
+					std::iter_swap(it.base() - 1, node_it);
+					break;
+				}
+			}
+		}
+		else if (new_x_coordinate > current_x) {
+			// Moving right: find the leftmost neighbour to the right that the node has crossed.
+			for (auto it = layer_data.nodes.begin(); it != layer_data.nodes.end(); ++it) {
+				if (node_layout_[it->get()].x <= current_x) {
+					// Skip nodes that are currently to the left of the node being moved.
+					continue;
+				}
+				if (node_layout_[it->get()].x < new_x_coordinate) {
+					if (!no_children && !(*it)->getChildren().empty()) {
+						// Both have children, so we will need to run the crossing minimisation
+						// algorithm after the swap, to ensure the new layout is as good as possible.
+						minimize_crossings = true;
+					}
+					std::iter_swap(it, node_it);
+					break;
+				}
+			}
+		}
+
+		if (minimize_crossings) {
+			// Avoid being too aggressive with crossing minimisation, since the user
+			// is making a manual adjustment and may not want the layout to change too much.
+			Hypergraph::minimizeCrossings(3, node->getLayer() + 1);
+		}
+
+		computeLayout();
+	}
 
 } // namespace hypergraph_logic

@@ -69,9 +69,24 @@ namespace hypergraph_logic {
 			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
 		}
 
+		// Run the complete layout pipeline, executing stages 2-5 in order.
+		// After this call, all layout data is known and the hypergraph can
+		// be represented graphically.
 		void computeLayout();
 
+		// This function allows the user to permut the nodes in a layer by drawing
+		// them in a different order. The GUI will be the one to provide the new
+		// x coordinates of the nodes, which will only be interpreted as a way to
+		// order the nodes in the layer, not as actual coordinates. The actual 
+		// coordinates will be re-assigned by the layout algorithm.
+		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate);
+
 		double getX(const NodePtr& node) const;
+
+
+		GraphicalHypergraph clone() const;
+		void toJSON(const std::string& path) const;
+		static GraphicalHypergraph fromJSON(const std::string& path);
 	protected:
 		std::unordered_map<Node*, NodeLayout> node_layout_; // Map from node pointer to its layout data.
 		std::unordered_map<Hyperedge*, double> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate).

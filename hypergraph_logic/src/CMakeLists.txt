@@ -1,4 +1,15 @@
 # ============================================================================
+# JSON (nlohmann) - header-only, fetched from official release tarball
+# ============================================================================
+include(FetchContent)
+
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
+# ============================================================================
 # Core Libraries
 # ============================================================================
 
@@ -107,15 +118,19 @@ endif()
 
 # Graphical hypergraph library
 add_library(graphical_hypergraph)
+
 target_sources(graphical_hypergraph
     PRIVATE
         horizontalCoordinates.cpp
         portAssignment.cpp
+        GraphicalHypergraph.cpp
+        GraphicalHypergraphPersistence.cpp
         $<IF:$<BOOL:${Gurobi_FOUND}>,horizontalOrder.cpp,>
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
         FILES ../include/GraphicalHypergraph.h)
+
 target_include_directories(graphical_hypergraph
     PUBLIC
         $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/../include>
@@ -124,9 +139,13 @@ target_include_directories(graphical_hypergraph
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
         $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_INCLUDE_DIRS},>
 )
+
 target_link_libraries(graphical_hypergraph
-    PUBLIC hypergraph
-    $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_LIBRARIES},>
+    PUBLIC
+        hypergraph
+        nlohmann_json::nlohmann_json
+    PRIVATE
+        $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_LIBRARIES},>
 )
 
 # Enable BK_TEST when building tests
