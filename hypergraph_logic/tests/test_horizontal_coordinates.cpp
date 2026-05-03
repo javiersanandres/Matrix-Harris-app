@@ -103,6 +103,7 @@ namespace hypergraph_logic {
             public:
                 explicit TestGraph(const std::string& name) : GraphicalHypergraph(name) {}
                 std::map<int, LayerData>& layers() { return layers_; }
+				void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
             };
 
             // Return the first non-segment hyperedge whose source set contains s
@@ -124,9 +125,9 @@ namespace hypergraph_logic {
             }
 
             // Assert that every adjacent pair in each layer satisfies the separation
-            // formula. Calls assignCoordinates() internally.
+            // formula. Calls assignXCoordinates() internally.
             static void checkNoOverlap(TestGraph& g) {
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 for (const auto& [layer, data] : g.getLayers()) {
                     const auto& nodes = data.nodes;
                     for (std::size_t i = 0; i + 1 < nodes.size(); ++i) {
@@ -395,7 +396,7 @@ namespace hypergraph_logic {
                 TestGraph g("chain");
                 NodePtr A = g.createNode("A", 0, nullptr);
                 NodePtr B = g.createNode("B", 0, A);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(A), g.getX(B), 1e-9);
             }
 
@@ -407,7 +408,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr C = g.createNode("C", 0, A);
                 NodePtr D = g.createNode("D", 1, B);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(A), g.getX(C), 1e-9);
                 EXPECT_NEAR(g.getX(B), g.getX(D), 1e-9);
                 EXPECT_GE(std::abs(g.getX(B) - g.getX(A)), 96.0 - 1e-9);
@@ -417,7 +418,7 @@ namespace hypergraph_logic {
                 // A -> d1 -> d2 -> B must all share the same x.
                 TestGraph g = buildLongChain();
                 auto nodes = g.getAllNodes();
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(nodes[0]), g.getX(nodes[1]), 1e-9);
                 EXPECT_NEAR(g.getX(nodes[1]), g.getX(nodes[2]), 1e-9);
                 EXPECT_NEAR(g.getX(nodes[2]), g.getX(nodes[3]), 1e-9);
@@ -433,7 +434,7 @@ namespace hypergraph_logic {
                 NodePtr D = g.createNode("D", 1, B);
                 g.addConnection(A, D);
                 g.addConnection(C, D);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(D), g.getX(B), 1.0)
                     << "D should align with its median parent B";
             }
@@ -448,7 +449,7 @@ namespace hypergraph_logic {
                 NodePtr D = g.createNode("D", 0, A);
                 NodePtr E = g.createNode("E", 1, B);
                 NodePtr F = g.createNode("F", 2, C);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 EXPECT_NEAR(g.getX(A), g.getX(D), 1e-9);
                 EXPECT_NEAR(g.getX(B), g.getX(E), 1e-9);
@@ -689,18 +690,18 @@ namespace hypergraph_logic {
             }
 
             // ============================================================================
-            // assignCoordinates – single-node and empty graphs
+            // assignXCoordinates – single-node and empty graphs
             // ============================================================================
 
             TEST(AssignCoordinates, EmptyGraphDoesNotCrash) {
                 TestGraph g("empty");
-                EXPECT_NO_THROW(g.assignCoordinates());
+                EXPECT_NO_THROW(g.assignXCoordinates());
             }
 
             TEST(AssignCoordinates, SingleNodeGivesFiniteCoordinate) {
                 TestGraph g("single");
                 NodePtr A = g.createNode("A", 0, nullptr);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_TRUE(std::isfinite(g.getX(A)));
             }
 
@@ -710,10 +711,10 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr C = g.createNode("C", 0, A);
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 double xA1 = g.getX(A), xB1 = g.getX(B), xC1 = g.getX(C);
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_DOUBLE_EQ(g.getX(A), xA1);
                 EXPECT_DOUBLE_EQ(g.getX(B), xB1);
                 EXPECT_DOUBLE_EQ(g.getX(C), xC1);
@@ -721,7 +722,7 @@ namespace hypergraph_logic {
 
             TEST(AssignCoordinates, AllCoordinatesAreFinite) {
                 TestGraph g = buildTwoLayerFan();
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 for (const auto& n : g.getAllNodes())
                     EXPECT_TRUE(std::isfinite(g.getX(n)))
                     << "Node " << n->getName() << " has non-finite coordinate";
@@ -730,7 +731,7 @@ namespace hypergraph_logic {
             TEST(AssignCoordinates, GetXThrowsForNodeNotInGraph) {
                 TestGraph g("unknown");
                 g.createNode("A", 0, nullptr);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 TestGraph other("other");
                 NodePtr orphan = other.createNode("orphan", 0, nullptr);
@@ -745,7 +746,7 @@ namespace hypergraph_logic {
                 TestGraph g("sep_real_real");
                 NodePtr A = g.createNode("A", 0, nullptr);
                 NodePtr B = g.createNode("B", 1, nullptr);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_GE(g.getX(B) - g.getX(A), 96.0 - 1e-9);
             }
 
@@ -759,7 +760,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 g.createNode("C", 0, d1);
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 double xd1 = g.getX(d1), xB = g.getX(B);
                 EXPECT_GT(xB, xd1);
                 EXPECT_GE(xB - xd1, 56.0 - 1e-9)
@@ -771,7 +772,7 @@ namespace hypergraph_logic {
                 g.createNode("A", 0, nullptr);
                 g.createNode("B", 1, nullptr);
                 g.createNode("C", 2, nullptr);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 auto nodes = g.getAllNodes();
                 EXPECT_GE(g.getX(nodes[1]) - g.getX(nodes[0]), 96.0 - 1e-9);
@@ -791,7 +792,7 @@ namespace hypergraph_logic {
                 NodePtr A = g.createNode("A", 0, nullptr);
                 NodePtr C = g.createNode("C", 0, A);
                 NodePtr D = g.createNode("D", 1, A);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 double xC = g.getX(C), xD = g.getX(D), xA = g.getX(A);
                 EXPECT_GE(xD - xC, 96.0 - 1e-9);
@@ -807,7 +808,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr C = g.createNode("C", 0, A);
                 g.addConnection(B, C);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 double xA = g.getX(A), xB = g.getX(B), xC = g.getX(C);
                 EXPECT_GE(xB - xA, 96.0 - 1e-9);
@@ -824,7 +825,7 @@ namespace hypergraph_logic {
                 // {A,B} -> {C,D}: after BK balancing A ~ C and B ~ D.
                 TestGraph g = buildTwoLayerFan();
                 auto nodes = g.getAllNodes();
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(nodes[0]), g.getX(nodes[2]), 1.0);
                 EXPECT_NEAR(g.getX(nodes[1]), g.getX(nodes[3]), 1.0);
             }
@@ -843,7 +844,7 @@ namespace hypergraph_logic {
                 NodePtr C = g.createNode("C", 1, A);
                 NodePtr D = g.createNode("D", 0, B);
                 g.addConnection(C, D);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 double xB = g.getX(B), xC = g.getX(C), xD = g.getX(D);
                 EXPECT_GE(xC - xB, 96.0 - 1e-9);
@@ -858,7 +859,7 @@ namespace hypergraph_logic {
                 NodePtr C = g.createNode("C", 1, A);
                 NodePtr D = g.createNode("D", 0, B);
                 g.addConnection(C, D);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 double xA = g.getX(A), xB = g.getX(B), xC = g.getX(C);
                 EXPECT_GE(xA, xB - 1e-9);
@@ -877,7 +878,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr C = g.createNode("C", 0, B);
                 NodePtr D = g.createNode("D", 1, A);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 EXPECT_GE(g.getX(B) - g.getX(A), 96.0 - 1e-9);
                 EXPECT_GE(g.getX(D) - g.getX(C), 96.0 - 1e-9);
@@ -895,7 +896,7 @@ namespace hypergraph_logic {
                 g.createNode("D", 0, A);
                 g.createNode("E", 1, B);
                 g.createNode("F", 2, C);
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 for (const auto& [layer, data] : g.getLayers())
                     for (std::size_t i = 0; i + 1 < data.nodes.size(); ++i)
@@ -921,7 +922,7 @@ namespace hypergraph_logic {
                             "R" + std::to_string(row) + "C" + std::to_string(col),
                             col, grid[row - 1][col]);
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
 
                 for (int col = 0; col < 4; ++col) {
                     double x0 = g.getX(grid[0][col]);
@@ -956,7 +957,7 @@ namespace hypergraph_logic {
                 EXPECT_TRUE(e->containsSource(B));
                 EXPECT_TRUE(e->containsTarget(C));
                 EXPECT_TRUE(e->containsTarget(D));
-                EXPECT_NO_THROW(g.assignCoordinates());
+                EXPECT_NO_THROW(g.assignXCoordinates());
             }
 
             TEST(HyperedgeAPI, CreateSourceAndTargetHelpers) {
@@ -972,7 +973,7 @@ namespace hypergraph_logic {
 
                 EXPECT_TRUE(e->containsSource(S));
                 EXPECT_TRUE(e->containsTarget(T));
-                EXPECT_NO_THROW(g.assignCoordinates());
+                EXPECT_NO_THROW(g.assignXCoordinates());
             }
 
             TEST(HyperedgeAPI, ThreeLayerGraphHasNoOverlap) {

@@ -69,12 +69,19 @@ namespace hypergraph_logic {
 			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
 		}
 
+		void computeLayout();
+
+		double getX(const NodePtr& node) const;
+	protected:
+		std::unordered_map<Node*, NodeLayout> node_layout_; // Map from node pointer to its layout data.
+		std::unordered_map<Hyperedge*, double> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate).
+		std::unordered_map<int, double> layer_layout_; // Map from layer index to its assigned y coordinate.
+
 		// ── Stage 2: node x-coordinates ───────────────────────────────────────────
 		//
 		// Assigns an x-coordinate to every node using the Brandes-Köpf algorithm.
 		// Coordinates are in logical pixels (constants defined in LayoutTypes.h).
-		void assignCoordinates();
-		double getX(const NodePtr& node) const;
+		void assignXCoordinates();
 
 		// ── Stage 3: horizontal order of hyperedge bars ───────────────────────────
 		//
@@ -83,7 +90,7 @@ namespace hypergraph_logic {
 		// the number of crossings. outgoing_edges is re-sorted in-place so that a
 		// lower index corresponds to a higher bar on the canvas.
 		//
-		// Must be called after assignCoordinates() and before assignPorts().
+		// Must be called after assignXCoordinates() and before assignPorts().
 		void orderHyperedges(int layer);
 
 		// ── Stage 4: port assignment ───────────────────────────────────────────────
@@ -94,9 +101,14 @@ namespace hypergraph_logic {
 		// non-overlapping source_ports and target_ports.
 		void assignPorts();
 
-	protected:
-		std::unordered_map<Node*, NodeLayout> node_layout_; // Map from node pointer to its layout data.
-		std::unordered_map<Hyperedge*, double> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate).
+		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────────
+		//
+		// It assigns a y coordinate to the horizontal span of each hyperedge, based on
+		// the vertical ordering of the hyperedges in each layer. This is the final
+		// stage of the layout pipeline, and it must be called after all previous stages.
+		// It also assings a y coordinate to each layer, which is also the y coordinate
+		// of the nodes in that layer.
+		void assignYCoordinates();
 	};
 
 } // namespace hypergraph_logic

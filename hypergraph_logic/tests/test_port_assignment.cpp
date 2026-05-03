@@ -27,6 +27,8 @@ namespace hypergraph_logic {
                 explicit TestGraph(const std::string& name) : GraphicalHypergraph(name) {}
                 std::map<int, LayerData>& layers() { return layers_; }
                 std::unordered_map<Node*, NodeLayout>& nodeLayout() { return node_layout_; }
+				void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
+				void assignPorts() { GraphicalHypergraph::assignPorts(); }
             };
 
             // ── Helpers ───────────────────────────────────────────────────────────────
@@ -43,7 +45,7 @@ namespace hypergraph_logic {
 
             // Run the full pipeline: coordinates first, then ports.
             static void runPipeline(TestGraph& g) {
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 g.assignPorts();
             }
 
@@ -600,7 +602,7 @@ namespace hypergraph_logic {
                 TestGraph g("idempotent");
                 NodePtr A = g.createNode("A", 0, nullptr);
                 NodePtr B = g.createNode("B", 0, A);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 g.assignPorts();
                 std::size_t count_src = g.nodeLayout().at(A.get()).source_ports.size();
                 std::size_t count_tgt = g.nodeLayout().at(B.get()).target_ports.size();
@@ -672,7 +674,7 @@ namespace hypergraph_logic {
                 HyperedgePtr e = findEdge(g, A, C);
                 g.addSourceToEdge(e, B);
                 g.addTargetToEdge(e, D);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 // After coordinates: xA < xB, so A is leftmost (pos=0), B is rightmost (pos=2).
                 // Build the PortAssigner for layer 0 and query directly.
                 PortAssigner pa(0, g.layers(), g.nodeLayout());

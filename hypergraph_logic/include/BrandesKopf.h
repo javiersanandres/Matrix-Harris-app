@@ -103,7 +103,7 @@ namespace bk_internal {
         // x-coordinate for every node, indexed by G2 id.
         std::vector<double> run();
 
-        // G2 is public so that the public entry point (assignCoordinates) can
+        // G2 is public so that the public entry point (assignXCoordinates) can
         // read g_.nodes to map G2 ids back to original Node pointers.
         G2 g_;
 

@@ -38,7 +38,7 @@ namespace horizontal_overlapping_internal {
     //
     // span(e) = [min x(v), max x(v)]  over all v in S(e) union T(e).
     // Node x-coordinates come from node_layout_ which is populated by
-    // assignCoordinates() before this step is called.
+    // assignXCoordinates() before this step is called.
     HorizontalOrderSolver::Span HorizontalOrderSolver::computeSpan(const HyperedgePtr& edge) const {
         double lo = std::numeric_limits<double>::max();
         double hi = -std::numeric_limits<double>::max();
@@ -234,7 +234,7 @@ namespace horizontal_overlapping_internal {
 // GraphicalHypergraph::orderHyperedges
 // 
 // Constructs a HorizontalOrderSolver for the given layer and delegates 
-// immediately. This must be called after assignCoordinates() and before 
+// immediately. This must be called after assignXCoordinates() and before 
 // assignPorts(), since the port-ordering policy depends on hyperedge order 
 // being already established.
 // ============================================================================

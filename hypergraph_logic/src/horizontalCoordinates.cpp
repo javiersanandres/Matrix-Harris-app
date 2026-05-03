@@ -392,11 +392,11 @@ namespace bk_internal {
 } // namespace bk_internal
 
 // ============================================================================
-// GraphicalHypergraph::assignCoordinates
+// GraphicalHypergraph::assignXCoordinates
 // ============================================================================
 namespace hypergraph_logic {
 
-	void GraphicalHypergraph::assignCoordinates() {
+	void GraphicalHypergraph::assignXCoordinates() {
 		if (getLayers().empty()) return;
 
 		using namespace bk_internal;

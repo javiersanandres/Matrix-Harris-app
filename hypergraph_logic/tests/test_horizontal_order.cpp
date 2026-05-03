@@ -18,6 +18,8 @@ namespace hypergraph_logic {
                 explicit TestGraph(const std::string& name) : GraphicalHypergraph(name) {}
                 std::map<int, LayerData>& layers() { return layers_; }
                 std::unordered_map<Node*, NodeLayout>& nodeLayout() { return node_layout_; }
+				void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
+				void orderHyperedges(int layer) { GraphicalHypergraph::orderHyperedges(layer); }
             };
 
             // ── Graph-building helpers ────────────────────────────────────────────────
@@ -32,9 +34,9 @@ namespace hypergraph_logic {
                 return nullptr;
             }
 
-            // Run assignCoordinates then orderHyperedges for every layer.
+            // Run assignXCoordinates then orderHyperedges for every layer.
             static void runPipeline(TestGraph& g) {
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int n = static_cast<int>(g.layers().size());
                 for (int layer = 0; layer < n - 1; ++layer)
                     g.orderHyperedges(layer);
@@ -163,7 +165,7 @@ namespace hypergraph_logic {
                 TestGraph g("single_edge");
                 NodePtr A = g.createNode("A", 0, nullptr);
                 NodePtr B = g.createNode("B", 0, A);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 HyperedgePtr e = findEdge(g, A, B);
                 ASSERT_NE(e, nullptr);
                 g.orderHyperedges(0);
@@ -266,7 +268,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr D = g.createNode("D", 1, A);
                 NodePtr C = g.createNode("C", 0, B);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);
@@ -299,7 +301,7 @@ namespace hypergraph_logic {
                 // e3: M->N  (N at position 1 in layer 1)
                 NodePtr N = g.createNode("N", 1, M);   // creates e3: M->N
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf)
@@ -359,7 +361,7 @@ namespace hypergraph_logic {
                 // e2: B->E
                 NodePtr E = g.createNode("E", 1, B);   // creates e2: B->E
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);
@@ -422,7 +424,7 @@ namespace hypergraph_logic {
                 tgt[1] = g.createNode("T1", 0, src[2]);  // e2: S2->T1
                 tgt[0] = g.createNode("T0", 0, src[3]);  // e3: S3->T0
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);
@@ -479,7 +481,7 @@ namespace hypergraph_logic {
                 // e2: B->E
                 NodePtr E = g.createNode("E", 1, B);
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);
@@ -545,7 +547,7 @@ namespace hypergraph_logic {
                 NodePtr E = g.createNode("E", 1, D);  // e2: D->E (layer 1->2)
                 NodePtr F = g.createNode("F", 0, C);  // e3: C->F (layer 1->2)
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf0 = bruteForceMin(g, 0);
                 int bf1 = bruteForceMin(g, 1);
                 g.orderHyperedges(0);
@@ -612,7 +614,7 @@ namespace hypergraph_logic {
                 NodePtr C = g.createNode("C", 1, A);
                 NodePtr D = g.createNode("D", 0, B);
                 g.addConnection(C, D);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf0 = bruteForceMin(g, 0);
                 int bf1 = bruteForceMin(g, 1);
                 g.orderHyperedges(0);
@@ -632,7 +634,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 1, nullptr);
                 NodePtr D = g.createNode("D", 1, A);
                 NodePtr C = g.createNode("C", 0, B);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 g.orderHyperedges(0);
                 auto first = g.layers().at(0).outgoing_edges;
                 g.orderHyperedges(0);
@@ -670,7 +672,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode("B", 0, nullptr);
                 g.createNode("C", 1, A);
                 g.createNode("D", 1, B);
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);
@@ -693,7 +695,7 @@ namespace hypergraph_logic {
                 for (int i = 0; i < 5; ++i)
                     g.createNode("T" + std::to_string(4 - i), 0, src[i]);
 
-                g.assignCoordinates();
+                g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);   // 5! = 120 permutations
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);

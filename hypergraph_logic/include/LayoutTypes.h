@@ -36,5 +36,15 @@ namespace hypergraph_logic {
     // in the same layer. This is used just as a reference. There might be 
     // cases in which this distance is not respected, but it is a reference
     // to decide when there are overlapping conflicts after port assignemnt.
-	inline constexpr double MIN_VERTICAL_SEP = 10.0; 
+	inline constexpr double MIN_VERTICAL_SEP = 10.0;
+
+    // Vertical gap between the nodes bottom boxes and the first horizontal
+	// segment of the hyperedges. Similarly, the gap between the top boxes and 
+    // the last horizontal segment.
+	inline constexpr double LAYER_GAP = 60.0;
+
+
+    // Minimum vertical gap between two horizontal segments from different
+    // hyperedges in the same layer.
+	inline constexpr double HORIZONTAL_SEP = 30.0;
 } // namespace hypergraph_logic

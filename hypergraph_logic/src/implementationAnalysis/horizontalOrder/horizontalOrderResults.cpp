@@ -13,7 +13,7 @@
 //   For each configuration (n, e) where n = upper_nodes = lower_nodes and e
 //   grows linearly:
 //     • Generate one random two-layer hypergraph with RNG_SEED.
-//     • Run assignCoordinates() + orderHyperedges(0).
+//     • Run assignXCoordinates() + orderHyperedges(0).
 //     • Record: crossings after MIP, elapsed time.
 //   Results → results_stress.csv
 //
@@ -59,6 +59,8 @@ public:
     const std::unordered_map<Node*, NodeLayout>& nodeLayout() const {
         return node_layout_;
     }
+	void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
+	void orderHyperedges(int layer) { GraphicalHypergraph::orderHyperedges(layer); }
 };
 
 // ============================================================================
@@ -312,7 +314,7 @@ static StressResult runStress(const StressConfig& cfg) {
 
     ResultsGraph g = generateTwoLayer(
         cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
-    g.assignCoordinates();
+    g.assignXCoordinates();
 
     auto t0 = std::chrono::high_resolution_clock::now();
     g.orderHyperedges(0);
@@ -334,7 +336,7 @@ static CompResult runComparison(const CompConfig& cfg) {
 
     ResultsGraph g = generateTwoLayer(
         cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
-    g.assignCoordinates();
+    g.assignXCoordinates();
 
     // Snapshot edges before MIP reorders them.
     std::vector<HyperedgePtr> snapshot = g.getLayers().at(0).outgoing_edges;
