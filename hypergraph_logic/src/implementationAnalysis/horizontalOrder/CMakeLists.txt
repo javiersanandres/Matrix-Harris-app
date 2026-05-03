@@ -30,6 +30,7 @@ add_executable(horizontalOrderResults
     horizontalOrderResults.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../horizontalOrder.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../horizontalCoordinates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../minimizeCrossings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hyperedge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hypergraph.cpp

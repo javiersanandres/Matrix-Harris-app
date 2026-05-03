@@ -207,16 +207,22 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Connection addition management
 	// ============================================================================
-	NodePtr Hypergraph::createNode(const std::string& label, int layer_position, const NodePtr& parent){
+	NodePtr Hypergraph::createNode(const std::string& label, int layer_position, const NodePtr& parent) {
 		NodePtr node = std::make_shared<Node>(label);
 		all_nodes_.push_back(node);
 
-		if(!parent){
+		if (!parent) {
 			addNodeToLayer(0, layer_position, node);
 		}
-		else{
+		else {
 			createHyperedge({ parent }, { node }, parent->getLayer());
 			addNodeToLayer(parent->getLayer() + 1, layer_position, node);
+		}
+
+		if (layer_position == -1) {
+			// No specific position requested, so we will insert it at the rightmost and less
+			// disruptive position in the layer.
+			minimizeCrossingsForNodes({ node.get() }, node->getLayer(), node->getLayer());
 		}
 
 		return node;
@@ -235,11 +241,15 @@ namespace hypergraph_logic {
 		// Removing all sources triggers edge removal and also handles the connection rewiring
 		std::unordered_set<Node*> sources_set;
 		int node_layer = 0;
+		int min_layer = std::numeric_limits<int>::max();
 		for (const auto& s : sources) {
 			sources_set.insert(s.get());
-			
-			if(s->getLayer() + 1 > node_layer)
+
+			if (s->getLayer() + 1 > node_layer)
 				node_layer = s->getLayer() + 1;
+
+			if (s->getLayer() + 1 < min_layer)
+				min_layer = s->getLayer() + 1;
 		}
 		removeSourcesFromHyperedge(edge, sources_set, false);
 		addNodeToLayer(node_layer, -1, node);
@@ -271,6 +281,11 @@ namespace hypergraph_logic {
 				}
 			}
 		}
+
+		// Apply crossing minimization to the new node and all possible new dummy nodes created by splitting the edge
+		// or as a consequence of relocating the targets. We will decrease the number of sifting rounds by the purpose
+		// of preserving the mental map as much as possible, while obviously minimizing crossings as well.
+		minimizeCrossings(3, min_layer);
 		return node;
 	}
 
@@ -291,12 +306,33 @@ namespace hypergraph_logic {
 				removeHyperedgeFromLayer(edge->getLayer(), edge);
 			}
 			splitLongEdge(edge);
+
+			// Now, we should find the best position for the new source in layer 0, as well as for any new
+			// dummy nodes created by the splitting.
+			std::vector<Node*> nodes_to_minimize = { node.get() };
+			int max_layer = 0;
+			for (const auto& segment : all_hyperedges_[edge]) {
+				for (const auto& s : segment->getSources()) {
+					if (s->isDummy()) {
+						nodes_to_minimize.push_back(s.get());
+					}
+					if (s->getLayer() > max_layer) {
+						max_layer = s->getLayer();
+					}
+				}
+			}
+			minimizeCrossingsForNodes(nodes_to_minimize, 0, max_layer);
+		}
+		else { 
+			// The edge was short before, and it keeps on being short now, but we have to 
+			// find a good place for the new source in layer 0.
+			minimizeCrossingsForNodes({ node.get() }, 0, 0);
 		}
 		// No relocation is needed since the new source is in the first layer and no cycles
 		// can be created by adding a new source to an existing edge.
 		return node;
 	}
-	
+
 	NodePtr Hypergraph::createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge) {
 		if (!edge) return nullptr;
 		NodePtr node = std::make_shared<Node>(label);
@@ -315,6 +351,30 @@ namespace hypergraph_logic {
 		addNodeToLayer(node_layer, layer_position, node);
 		if (edgeIsShort(edge) < 0) { // The edge needs to be resplitted (it was long before).
 			splitLongEdge(edge);
+
+			// Now, we should find the best position for the new target in the layer, as well as for any new
+			// dummy nodes created by the splitting.
+			std::vector<Node*> nodes_to_minimize = { node.get() };
+			int max_layer = node_layer;
+			int min_layer = node_layer;
+			for (const auto& segment : all_hyperedges_[edge]) {
+				for (const auto& s : segment->getSources()) {
+					if (s->isDummy()) {
+						nodes_to_minimize.push_back(s.get());
+					}
+					if (s->getLayer() > max_layer) {
+						max_layer = s->getLayer();
+					}
+					if (s->getLayer() < min_layer) {
+						min_layer = s->getLayer();
+					}
+				}
+			}
+			minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
+		}
+		else {
+			// Just find the best position for the new target in its layer.
+			minimizeCrossingsForNodes({ node.get() }, node_layer, node_layer);
 		}
 		// Again it is fairly simple to see that no relocation is needed and 
 		// also no cycles can be created.
@@ -353,7 +413,7 @@ namespace hypergraph_logic {
 		//   - For any y in X, if b < y then we also have a < y (transitivity).
 		// Therefore, any preexisting connection x < y where x < a and b < y would now be redundant 
 		// and can be removed without losing any information about the partial order.
-		removeTransitiveConnections({ parent }, { child });
+		int start_layer = removeTransitiveConnections({ parent }, { child });
 
 		int parent_layer = parent->getLayer();
 		int child_layer = child->getLayer();
@@ -369,6 +429,27 @@ namespace hypergraph_logic {
 
 			// Rewire the connection from parent to child with the new dummy nodes and split the hyperedge.
 			splitLongEdge(edge);
+
+			if (start_layer < INT_MAX) {
+				// We needed to remove some redundant connections, which lead to the creation of new dummy nodes
+				// in between the layers. Therefore, at this point, we run global sifting from the start_layer.
+				// This case is less disruptive than the worst case, since fewer nodes are affected by the change,
+				// so we will allow fewer rounds of sifting.
+				minimizeCrossings(3, start_layer);
+			}
+			else {
+				// If no new dummy nodes were created when removing redudant connections, then we only need to minimize crossings for the
+				// new dummy nodes created by splitting the edge, which are a subset of the sources of the edge segments.
+				std::vector<Node*> nodes_to_minimize;
+				for (const auto& segment : all_hyperedges_[edge]) {
+					for (const auto& s : segment->getSources()) {
+						if (s->isDummy()) {
+							nodes_to_minimize.push_back(s.get());
+						}
+					}
+				}
+				minimizeCrossingsForNodes(nodes_to_minimize, parent_layer + 1, child_layer - 1);
+			}
 		}
 		else {
 			// Worst case: the child layer needs to be updated. This automatically implies that the new layer
@@ -376,6 +457,15 @@ namespace hypergraph_logic {
 			edge = createHyperedge({ parent }, { child }, parent_layer);
 
 			applyRelocationAndPropagate({ {child, parent_layer + 1} });
+
+			// We run global sifting from the min_layer of all parents to the affected child. Since this operation is
+			// quite disruptive, we will allow more rounds of sifting to try to minimize crossings as much as possible.
+			for (const auto& child_parent : child->getParents()) {
+				if (child_parent->getLayer() + 1 < start_layer) {
+					start_layer = child_parent->getLayer() + 1;
+				}
+			}
+			minimizeCrossings(10, start_layer);
 		}
 		return edge;
 	}
@@ -389,7 +479,7 @@ namespace hypergraph_logic {
 				throw std::logic_error("A node cannot be connected to itself.");
 			}
 		}
-		
+
 		// Even though some connections might be redundant, they can also encode an intention of grouping the sources and targets
 		// in a different manner. The policy applied to allow these regroupings is the following:
 		// If a pre-existing connection from the new source to (at least) one of the targets of the edge already exists,
@@ -412,11 +502,11 @@ namespace hypergraph_logic {
 				throw std::logic_error("This connection already exists in the diagram.");
 			}
 		}
-		
+
 		if (affected_targets.empty() && parentIsInAncestors(targets, source)) {
 			throw std::logic_error("This connection already exists in the diagram.");
 		}
-		
+
 		// Temporarily add the source and check for cycles
 		for (const auto& t : targets) {
 			if (affected_targets.count(t.get()) == 0) {
@@ -442,16 +532,16 @@ namespace hypergraph_logic {
 			for (const auto& hyperedge : affected_edges) {
 				removeTargetsFromHyperedge(hyperedge, affected_targets, false); // We will relocate later, so we avoid it here.
 			}
-			
+
 			// Now, reinstate the connections from the source to the affected targets since they were removed in the previous step.
 			for (const auto& t : affected_targets) {
 				source->addChild(t->shared_from_this());
 				t->addParent(source);
 			}
 		}
-		
+
 		// Remove any pre-existing connections which are now redundant.
-		removeTransitiveConnections({ source }, targets);
+		int start_layer = removeTransitiveConnections({ source }, targets);
 
 		// Special care, the previous call could have removed the edge from the hypergraph
 		// if all sources where ancestors of source. So we may have to readd it.
@@ -480,12 +570,57 @@ namespace hypergraph_logic {
 			else {
 				// The edge needs to be split or resplitted. 
 				splitLongEdge(edge);
+
+				if (start_layer < INT_MAX) {
+					// Update the start_layer to be the minimum layer of the new dummy nodes created by splitting the edge.
+					for (const auto& src : edge->getSources()) {
+						if (src->getLayer() + 1 < start_layer) {
+							start_layer = src->getLayer() + 1;
+						}
+					}
+				}
+				else {
+					// No new dummy nodes were created when removing redundant connections, so it is just a matter of placing
+					// the new dummy nodes created by splitting the edge in good positions to minimize crossings.
+					std::vector<Node*> nodes_to_minimize;
+					int max_layer = 0;
+					int min_layer = INT_MAX;
+					for (const auto& segment : all_hyperedges_[edge]) {
+						for (const auto& s : segment->getSources()) {
+							if (s->isDummy()) {
+								nodes_to_minimize.push_back(s.get());
+							}
+							if (s->getLayer() > max_layer) {
+								max_layer = s->getLayer();
+							}
+							if (s->getLayer() < min_layer) {
+								min_layer = s->getLayer();
+							}
+						}
+					}
+					minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
+				}
 			}
+
+			if (start_layer < INT_MAX) {
+				// We needed to remove some redundant connections, which lead to the creation of new dummy nodes
+				// in between the layers. Therefore, at this point, we run global sifting from the start_layer.
+				minimizeCrossings(3, start_layer);	
+			}
+
 		}
 		else {
-			// Inside the function call, if adding the new source has made the edge long,
-			// it will be split and the necessary dummy nodes will be added.
 			applyRelocationAndPropagate(relocations);
+
+			// After relocations are applied, we need to minimize crossings for all the affected nodes, starting from
+			// the shallowest dummy node (which will be located in the sources top layer + 1). Since this is a very
+			// disruptive operation, we will allow more rounds of sifting to try to minimize crossings as much as possible.
+			for (const auto& src : edge->getSources()) {
+				if (src->getLayer() + 1 < start_layer) {
+					start_layer = src->getLayer() + 1;
+				}
+			}
+			minimizeCrossings(10, start_layer);
 		}
 	}
 
@@ -573,7 +708,7 @@ namespace hypergraph_logic {
 		if (!affected_edges.empty()) {
 			// Remove the target from all the hyperedges in which it participates as so.
 			for (const auto& hyperedge : affected_edges) {
-				removeTargetsFromHyperedge(hyperedge, { target.get()}, false); // We will relocate later, so we avoid it here.
+				removeTargetsFromHyperedge(hyperedge, { target.get() }, false); // We will relocate later, so we avoid it here.
 			}
 			// Now, reinstate the connections from the target parents to the target since they were removed in the previous step.
 			for (const auto& s : already_existing_sources) {
@@ -581,9 +716,9 @@ namespace hypergraph_logic {
 				target->addParent(s->shared_from_this());
 			}
 		}
-		
+
 		// As before, we need to remove any pre-existing connections which are now redundant.
-		removeTransitiveConnections(sources, { target });
+		int start_layer = removeTransitiveConnections(sources, { target });
 
 		// Special care, the previous call could have removed the edge from the hypergraph
 		// if all targets where descendants of target. So we may have to readd it.
@@ -594,6 +729,16 @@ namespace hypergraph_logic {
 			// The child layer needs to be updated. This automatically implies that the new layer
 			// number is the parents_layer + 1 and this should propagate down to all the descendants of the child.
 			applyRelocationAndPropagate({ {target, parents_layer + 1} });
+
+			// No, after relocations are applied, we need to minimize crossings for all the affected nodes, starting from
+			// the shallowest dummy node (which will be located in the sources top layer + 1). Since this is a very disruptive
+			// operation, we will allow more rounds of sifting to try to minimize crossings as much as possible.
+			for (const auto& src : edge->getSources()) {
+				if (src->getLayer() + 1 < start_layer) {
+					start_layer = src->getLayer() + 1;
+				}
+			}
+			minimizeCrossings(10, start_layer);
 		}
 		else {
 			// Same as with adding a new source, the new edge could be long or short depending on the case.
@@ -604,7 +749,44 @@ namespace hypergraph_logic {
 			else {
 				// The edge needs to be split or resplitted. 
 				splitLongEdge(edge);
+
+				if (start_layer < INT_MAX) {
+					// Update the start_layer to be the minimum layer of the new dummy nodes created by splitting the edge.
+					for (const auto& src : edge->getSources()) {
+						if (src->getLayer() + 1 < start_layer) {
+							start_layer = src->getLayer() + 1;
+						}
+					}
+				}
+				else {
+					// No new dummy nodes were created when removing redundant connections, so it is just a matter of placing
+					// the new dummy nodes created by splitting the edge in good positions to minimize crossings.
+					std::vector<Node*> nodes_to_minimize;
+					int max_layer = 0;
+					int min_layer = INT_MAX;
+					for (const auto& segment : all_hyperedges_[edge]) {
+						for (const auto& s : segment->getSources()) {
+							if (s->isDummy()) {
+								nodes_to_minimize.push_back(s.get());
+							}
+							if (s->getLayer() > max_layer) {
+								max_layer = s->getLayer();
+							}
+							if (s->getLayer() < min_layer) {
+								min_layer = s->getLayer();
+							}
+						}
+					}
+					minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
+				}
 			}
+
+			if (start_layer < INT_MAX) {
+				// We needed to remove some redundant connections, which lead to the creation of new dummy nodes
+				// in between the layers. Therefore, at this point, we run global sifting from the start_layer.
+				minimizeCrossings(3, start_layer);
+			}
+
 		}
 	}
 
@@ -694,7 +876,7 @@ namespace hypergraph_logic {
 
 		// Snapshot before modifying
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;
-		
+
 		for (const auto& [edge, _] : snapshot) {
 			if (edge->containsSource(parent) && edge->containsTarget(child)) {
 				auto remaining_sources = edge->getSources();
@@ -703,16 +885,70 @@ namespace hypergraph_logic {
 				if (remaining_sources.empty()) return;
 
 				const auto& new_edge = createHyperedge(remaining_sources, { child }, -1);
-				int k = edgeIsShort(new_edge);
-				if (k >= 0) {
-					// The new edge is short, just add it to the layer data.
-					addHyperedgeToLayer(k, new_edge);
+				if (relocateNodes({ child })) {
+					if (child->getChildren().empty()) {
+						// The child has no children, so we just have to take care of the possibly
+						// created dummy nodes in the new edge (if relocating has caused splitting).
+						std::vector<Node*> nodes_to_minimize;
+						int min_layer = INT_MAX;
+						int max_layer = 0;
+						for (const auto& segment : all_hyperedges_[new_edge]) {
+							for (const auto& s : segment->getSources()) {
+								if (s->isDummy()) {
+									nodes_to_minimize.push_back(s.get());
+									if (s->getLayer() < min_layer) {
+										min_layer = s->getLayer();
+									}
+									if (s->getLayer() > max_layer) {
+										max_layer = s->getLayer();
+									}
+								}
+							}
+						}
+
+						minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
+					}
+					else {
+						int start_layer = child->getLayer();
+						for (const auto& child_parent : child->getParents()) {
+							if (child_parent->getLayer() + 1 < start_layer) {
+								start_layer = child_parent->getLayer() + 1;
+							}
+						}
+
+						minimizeCrossings(10, start_layer);
+					}
 				}
 				else {
-					// The new edge is long, we need to split it and add the necessary dummy nodes.
-					splitLongEdge(new_edge);
+					int k = edgeIsShort(new_edge);
+					if (k >= 0) {
+						// The new edge is short, just add it to the layer data.
+						addHyperedgeToLayer(k, new_edge);
+					}
+					else {
+						// The new edge is long, we need to split it and add the necessary dummy nodes.
+						splitLongEdge(new_edge);
+
+						// Locate the new dummy nodes created by splitting the edge in good positions to minimize crossings.
+						std::vector<Node*> nodes_to_minimize;
+						int min_layer = INT_MAX;
+						int max_layer = 0;
+						for (const auto& segment : all_hyperedges_[new_edge]) {
+							for (const auto& s : segment->getSources()) {
+								if (s->isDummy()) {
+									nodes_to_minimize.push_back(s.get());
+									if (s->getLayer() < min_layer) {
+										min_layer = s->getLayer();
+									}
+									if (s->getLayer() > max_layer) {
+										max_layer = s->getLayer();
+									}
+								}
+							}
+						}
+						minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
+					}
 				}
-				// TO-DO: Decide if you want relocation or not.
 				return; // There cannot be any other edge connecting the same parent and child, so we may stop after the first one.
 			}
 		}
@@ -825,7 +1061,22 @@ namespace hypergraph_logic {
 		// targets, so those targets (and their descendants) may need
 		// to relocate upward.
 		// ----------------------------------------------------------------
-		if (relocation) relocateNodes(original_edge->getTargets());
+		if (relocation) {
+			if (relocateNodes(original_edge->getTargets())) {
+				int start_layer = INT_MAX;
+				for (const auto& tgt : original_edge->getTargets()) {
+					for (const auto& p : tgt->getParents()) {
+						if (p->getLayer() + 1 < start_layer) {
+							start_layer = p->getLayer() + 1;
+						}
+					}
+				}
+
+				if (start_layer < INT_MAX) {
+					minimizeCrossings(10, start_layer);
+				}
+			}
+		}
 	}
 
 	static bool allTargetsDead(const HyperedgePtr& seg, const std::unordered_set<Node*>& dead_dummies, const std::unordered_set<Node*>& removed_targets)
@@ -941,7 +1192,22 @@ namespace hypergraph_logic {
 		// parent may have changed and they (and descendants) must relocate 
 		// upward. Collect all affected nodes and batch-relocate.
 		// ----------------------------------------------------------------
-		if (relocation) relocateNodes(original_edge->getTargets());
+		if (relocation) {
+			if (relocateNodes(original_edge->getTargets())) {
+				int start_layer = INT_MAX;
+				for (const auto& tgt : original_edge->getTargets()) {
+					for (const auto& p : tgt->getParents()) {
+						if (p->getLayer() + 1 < start_layer) {
+							start_layer = p->getLayer() + 1;
+						}
+					}
+				}
+
+				if (start_layer < INT_MAX) {
+					minimizeCrossings(10, start_layer);
+				}
+			}
+		}
 	}
 
 	// ============================================================================
@@ -1021,7 +1287,7 @@ namespace hypergraph_logic {
 					edge->replaceSource(node2, node1);
 				}
 				if (!edge->isSegment()) modified_edges.push_back(edge);
-				continue; 
+				continue;
 			}
 			if (edge->containsTarget(node2)) {
 				if (edge->containsTarget(node1)) {
@@ -1079,16 +1345,25 @@ namespace hypergraph_logic {
 		// implicitly means that node1 and node2 were both in the same layer and
 		// the fusion doesn't change any other layer number, so no relocation is
 		// needed for any other node.
-		relocateNodes({ node1 });
+		if (relocateNodes({ node1 })) {
+			// Run global sifting for all the affected nodes.
+			int start_layer = node1->getLayer();
+			for (const auto& parent : node1->getParents()) {
+				if (parent->getLayer() + 1 < start_layer) {
+					start_layer = parent->getLayer() + 1;
+				}
+			}
+			minimizeCrossings(10, start_layer);
+		}
 	}
-	
+
 	// ============================================================================
 	// Helper methods for connection management
 	// ============================================================================
 	void Hypergraph::splitLongEdge(const HyperedgePtr& long_edge) {
 		if (long_edge->isSegment()) return;
 		if (!all_hyperedges_[long_edge].empty()) dissolveSegments({ long_edge.get() }); // If it was already split, dissolve the previous segments before splitting again.
-		
+
 		// ----------------------------------------------------------------
 		// Group sources and targets by layer
 		// ----------------------------------------------------------------
@@ -1206,8 +1481,9 @@ namespace hypergraph_logic {
 		}
 	}
 
-	void Hypergraph::removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children) {
-		if (children.empty()) return;
+	int Hypergraph::removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children) {
+		int min_affected_layer = INT_MAX;
+		if (children.empty()) return min_affected_layer; // No connections to remove, so no affected layer.
 
 		// Collect all ancestors of every parent (including the parents themselves).
 		std::unordered_set<Node*> parents_and_ancestors = getAllAncestors(parents);
@@ -1262,6 +1538,14 @@ namespace hypergraph_logic {
 					int k = edgeIsShort(new_edge);
 					if (k < 0) {
 						splitLongEdge(new_edge);
+
+						// There will be newly created dummies which will need to be located in a convenient
+						// position in the layer. So, min_affected_layer should be at most the layer of the 
+						// ancestors + 1, since the new dummies will be children of those ancestors.
+						for (const auto& anc : ancestor_sources_vec) {
+							if (anc->getLayer() + 1 < min_affected_layer)
+								min_affected_layer = anc->getLayer() + 1;
+						}
 					}
 					else {
 						addHyperedgeToLayer(k, new_edge);
@@ -1269,6 +1553,8 @@ namespace hypergraph_logic {
 				}
 			}
 		}
+		
+		return min_affected_layer;
 	}
 
 	bool Hypergraph::relocateNodes(const std::vector<NodePtr>& nodes) {

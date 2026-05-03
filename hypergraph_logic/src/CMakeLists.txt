@@ -46,6 +46,7 @@ add_library(hypergraph)
 target_sources(hypergraph
     PRIVATE
         Hypergraph.cpp
+        minimizeCrossings.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -108,7 +109,6 @@ endif()
 add_library(graphical_hypergraph)
 target_sources(graphical_hypergraph
     PRIVATE
-        minimizeCrossings.cpp
         horizontalCoordinates.cpp
         portAssignment.cpp
         $<IF:$<BOOL:${Gurobi_FOUND}>,horizontalOrder.cpp,>

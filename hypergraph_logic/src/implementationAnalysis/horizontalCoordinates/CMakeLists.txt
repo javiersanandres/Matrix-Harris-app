@@ -7,6 +7,7 @@ find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets)
 add_executable(horizontalCoordinatesVisualization
     horizontalCoordinatesVisualization.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../horizontalCoordinates.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../minimizeCrossings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hyperedge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hypergraph.cpp
@@ -17,7 +18,7 @@ target_include_directories(horizontalCoordinatesVisualization
         ${CMAKE_SOURCE_DIR}/hypergraph_logic/include
 )
 
-target_compile_definitions(horizontalCoordinatesVisualization PRIVATE BK_TEST)
+target_compile_definitions(horizontalCoordinatesVisualization PRIVATE BK_TEST GS_TEST)
 
 # Add MSVC-specific compiler flag for __cplusplus macro
 if(MSVC)

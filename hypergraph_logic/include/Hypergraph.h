@@ -105,6 +105,10 @@ namespace hypergraph_logic {
 		// layer_position controls where within the target layer the node is inserted;
 		// out-of-bounds values cause the node to be appended at the end of the layer.
 		//
+		// When layer_position is -1 (i.e. no specific position is requested), crossing
+		// minimization is applied to find the least disruptive position for the new node
+		// within its layer, regardless of whether it has a parent or not.
+		//
 		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent);
 
 		// ── createNode (into edge) ────────────────────────────────────────────────────────────────────
@@ -113,6 +117,11 @@ namespace hypergraph_logic {
 		// The original edge is effectively split into two: one from the edge's sources to the new node,
 		// and one from the new node to the edge's original targets, which are pushed one layer deeper.
 		// This is the main mechanism for adding structure to an existing connection.
+		//
+		// After the structural changes are applied, a global sifting pass is run starting from the
+		// shallowest layer affected by the insertion (i.e. the minimum layer among the sources + 1).
+		// The number of sifting rounds is intentionally kept low (3) to minimise disruption to the
+		// existing layout while still placing the new node and any new dummy nodes reasonably well.
 		//
 		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
 
@@ -124,6 +133,12 @@ namespace hypergraph_logic {
 		// If the edge was previously short and the new source makes it long, the edge is re-split
 		// into segments with the appropriate dummy nodes.
 		//
+		// Crossing minimization is applied after the structural changes:
+		//   - If the edge was re-split, minimizeCrossingsForNodes is called for the new source and
+		//     all new dummy nodes created by the split, over the range [0, deepest dummy layer].
+		//   - If the edge remained short, minimizeCrossingsForNodes is called for the new source
+		//     alone, restricted to layer 0.
+		//
 		NodePtr createSource(const std::string& label, int layer_position, const HyperedgePtr& edge);
 
 		// ── createTarget ─────────────────────────────────────────────────────────────────────────────
@@ -132,6 +147,13 @@ namespace hypergraph_logic {
 		// The new node is placed at layer max(source layers) + 1, guaranteeing the layering invariant.
 		// Parent-child relationships are wired from all existing sources to the new node.
 		// If the edge was previously short and the new target placement makes it long, it is re-split.
+		//
+		// Crossing minimization is applied after the structural changes:
+		//   - If the edge was re-split, minimizeCrossingsForNodes is called for the new target and
+		//     all new dummy nodes created by the split, over the range
+		//     [shallowest dummy layer, target layer].
+		//   - If the edge remained short, minimizeCrossingsForNodes is called for the new target
+		//     alone, restricted to its layer.
 		//
 		NodePtr createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge);
 
@@ -151,6 +173,15 @@ namespace hypergraph_logic {
 		//   - parent_layer >= child_layer:     the child must be pushed to parent_layer + 1, triggering
 		//                                      applyRelocationAndPropagate for it and all its descendants.
 		//
+		// Crossing minimization strategy after the structural changes:
+		//   - Short edge: no minimization needed, the new edge fits without creating new nodes.
+		//   - Long edge, no transitive removals: minimizeCrossingsForNodes is called for the new dummy
+		//     nodes only, over the intermediate layer range [parent_layer + 1, child_layer - 1].
+		//   - Long edge, with transitive removals: global sifting (3 rounds) is run from the shallowest
+		//     layer affected by any new dummy created during the transitive removal splits.
+		//   - Relocation case: global sifting (10 rounds) is run from the shallowest layer among all
+		//     of the child's parents, to account for the wider disruption caused by the propagation.
+		//
 		// Returns the newly created hyperedge (before any splitting).
 		//
 		HyperedgePtr addConnection(const NodePtr& parent, const NodePtr& child);
@@ -169,6 +200,15 @@ namespace hypergraph_logic {
 		// After the source is added, targets may need to be relocated downward (since the new source
 		// might be in a deeper layer than the existing ones), and the edge may need to be re-split.
 		//
+		// Crossing minimization strategy after the structural changes:
+		//   - No relocation needed, edge stayed short: no minimization.
+		//   - No relocation needed, edge is long, no transitive removals: minimizeCrossingsForNodes
+		//     for the new dummy nodes over their layer range.
+		//   - No relocation needed, edge is long, with transitive removals: the start_layer is updated
+		//     to the shallowest layer affected, then global sifting (3 rounds) is run from start_layer.
+		//   - Relocation needed: global sifting (10 rounds) from the shallowest source layer + 1,
+		//     to account for the wider disruption caused by the propagation.
+		//
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source);
 
 		// ── addTargetToEdge ───────────────────────────────────────────────────────────────────────────
@@ -179,6 +219,14 @@ namespace hypergraph_logic {
 		// After adding the target, if its current layer is shallower than max(source layers) + 1,
 		// it must be relocated downward via applyRelocationAndPropagate; otherwise the edge is
 		// re-evaluated for shortness and split if necessary.
+		//
+		// Crossing minimization strategy mirrors addSourceToEdge exactly:
+		//   - No relocation needed, edge stayed short: no minimization.
+		//   - No relocation needed, edge is long, no transitive removals: minimizeCrossingsForNodes
+		//     for the new dummy nodes over their layer range.
+		//   - No relocation needed, edge is long, with transitive removals: global sifting (3 rounds)
+		//     from the shallowest layer affected by any split during transitive removal.
+		//   - Relocation needed: global sifting (10 rounds) from the shallowest source layer + 1.
 		//
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target);
 
@@ -207,8 +255,15 @@ namespace hypergraph_logic {
 		// that contains parent as a source and child as a target, and extracting child from it.
 		// If parent was the only source on that edge, the edge is deleted; otherwise, the remaining
 		// sources are preserved in a new edge that is re-split or re-layered as needed.
-		// The child is not relocated: the assumption is that keeping the child at its current depth
-		// is the intended behaviour after a connection removal.
+		//
+		// If the child relocates upward as a result (it no longer needs to be as deep), crossing
+		// minimization is applied:
+		//   - If the child has no children of its own: minimizeCrossingsForNodes for any new dummy
+		//     nodes created by re-splitting the new edge after relocation.
+		//   - If the child has children: global sifting (10 rounds) from the shallowest parent
+		//     layer + 1, since the relocation propagates through the child's descendants.
+		// If the child does not relocate and the new edge is long: minimizeCrossingsForNodes for
+		// the new dummy nodes over their layer range.
 		//
 		void removeConnection(const NodePtr& parent, const NodePtr& child);
 
@@ -227,6 +282,8 @@ namespace hypergraph_logic {
 		//
 		// The relocation flag controls whether the targets of the edge are subsequently relocated
 		// upward (some of them may now be deeper than necessary if their deepest parent was removed).
+		// When relocation is true and at least one node actually moves, global sifting (10 rounds)
+		// is run from the shallowest new parent layer + 1 among all relocated targets.
 		//
 		void removeSourcesFromHyperedge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources_to_remove, bool relocation);
 
@@ -241,6 +298,8 @@ namespace hypergraph_logic {
 		//
 		// The relocation flag controls whether the remaining targets are subsequently relocated upward,
 		// since some of them may have fewer parents and could legally sit in a shallower layer.
+		// When relocation is true and at least one node actually moves, global sifting (10 rounds)
+		// is run from the shallowest new parent layer + 1 among all relocated targets.
 		//
 		void removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation);
 
@@ -261,7 +320,9 @@ namespace hypergraph_logic {
 		// duplicate hyperedges (same source set and target set), the duplicates are dissolved.
 		//
 		// Finally, node1 is relocated if its optimal layer changed as a result of inheriting
-		// node2's parents; all its descendants are propagated accordingly.
+		// node2's parents; all its descendants are propagated accordingly. If relocation occurs,
+		// global sifting (10 rounds) is run from the shallowest parent layer + 1 of node1 to
+		// account for the full extent of the disruption.
 		//
 		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_label);
 
@@ -424,12 +485,18 @@ namespace hypergraph_logic {
 		// new parents AND whose targets are descendants of (or equal to) the new children, the
 		// overlapping (source, target) combinations are redundant. The ancestor sources are removed
 		// from those edges; if the remaining targets of those sources are still needed, a new trimmed
-		// edge is created to preserve that non-redundant information.
+		// edge is created to preserve that non-redundant information. If that trimmed edge is long,
+		// it is split, creating new dummy nodes in intermediate layers.
 		//
 		// This enforces the Hasse-diagram invariant: no connection exists if it can be inferred by
 		// following other connections transitively.
 		//
-		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children);
+		// Returns the shallowest layer at which a new dummy node was created as a result of splitting
+		// a trimmed edge (i.e. ancestor_layer + 1 for the shallowest ancestor involved). Returns
+		// INT_MAX if no splitting occurred, signalling to the caller that no new dummy nodes need
+		// to be placed by a subsequent crossing minimization pass.
+		//
+		int removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children);
 
 		// ── relocateNodes ────────────────────────────────────────────────────────────────────────────
 		//
@@ -521,5 +588,41 @@ namespace hypergraph_logic {
 		// so that the graph can be rolled back if a cycle would be introduced.
 		//
 		bool checkCycles(const NodePtr& node);
+
+		// ====================================================================
+		// Crossing minimization management
+		// ====================================================================
+
+		// ── minimizeCrossings ────────────────────────────────────────────────────────────────────────
+		//
+		// Runs the global sifting algorithm over all layers from start_layer to the deepest layer
+		// in the graph, writing the optimised node order back to LayerData::nodes.
+		//
+		// This is the heavy-weight crossing minimization path. It is called after operations that
+		// cause widespread structural disruption — such as node relocation with propagation — where
+		// many layers are affected simultaneously and a focused per-node pass would be insufficient.
+		// The number of sifting rounds is tuned per call site: higher values (e.g. 10) are used when
+		// the disruption is large; lower values (e.g. 3) are used when fewer nodes are affected and
+		// preserving the existing layout matters more than reaching a global optimum.
+		//
+		// Returns the crossing count after sifting.
+		//
+		int minimizeCrossings(int sifting_rounds, int start_layer);
+
+		// ── minimizeCrossingsForNodes ─────────────────────────────────────────────────────────────────
+		//
+		// Runs a targeted crossing minimization pass that only moves the blocks associated with the
+		// given nodes (plus any hub whose every neighbour is also movable), leaving all other nodes
+		// in place. This preserves the existing layout as much as possible — the mental map — while
+		// still finding the best positions for the newly introduced nodes.
+		//
+		// This is the light-weight crossing minimization path. It is called when a small number of
+		// new nodes are introduced (a new real node, or the dummy nodes from a single edge split)
+		// and the rest of the graph should be disturbed as little as possible.
+		//
+		// The sifting is performed over [start_layer, end_layer]. The result is written back to
+		// LayerData::nodes. Returns the crossing count after the pass.
+		//
+		int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer);
 	};
 } // namespace hypergraph_logic

@@ -63,22 +63,11 @@ namespace hypergraph_logic {
 		//   sifting_rounds — maximum number of full passes over all nodes.
 		//                    Terminates early when no improvement is found.
 		//                    Default: 10 (empirical).
-		//   start_layer    — first layer included in the sifted region.
-		//                    Layers below start_layer are fixed anchors whose
-		//                    edges still count toward crossings but whose nodes
-		//                    are never moved. Pass 0 to sift the whole graph.
 		//
 		// Returns the total crossing count of the final ordering.
-		int minimizeCrossings(int sifting_rounds = 10, int start_layer = 0);
-
-		// Also part of the crossing minimization problem, this function is used when 
-		// new connections are added to place new nodes in the best position that 
-		// minimises crossings and respects the user's mental map as much as possible.
-		// It is used for example when long-edge splitting creates new dummy nodes, or 
-		// when the user adds a new node and connects it to existing nodes. It can also
-		// be used when adding a new connection changes only one node's layer, so we don't
-		// have to progragate down (which would imply using the global sifting).
-		int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer);
+		int minimizeCrossings(int sifting_rounds = 10) {
+			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
+		}
 
 		// ── Stage 2: node x-coordinates ───────────────────────────────────────────
 		//

@@ -287,7 +287,7 @@ namespace hypergraph_logic {
 
                 G2 g2 = buildG2(g.layers());
 
-                EXPECT_TRUE(isInnerSegment(g2, 3, 5))
+                EXPECT_TRUE(isInnerSegment(g2, 2, 4))
                     << "(d1, d2) should be an inner segment";
             }
 

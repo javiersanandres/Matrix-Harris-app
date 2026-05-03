@@ -618,59 +618,29 @@ namespace sifting_internal {
 			combinations *= static_cast<double>(nb - S_.fixed_position_count - i);
 			combinations /= static_cast<double>(i + 1);
 			if (combinations > 1e6) {
-				// The computation is too large, so we skip the exhaustive search and run regular
-				// sifting instead. The only difference is that we do not move all blocks within
-				// the window [start_layer_, end_layer_], but only those that are not partially
-				// cut dummy chains.
-				// 
-				// A dummy-chain block can extend beyond end_layer_ when siftNodes is called
-				// with a window smaller than the full graph. Its lower G1 node sits at virtual
-				// layer 2*L where L > end_layer_, meaning the chain continues past the window
-				// we are allowed to touch. Moving such a block would corrupt the ordering of
-				// layers outside the window, so we remove it from the movable set.
-				//
-				// We only need to check the lower end: the anchor layer at start_layer_-1
-				// already pins any chain that enters the window from above, so cut chains at
-				// the top are never added to movable_set in the first place.
+				// Treat all movable blocks as one composite block and sweep it left as a
+				// unit. Each step moves the composite one position left via mb consecutive
+				// siftingSwaps. Cost: O(nb * mb) instead of O(C(nb, mb)).
+				int best_chi = 0;
+				BlockList best_B = B_;
+				int chi = 0;
 
-				for (int bid : B_) {
-					if (S_.pi[bid] < S_.fixed_position_count) continue; // anchor, never move
-					if (movable_set.count(bid)) continue;                // already movable
-
-					const std::vector<int>& block_nodes = S_.blocks[bid].g1_nodes;
-
-					// Find the deepest G1 node in the block.
-					int deepest_g1 = block_nodes[0];
-					int deepest_layer = S_.g1_nodes[deepest_g1].g1_layer;
-					for (int g1_idx : block_nodes) {
-						if (S_.g1_nodes[g1_idx].g1_layer > deepest_layer) {
-							deepest_layer = S_.g1_nodes[g1_idx].g1_layer;
-							deepest_g1 = g1_idx;
-						}
-					}
-					const G1Node& deepest = S_.g1_nodes[deepest_g1];
-
-					// Non-dummy blocks carry no chain risk.
-					if (deepest.original == nullptr || !deepest.original->isDummy() || deepest_layer < 2 * end_layer_) {
-						movable_set.insert(bid);
-						continue;
+				for (int k = nb - mb; k > S_.fixed_position_count; k--) {
+					// Move the composite block one step left: swap each of its mb elements
+					// with the fixed block that just entered on the right.
+					for (int j = k; j < mb + k; j++) {
+						chi += siftingSwap(B_[j - 1], B_[j]);
+						std::swap(B_[j - 1], B_[j]);
 					}
 
-					// Dummy block whose deepest node cannot start a further chain.
-					if (!isDummyChainStart(deepest.original))
-						movable_set.insert(bid);
-				}
-
-				// Sift only the movable blocks. Use a snapshot of B_ so that
-				// modifications inside siftingStep do not corrupt the iteration.
-				int numblocks = static_cast<int>(B_.size());
-				for (int round = 0; round < 10; round++) {
-					BlockList snapshot = B_;
-					for (int j = S_.fixed_position_count; j < numblocks; j++) {
-						if (movable_set.count(snapshot[j]))
-							siftingStep(snapshot[j]);
+					if (chi < best_chi) {
+						best_chi = chi;
+						best_B = B_;
 					}
 				}
+
+				B_ = std::move(best_B);
+				sortAdjacencies();
 				return;
 			}
 		}
@@ -678,9 +648,7 @@ namespace sifting_internal {
 		int best_chi = 0;
 		BlockList best_B = B_;
 
-		// The first movable block starts at position nb - mb.
-		int movable_start = nb - mb;
-		siftNodesSearch(movable_start, nb, B_.back(), movable_set, 0, best_chi, best_B);
+		siftNodesSearch(nb - mb, nb, B_.back(), movable_set, 0, best_chi, best_B);
 
 		// Apply the best ordering found.
 		B_ = std::move(best_B);
@@ -789,12 +757,10 @@ namespace hypergraph_logic {
 	//
 	// Runs the global sifting algorithm over [start_layer, last_layer], writing
 	// the optimised order back to LayerData::nodes and returning the crossing count.
-
-	int GraphicalHypergraph::minimizeCrossings(int sifting_rounds, int start_layer) {
+	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer) {
 		if (getLayers().empty()) return 0;
-
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
-		GlobalSifter sifter(start_layer, last_layer, layers_);
+		GlobalSifter sifter(start_layer, last_layer, layers_, false);
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.runSifting(sifting_rounds);
 		sifter.writeBack();
@@ -808,7 +774,7 @@ namespace hypergraph_logic {
 	// nodes to find their locally best positions within the current ordering.
 	// The result is written back to LayerData::nodes.
 
-	int GraphicalHypergraph::minimizeCrossingsForNodes(
+	int Hypergraph::minimizeCrossingsForNodes(
 		const std::vector<Node*>& nodes,
 		int start_layer,
 		int end_layer)

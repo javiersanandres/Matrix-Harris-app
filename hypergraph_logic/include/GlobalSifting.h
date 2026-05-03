@@ -12,7 +12,7 @@
 //
 // ==================================================================================
 
-#include "GraphicalHypergraph.h"
+#include "Hypergraph.h"
 #include <algorithm>
 #include <climits>
 #include <map>
