@@ -11,7 +11,7 @@ add_executable(hypergraph_logic_tests
     test_minimize_crossings_hypergraph.cpp 
     test_horizontal_coordinates.cpp
     test_port_assignment.cpp 
-    test_horizontal_order.cpp "test_graphicalhypergraph_persistence.cpp")
+    test_horizontal_order.cpp "test_graphicalhypergraph_persistence.cpp" "test_graphicalhypergraph.cpp")
 
 target_include_directories(hypergraph_logic_tests
     PRIVATE

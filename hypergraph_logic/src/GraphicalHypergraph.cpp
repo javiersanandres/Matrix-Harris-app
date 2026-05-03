@@ -139,8 +139,16 @@ namespace hypergraph_logic {
 				}
 			}
 
-			// The current layer's node row sits one LAYER_GAP below the bottom-most bar.
-			layer_layout_[layer_idx] = y_levels.back().y - LAYER_GAP - NODE_HEIGHT / 2.0;
+			if (y_levels[0].bars.empty()){
+				// No bars at the first level, which means that all hyperedges are trivial
+				// and therfore, the next layer_layout does not need to be pushed down by
+				// the default gap.
+				layer_layout_[layer_idx] = layer_layout_[layer_idx - 1] - LAYER_GAP - NODE_HEIGHT;
+			}
+			else {
+				// The current layer's node row sits one LAYER_GAP below the bottom-most bar.
+				layer_layout_[layer_idx] = y_levels.back().y - LAYER_GAP - NODE_HEIGHT / 2.0;
+			}
 
 			incoming_edges = layer_data.outgoing_edges;
 			nodes_in_prev_layer = layer_data.nodes;
