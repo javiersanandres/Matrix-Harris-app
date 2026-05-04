@@ -34,7 +34,7 @@ namespace hypergraph_logic {
 	// ============================================================================
 	class Hypergraph {
 	public:
-		explicit Hypergraph(std::string name);
+		explicit Hypergraph(const std::string& name);
 
 		// ====================================================================
 		// Node management

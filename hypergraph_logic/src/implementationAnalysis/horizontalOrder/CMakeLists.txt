@@ -34,6 +34,9 @@ add_executable(horizontalOrderResults
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Node.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hyperedge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hypergraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraphPersistence.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../portAssignment.cpp
 )
 
 target_include_directories(horizontalOrderResults
@@ -44,9 +47,12 @@ target_include_directories(horizontalOrderResults
 )
 
 target_link_libraries(horizontalOrderResults
+    PUBLIC
+        nlohmann_json::nlohmann_json
     PRIVATE
         ${Gurobi_LIBRARIES}
 )
+
 
 if(MSVC)
     target_compile_options(horizontalOrderResults PRIVATE

@@ -125,6 +125,7 @@ target_sources(graphical_hypergraph
         portAssignment.cpp
         GraphicalHypergraph.cpp
         GraphicalHypergraphPersistence.cpp
+        JointGraphicalHypergraph.cpp
         $<IF:$<BOOL:${Gurobi_FOUND}>,horizontalOrder.cpp,>
     PUBLIC
         FILE_SET HEADERS
@@ -150,7 +151,7 @@ target_link_libraries(graphical_hypergraph
 
 # Enable BK_TEST when building tests
 if(BUILD_TESTING)
-    target_compile_definitions(graphical_hypergraph PRIVATE BK_TEST)
+    target_compile_definitions(graphical_hypergraph PRIVATE BK_TEST JGH_TEST)
 endif()
 
 # Keep the analysis separate from the core libraries.

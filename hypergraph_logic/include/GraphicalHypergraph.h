@@ -1,5 +1,6 @@
 #pragma once
 #include "Hypergraph.h"
+#include <string>
 
 namespace hypergraph_logic {
 
@@ -53,7 +54,20 @@ namespace hypergraph_logic {
 	// ============================================================================
 	class GraphicalHypergraph : public Hypergraph {
 	public:
-		using Hypergraph::Hypergraph;
+		explicit GraphicalHypergraph(const std::string& name);
+
+		// ── Unique identity ───────────────────────────────────────────────────────
+		//
+		// Every GraphicalHypergraph receives a unique ID at construction time,
+		// generated from a process-wide monotonically increasing counter.  The ID
+		// is preserved through clone() and toJSON()/fromJSON() so that the
+		// JointGraphicalHypergraph can recognise a graph it has already
+		// incorporated even after the graph has been serialized and reloaded.
+		//
+		// The ID is intentionally read-only after construction: it identifies the
+		// graph's logical identity, not its content.
+		//
+		const std::string& getId() const { return id_; }
 
 		// ── Stage 1: crossing minimisation ────────────────────────────────────────
 		//
@@ -66,7 +80,9 @@ namespace hypergraph_logic {
 		//
 		// Returns the total crossing count of the final ordering.
 		int minimizeCrossings(int sifting_rounds = 10) {
-			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
+			int crossings = Hypergraph::minimizeCrossings(sifting_rounds, 0);
+			computeLayout();
+			return crossings;
 		}
 
 		// Run the complete layout pipeline, executing stages 2-5 in order.
@@ -83,11 +99,47 @@ namespace hypergraph_logic {
 
 		double getX(const NodePtr& node) const;
 
+		// ── Persistence ───────────────────────────────────────────────────────────
 
-		GraphicalHypergraph clone() const;
+		// ── toJSON ────────────────────────────────────────────────────────────────
+		//
+		// Serializes the complete state of the graph — topology, layer ordering,
+		// layout data, and unique ID — to a JSON file at the given path.
+		//
+		// Throws std::runtime_error if the file cannot be opened for writing.
+		//
 		void toJSON(const std::string& path) const;
+
+		// ── fromJSON ──────────────────────────────────────────────────────────────
+		//
+		// Static factory that reconstructs a GraphicalHypergraph from a JSON file
+		// previously written by toJSON(). The unique ID stored in the file is
+		// restored exactly, so the graph retains its original identity.
+		//
+		// Throws std::runtime_error if the file cannot be opened or the JSON is
+		// malformed.
+		//
 		static GraphicalHypergraph fromJSON(const std::string& path);
+
+		// ── clone ─────────────────────────────────────────────────────────────────
+		//
+		// Produces a fully independent deep copy of this graph, including all
+		// layout data. The clone receives the same unique ID as the original so
+		// that the JointGraphicalHypergraph can still recognise it.
+		//
+		GraphicalHypergraph clone() const;
+
 	protected:
+		// ── Unique ID ─────────────────────────────────────────────────────────────
+		//
+		// Assigned once at construction from a process-wide counter.
+		// Preserved verbatim by clone() and fromJSON().
+		// Stored in the protected section so that subclasses (e.g.
+		// JointGraphicalHypergraph) and the persistence functions can access it
+		// directly without a public setter.
+		//
+		std::string id_;
+
 		std::unordered_map<Node*, NodeLayout> node_layout_; // Map from node pointer to its layout data.
 		std::unordered_map<Hyperedge*, double> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate).
 		std::unordered_map<int, double> layer_layout_; // Map from layer index to its assigned y coordinate.
@@ -124,6 +176,36 @@ namespace hypergraph_logic {
 		// It also assings a y coordinate to each layer, which is also the y coordinate
 		// of the nodes in that layer.
 		void assignYCoordinates();
+
+		// ── mergeFrom ─────────────────────────────────────────────────────────────────
+		//
+		// Merges the contents of another GraphicalHypergraph (passed by rvalue so its
+		// internal containers can be moved rather than copied) into this graph.
+		//
+		// The merge is structural and flat: every node, edge, segment, and layout entry
+		// from other is incorporated into the corresponding collection of this graph.
+		// No parent/child links or hyperedge source/target lists are modified — the
+		// incoming graph is assumed to be already internally consistent, having been
+		// produced by clone().
+		//
+		// Layer merging follows the side-by-side rule:
+		//   left = true  — incoming nodes and outgoing edges are prepended to each
+		//                  layer's existing vectors, so the incoming graph appears to
+		//                  the left of all currently present content.
+		//   left = false — incoming nodes and outgoing edges are appended to each
+		//                  layer's existing vectors, so the incoming graph appears to
+		//                  the right.
+		// Layers that do not yet exist in this graph are created on demand.¡
+		void mergeFrom(GraphicalHypergraph&& other, bool left);
+
+	private:
+		// ── ID generation ─────────────────────────────────────────────────────────
+		//
+		// Returns the next available ID string from a process-wide atomic counter.
+		// Called exactly once per GraphicalHypergraph construction; clone() and
+		// fromJSON() restore the existing ID directly without calling this.
+		//
+		static std::string generateId();
 	};
 
 } // namespace hypergraph_logic

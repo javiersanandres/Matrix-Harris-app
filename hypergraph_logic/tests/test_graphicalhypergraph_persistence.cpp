@@ -229,7 +229,7 @@ namespace hypergraph_logic {
                         if (g.rawEdgeLayout().find(orig.get()) != g.rawEdgeLayout().end())
                             return false;
 
-						for (const auto& seg : segs) {
+                        for (const auto& seg : segs) {
                             if (g.rawEdgeLayout().find(seg.get()) == g.rawEdgeLayout().end())
                                 return false;
                         }
@@ -522,6 +522,19 @@ namespace hypergraph_logic {
                 assertStructurallyEqual(g, copy);
             }
 
+            TEST_F(PersistenceTest, Clone_IdPreserved) {
+                buildSimpleGraph();
+                auto copy = TestableGraphicalHypergraph(g.clone());
+                // clone() must carry the same logical identity as the original.
+                EXPECT_EQ(g.getId(), copy.getId());
+            }
+
+            TEST_F(PersistenceTest, Clone_IdPreserved_LongEdgeGraph) {
+                buildGraphWithLongEdge();
+                auto copy = TestableGraphicalHypergraph(g.clone());
+                EXPECT_EQ(g.getId(), copy.getId());
+            }
+
             TEST_F(PersistenceTest, Clone_SegmentOriginsPointIntoClone) {
                 buildGraphWithLongEdge();
                 auto copy = TestableGraphicalHypergraph(g.clone());
@@ -661,6 +674,35 @@ namespace hypergraph_logic {
                 };
                 auto loaded = NameReader(GraphicalHypergraph::fromJSON(tmp.path));
                 EXPECT_EQ(loaded.pubName(), "test_graph");
+            }
+
+            TEST_F(PersistenceTest, RoundTrip_IdPreserved) {
+                buildSimpleGraph();
+                TempFile tmp("id_preserved.json");
+                const std::string original_id = g.getId();
+                g.toJSON(tmp.path);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(tmp.path));
+                // fromJSON() must restore the original ID, not generate a fresh one.
+                EXPECT_EQ(loaded.getId(), original_id);
+            }
+
+            TEST_F(PersistenceTest, RoundTrip_DoubleRoundTrip_IdStable) {
+                buildSimpleGraph();
+                TempFile tmp1("id_stable_1.json");
+                TempFile tmp2("id_stable_2.json");
+                const std::string original_id = g.getId();
+                g.toJSON(tmp1.path);
+                auto loaded1 = TestableGraphicalHypergraph(GraphicalHypergraph::fromJSON(tmp1.path));
+                loaded1.toJSON(tmp2.path);
+                auto loaded2 = TestableGraphicalHypergraph(GraphicalHypergraph::fromJSON(tmp2.path));
+                // ID must survive multiple serialization round-trips unchanged.
+                EXPECT_EQ(loaded2.getId(), original_id);
+            }
+
+            TEST_F(PersistenceTest, TwoDistinctGraphs_HaveDifferentIds) {
+                TestableGraphicalHypergraph g2{ "other_graph" };
+                EXPECT_NE(g.getId(), g2.getId());
             }
 
             // =============================================================================

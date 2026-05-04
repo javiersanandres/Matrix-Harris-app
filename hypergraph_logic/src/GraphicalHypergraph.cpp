@@ -4,6 +4,13 @@
 #include <algorithm>
 
 namespace hypergraph_logic {
+
+	GraphicalHypergraph::GraphicalHypergraph(const std::string& name)
+		: Hypergraph(name)
+		, id_(generateId())
+	{
+	}
+
 	struct EdgeSpan {
 		double xmin = std::numeric_limits<double>::max();
 		double xmax = std::numeric_limits<double>::lowest();

@@ -7,7 +7,7 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Constructor
 	// ============================================================================
-	Hypergraph::Hypergraph(std::string name) : name_(std::move(name)) {};
+	Hypergraph::Hypergraph(const std::string& name) : name_(std::move(name)) {};
 
 	// ============================================================================
 	// Node management
@@ -882,7 +882,18 @@ namespace hypergraph_logic {
 				auto remaining_sources = edge->getSources();
 				remaining_sources.erase(std::remove(remaining_sources.begin(), remaining_sources.end(), parent), remaining_sources.end());
 				removeTargetsFromHyperedge(edge, { child.get() }, false);
-				if (remaining_sources.empty()) return;
+				if (remaining_sources.empty()) {
+					if (relocateNodes({ child })) {
+						int start_layer = child->getLayer();
+						for (const auto& child_parent : child->getParents()) {
+							if (child_parent->getLayer() + 1 < start_layer) {
+								start_layer = child_parent->getLayer() + 1;
+							}
+						}
+						minimizeCrossings(10, start_layer);
+					}
+					return;
+				}
 
 				const auto& new_edge = createHyperedge(remaining_sources, { child }, -1);
 				if (relocateNodes({ child })) {

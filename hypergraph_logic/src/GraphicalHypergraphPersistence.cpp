@@ -1,5 +1,7 @@
 #include "GraphicalHypergraph.h"
 
+#include <atomic>
+
 #include <nlohmann/json.hpp>
 #include <fstream>
 #include <stdexcept>
@@ -8,8 +10,21 @@ using json = nlohmann::json;
 
 namespace hypergraph_logic {
 
+	// ============================================================================
+	// ID generation
+	// ============================================================================
+
+	std::string GraphicalHypergraph::generateId() {
+		static std::atomic<uint64_t> counter{ 1 };
+		return "gh-" + std::to_string(counter.fetch_add(1, std::memory_order_relaxed));
+	}
+
+	// ============================================================================
+	// Cloning and merging functionality
+	// ============================================================================
 	GraphicalHypergraph GraphicalHypergraph::clone() const {
 		GraphicalHypergraph copy(name_);
+		copy.id_ = id_;  // preserve identity across copies
 
 		// 1. Build a mapping from old Node* -> new NodePtr (fresh allocation).
 		std::unordered_map<Node*, NodePtr> node_map;
@@ -93,7 +108,36 @@ namespace hypergraph_logic {
 		return copy;
 	}
 
+	void GraphicalHypergraph::mergeFrom(GraphicalHypergraph&& other, bool left) {
+		for (const auto& node : other.all_nodes_)
+			all_nodes_.push_back(node);
 
+		for (auto& [orig, segs] : other.all_hyperedges_)
+			all_hyperedges_[orig] = std::move(segs);
+
+		for (auto& [layer_idx, src_data] : other.layers_) {
+			LayerData& dst = layers_[layer_idx];
+			if (left) {
+				dst.nodes.insert(dst.nodes.begin(),
+					src_data.nodes.begin(), src_data.nodes.end());
+				dst.outgoing_edges.insert(dst.outgoing_edges.begin(),
+					src_data.outgoing_edges.begin(), src_data.outgoing_edges.end());
+			}
+			else {
+				dst.nodes.insert(dst.nodes.end(),
+					src_data.nodes.begin(), src_data.nodes.end());
+				dst.outgoing_edges.insert(dst.outgoing_edges.end(),
+					src_data.outgoing_edges.begin(), src_data.outgoing_edges.end());
+			}
+		}
+
+		for (auto& [raw, layout] : other.node_layout_)
+			node_layout_[raw] = std::move(layout);
+		for (auto& [raw, y] : other.edge_layout_)
+			edge_layout_[raw] = y;
+		for (const auto& [idx, y] : other.layer_layout_)
+			layer_layout_.emplace(idx, y);
+	}
 
 	// ============================================================================
 	// toJSON
@@ -150,6 +194,7 @@ namespace hypergraph_logic {
 	void GraphicalHypergraph::toJSON(const std::string& path) const {
 		json j;
 		j["name"] = name_;
+		j["id"] = id_;
 
 		// ── 1. Assign stable integer IDs to every node ────────────────────────────
 		std::unordered_map<Node*, int> node_id;
@@ -294,6 +339,10 @@ namespace hypergraph_logic {
 		}
 
 		GraphicalHypergraph g(j.at("name").get<std::string>());
+		// Restore the original identity so the JointGraphicalHypergraph can
+		// recognise this graph even after a serialization round-trip.
+		if (j.contains("id"))
+			g.id_ = j.at("id").get<std::string>();
 
 		// ── Pass 1a: allocate nodes ───────────────────────────────────────────────
 		std::unordered_map<int, NodePtr> node_by_id;

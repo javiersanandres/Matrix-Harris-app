@@ -11,7 +11,7 @@ add_executable(hypergraph_logic_tests
     test_minimize_crossings_hypergraph.cpp 
     test_horizontal_coordinates.cpp
     test_port_assignment.cpp 
-    test_horizontal_order.cpp "test_graphicalhypergraph_persistence.cpp" "test_graphicalhypergraph.cpp")
+    test_horizontal_order.cpp "test_graphicalhypergraph_persistence.cpp" "test_graphicalhypergraph.cpp" "test_jointgraphicalhypergraph.cpp")
 
 target_include_directories(hypergraph_logic_tests
     PRIVATE
@@ -25,7 +25,7 @@ target_link_libraries(hypergraph_logic_tests
         GTest::gtest_main
 )
 
-target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST GS_TEST)
+target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST GS_TEST JGH_TEST)
 
 # Discover and register all tests
 include(GoogleTest)
