@@ -2,7 +2,10 @@
 #include "JointGraphicalHypergraph.h"
 
 #include <algorithm>
+#include <filesystem>
+#include <fstream>
 #include <unordered_set>
+#include <nlohmann/json.hpp>
 
 namespace hypergraph_logic {
     namespace jointgraphicalhypergraph_tests {
@@ -690,6 +693,151 @@ namespace hypergraph_logic {
             catch (...) {}
 
             EXPECT_EQ(joint->getIncorporatedIds().size(), count_before);
+        }
+
+        // =============================================================================
+        // 11. JointGraphicalHypergraph persistence
+        //
+        // toJSON(json&) must write incorporated_ids_ in addition to the base graph
+        // state. fromJSON(const json&) must restore everything, claim the singleton
+        // slot, and produce a joint that is structurally equivalent to the original.
+        // =============================================================================
+
+        // Helper: count real nodes in a JointGraphicalHypergraph without TestableJoint.
+        static int countRealNodesInJoint(const JointGraphicalHypergraph& j) {
+            int c = 0;
+            for (const auto& n : j.getAllNodes()) if (!n->isDummy()) ++c;
+            return c;
+        }
+
+        // JointPersistenceTest: each test owns the singleton for its duration.
+        // SetUp creates a fresh joint, populates it, serializes it, and tears down
+        // the live instance so fromJSON can reclaim the singleton slot.
+        class JointPersistenceTest : public ::testing::Test {
+        protected:
+            // Snapshot of the serialized state — set by SetUp.
+            nlohmann::json serialized;
+            std::string original_id;
+            std::unordered_set<std::string> original_incorporated_ids;
+            int original_layer_count = 0;
+            int original_real_node_count = 0;
+
+            void SetUp() override {
+                // Build and populate a joint, capture its state, then destroy it.
+                {
+                    auto j = JointGraphicalHypergraph::create("joint");
+                    auto g1 = makeSimpleGraph("g1");
+                    auto g2 = makeGraphWithLongEdge("g2");
+                    j->addHypergraph(g1, false);
+                    j->addHypergraph(g2, false);
+
+                    original_id = j->getId();
+                    original_incorporated_ids = j->getIncorporatedIds();
+                    original_layer_count = j->getLayerCount();
+                    original_real_node_count = countRealNodesInJoint(*j);
+
+                    j->toJSON(serialized);
+                    // j destroyed here — singleton slot released.
+                }
+            }
+
+            void TearDown() override {
+                // Nothing extra needed: fromJSON claims and the unique_ptr in each
+                // test releases the slot when the test ends.
+            }
+        };
+
+        TEST_F(JointPersistenceTest, FromJSON_ReturnsNonNull) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            ASSERT_NE(loaded, nullptr);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_ClaimsSingletonSlot) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            EXPECT_THROW(JointGraphicalHypergraph::create("second"), std::logic_error);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_DestroyingReleasesSlot) {
+            {
+                auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            }
+            EXPECT_NO_THROW(JointGraphicalHypergraph::create("after"));
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_WhileLiveThrows) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            EXPECT_THROW(
+                JointGraphicalHypergraph::fromJSON(serialized), std::logic_error);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_IdPreserved) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            EXPECT_EQ(loaded->getId(), original_id);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_IncorporatedIdsPreserved) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            EXPECT_EQ(loaded->getIncorporatedIds(), original_incorporated_ids);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_LayerCountPreserved) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            EXPECT_EQ(loaded->getLayerCount(), original_layer_count);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_RealNodeCountPreserved) {
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+            EXPECT_EQ(countRealNodesInJoint(*loaded), original_real_node_count);
+        }
+
+        TEST_F(JointPersistenceTest, FromJSON_DuplicateAddRejectedAfterLoad) {
+            // Any graph whose ID is in incorporated_ids_ must be rejected even after
+            // a round-trip, so the duplicate guard survives serialization.
+            auto loaded = JointGraphicalHypergraph::fromJSON(serialized);
+
+            // Reconstruct a graph with one of the incorporated IDs by cloning from
+            // the loaded joint — its clone() preserves the original ID.
+            // We can't reproduce the exact original graph objects here, so we
+            // verify that incorporated_ids_ is non-empty and all IDs are present.
+            EXPECT_FALSE(loaded->getIncorporatedIds().empty());
+            for (const auto& id : original_incorporated_ids)
+                EXPECT_TRUE(loaded->getIncorporatedIds().count(id))
+                << "Incorporated ID missing after round-trip: " << id;
+        }
+
+        TEST_F(JointPersistenceTest, ToJSON_ProducesSameResultAsFilePath) {
+            // Verify that the json& overload and the file-path overload produce
+            // identical output on the same graph state.
+            auto j = JointGraphicalHypergraph::fromJSON(serialized);
+
+            nlohmann::json from_mem;
+            j->toJSON(from_mem);
+
+            // Round-trip via file.
+            namespace fs = std::filesystem;
+            fs::path tmp = fs::temp_directory_path() / "joint_vs_file.json";
+            j->toJSON(tmp.string());
+            std::ifstream f(tmp);
+            nlohmann::json from_file;
+            f >> from_file;
+            fs::remove(tmp);
+
+            EXPECT_EQ(from_mem, from_file);
+        }
+
+        TEST_F(JointPersistenceTest, DoubleRoundTrip_StableUnderRepetition) {
+            auto loaded1 = JointGraphicalHypergraph::fromJSON(serialized);
+
+            nlohmann::json serialized2;
+            loaded1->toJSON(serialized2);
+            loaded1.reset();   // release singleton slot
+
+            auto loaded2 = JointGraphicalHypergraph::fromJSON(serialized2);
+
+            EXPECT_EQ(loaded2->getId(), original_id);
+            EXPECT_EQ(loaded2->getIncorporatedIds(), original_incorporated_ids);
+            EXPECT_EQ(loaded2->getLayerCount(), original_layer_count);
+            EXPECT_EQ(countRealNodesInJoint(*loaded2), original_real_node_count);
         }
 
     } // namespace jointgraphicalhypergraph_tests

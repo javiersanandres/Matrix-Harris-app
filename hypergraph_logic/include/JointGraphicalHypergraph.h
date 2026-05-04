@@ -6,6 +6,8 @@
 #include <unordered_set>
 #include <memory>
 
+using json = nlohmann::json;
+
 namespace hypergraph_logic {
 
 	// ============================================================================
@@ -138,6 +140,32 @@ namespace hypergraph_logic {
 		// incorporated into this joint so far.
 		//
 		const std::unordered_set<std::string>& getIncorporatedIds() const;
+
+		// ── Persistence ───────────────────────────────────────────────────────────
+
+		// ── toJSON ────────────────────────────────────────────────────────────────
+		//
+		// Extends GraphicalHypergraph::toJSON(json&) by also writing the
+		// incorporated_ids_ set under the key "incorporated_ids". This allows the
+		// joint to be fully round-tripped without re-adding each diagram manually.
+		//
+		void toJSON(nlohmann::json& j) const;
+
+		// Convenience overload: serializes to a JSON file at the given path.
+		void toJSON(const std::string& path) const;
+
+		// ── fromJSON ──────────────────────────────────────────────────────────────
+		//
+		// Static factory that reconstructs a live JointGraphicalHypergraph from a
+		// json object previously produced by toJSON(json&), restoring both the
+		// graph topology/layout and the incorporated_ids_ set.
+		// Throws std::logic_error if a live instance already exists.
+		//
+		static std::unique_ptr<JointGraphicalHypergraph> fromJSON(const nlohmann::json& j);
+
+		// Convenience overload: deserializes from a JSON file at the given path.
+		// Throws std::runtime_error if the file cannot be opened or is malformed.
+		static std::unique_ptr<JointGraphicalHypergraph> fromJSON(const std::string& path);
 
 	private:
 		// ── Private constructors ──────────────────────────────────────────────────

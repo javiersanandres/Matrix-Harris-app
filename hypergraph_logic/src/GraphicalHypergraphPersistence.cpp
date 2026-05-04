@@ -1,8 +1,6 @@
 #include "GraphicalHypergraph.h"
 
 #include <atomic>
-
-#include <nlohmann/json.hpp>
 #include <fstream>
 #include <stdexcept>
 
@@ -140,59 +138,15 @@ namespace hypergraph_logic {
 	}
 
 	// ============================================================================
-	// toJSON
+	// toJSON — core (json& overload)
 	//
-	// Serializes the full state of the GraphicalHypergraph to a JSON file at the
-	// given path. The structure is as follows:
+	// Serializes the complete state of the GraphicalHypergraph into the supplied
+	// json object. The caller decides whether to write it to a file or embed it
+	// directly in a larger document (e.g. a Project save file).
 	//
-	//   {
-	//     "name": <string>,
-	//     "nodes": [
-	//       { "id": <int>, "dummy": <bool>, "name": <string>, "layer": <int> },
-	//       ...
-	//     ],
-	//     "edges": [
-	//       {
-	//         "id":      <int>,       // unique ID across originals and segments
-	//         "segment": <bool>,
-	//         "origin":  <int|null>,  // ID of the original edge, null if not a segment
-	//         "layer":   <int>,
-	//         "sources": [<node_id>, ...],
-	//         "targets": [<node_id>, ...]
-	//       },
-	//       ...
-	//     ],
-	//     "layers": [
-	//       {
-	//         "index": <int>,
-	//         "nodes": [<node_id>, ...],           // ordered
-	//         "outgoing_edges": [<edge_id>, ...]   // ordered
-	//       },
-	//       ...
-	//     ],
-	//     "layout": {
-	//       "layer_layout": { "<layer_index>": <y>, ... },
-	//       "node_layout": [
-	//         {
-	//           "node_id": <int>,
-	//           "x": <double>,
-	//           "source_ports": [ { "edge_id": <int>, "x": <double> }, ... ],
-	//           "target_ports": [ { "edge_id": <int>, "x": <double> }, ... ]
-	//         },
-	//         ...
-	//       ],
-	//       "edge_layout": [ { "edge_id": <int>, "y": <double> }, ... ]
-	//     }
-	//   }
-	//
-	// Node IDs are indices into the "nodes" array.
-	// Edge IDs are assigned sequentially: originals first (in all_hyperedges_
-	// iteration order), then their segments in order. This guarantees that an
-	// original edge always has a lower ID than any of its segments, which
-	// simplifies the two-pass deserialization.
+	// Schema — see toJSON(const std::string& path) for the full description.
 	// ============================================================================
-	void GraphicalHypergraph::toJSON(const std::string& path) const {
-		json j;
+	void GraphicalHypergraph::toJSON(json& j) const {
 		j["name"] = name_;
 		j["id"] = id_;
 
@@ -235,7 +189,7 @@ namespace hypergraph_logic {
 			entry["targets"] = std::move(tgts);
 
 			edges_arr.push_back(std::move(entry));
-			};
+		};
 
 		for (const auto& [orig, segs] : all_hyperedges_) {
 			serialize_edge(orig, false, -1);
@@ -299,8 +253,14 @@ namespace hypergraph_logic {
 		layout["edge_layout"] = std::move(el);
 
 		j["layout"] = std::move(layout);
+	}
 
-		// ── 5. Write to disk ──────────────────────────────────────────────────────
+	// ============================================================================
+	// toJSON — file-path overload (thin wrapper)
+	// ============================================================================
+	void GraphicalHypergraph::toJSON(const std::string& path) const {
+		json j;
+		toJSON(j);
 		std::ofstream file(path);
 		if (!file.is_open())
 			throw std::runtime_error("GraphicalHypergraph::toJSON: cannot open file: " + path);
@@ -308,10 +268,10 @@ namespace hypergraph_logic {
 	}
 
 	// ============================================================================
-	// fromJSON  (static factory)
+	// fromJSON — core (const json& overload)
 	//
-	// Reconstructs a GraphicalHypergraph from a JSON file previously written by
-	// toJSON(). Uses a two-pass approach:
+	// Reconstructs a GraphicalHypergraph from a json object previously produced
+	// by toJSON(json&). Uses a two-pass approach:
 	//
 	//   Pass 1 — allocate all nodes and all original edges, build id->ptr maps.
 	//   Pass 2 — allocate all segment edges (origin ptr is now available),
@@ -319,25 +279,12 @@ namespace hypergraph_logic {
 	//            reconstruct layers_, layout maps.
 	//
 	// Parent/child wiring mirrors createHyperedge exactly:
-	//   - real→real pairs are derived from original edges.
+	//   - real->real pairs are derived from original edges.
 	//   - All pairs involving at least one dummy are derived from segment edges,
 	//     with the asymmetric rule that only the dummy side records the link,
 	//     keeping real nodes unaware of the dummy routing infrastructure.
 	// ============================================================================
-	GraphicalHypergraph GraphicalHypergraph::fromJSON(const std::string& path) {
-		std::ifstream file(path);
-		if (!file.is_open())
-			throw std::runtime_error("GraphicalHypergraph::fromJSON: cannot open file: " + path);
-
-		json j;
-		try {
-			file >> j;
-		}
-		catch (const json::parse_error& e) {
-			throw std::runtime_error(
-				std::string("GraphicalHypergraph::fromJSON: JSON parse error: ") + e.what());
-		}
-
+	GraphicalHypergraph GraphicalHypergraph::fromJSON(const json& j) {
 		GraphicalHypergraph g(j.at("name").get<std::string>());
 		// Restore the original identity so the JointGraphicalHypergraph can
 		// recognise this graph even after a serialization round-trip.
@@ -406,13 +353,13 @@ namespace hypergraph_logic {
 
 		// ── Pass 2b: wire parent/child links ──────────────────────────────────────
 		//
-		// Original edges encode real→real pairs only.
+		// Original edges encode real->real pairs only.
 		// Segment edges encode all pairs involving at least one dummy, with the
 		// same asymmetric rule as createHyperedge: only the dummy side records
 		// the link so that real nodes remain unaware of the dummy infrastructure.
 		for (const auto& [orig, segs] : g.all_hyperedges_) {
 
-			// real→real from the original edge.
+			// real->real from the original edge.
 			for (const auto& src : orig->getSources()) {
 				if (src->isDummy()) continue;
 				for (const auto& tgt : orig->getTargets()) {
@@ -441,7 +388,7 @@ namespace hypergraph_logic {
 							// Only the dummy knows the real source.
 							tgt->addParent(src);
 						}
-						// real→real: already handled above via the original edge.
+						// real->real: already handled above via the original edge.
 					}
 				}
 			}
@@ -489,6 +436,26 @@ namespace hypergraph_logic {
 		}
 
 		return g;
+	}
+
+	// ============================================================================
+	// fromJSON — file-path overload (thin wrapper)
+	// ============================================================================
+	GraphicalHypergraph GraphicalHypergraph::fromJSON(const std::string& path) {
+		std::ifstream file(path);
+		if (!file.is_open())
+			throw std::runtime_error("GraphicalHypergraph::fromJSON: cannot open file: " + path);
+
+		json j;
+		try {
+			file >> j;
+		}
+		catch (const json::parse_error& e) {
+			throw std::runtime_error(
+				std::string("GraphicalHypergraph::fromJSON: JSON parse error: ") + e.what());
+		}
+
+		return fromJSON(j);
 	}
 
 } // namespace hypergraph_logic

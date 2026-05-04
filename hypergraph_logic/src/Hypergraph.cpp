@@ -7,7 +7,7 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Constructor
 	// ============================================================================
-	Hypergraph::Hypergraph(const std::string& name) : name_(std::move(name)) {};
+	Hypergraph::Hypergraph(const std::string& name) : name_(name) {};
 
 	// ============================================================================
 	// Node management

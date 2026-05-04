@@ -36,6 +36,9 @@ namespace hypergraph_logic {
 	public:
 		explicit Hypergraph(const std::string& name);
 
+		const std::string& getName() const { return name_; }
+		void setName(const std::string& name) { name_ = name; }
+
 		// ====================================================================
 		// Node management
 		// ====================================================================

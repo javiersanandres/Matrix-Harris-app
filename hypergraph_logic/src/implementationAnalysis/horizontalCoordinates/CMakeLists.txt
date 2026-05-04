@@ -3,6 +3,17 @@
 list(APPEND CMAKE_PREFIX_PATH "C:/Qt2/6.11.0/msvc2022_64")
 find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets)
 
+# ============================================================================
+# JSON (nlohmann) - header-only, fetched from official release tarball
+# ============================================================================
+include(FetchContent)
+
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
 # Horizontal Coordinates Visualization library
 add_executable(horizontalCoordinatesVisualization
     horizontalCoordinatesVisualization.cpp
@@ -30,6 +41,8 @@ set_target_properties(horizontalCoordinatesVisualization PROPERTIES
 )
 
 target_link_libraries(horizontalCoordinatesVisualization
+    PUBLIC
+        nlohmann_json::nlohmann_json
     PRIVATE
         Qt6::Core
         Qt6::Widgets    
@@ -66,6 +79,8 @@ set_target_properties(minCrossHorizCoord PROPERTIES
 )
 
 target_link_libraries(minCrossHorizCoord
+    PUBLIC
+        nlohmann_json::nlohmann_json
     PRIVATE
         Qt6::Core
         Qt6::Widgets

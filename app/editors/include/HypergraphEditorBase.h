@@ -91,6 +91,12 @@ namespace app_logic {
 
 		// ── Read-only queries (no snapshot needed) ────────────────────────────────────
 
+		const std::string& getName() const {
+			return derived().graph().getName();
+		}
+		const void setName(const std::string& name) {
+			derived().graph().setName(name);
+		}
 		const std::string& getId() const {
 			return derived().graph().getId();
 		}
@@ -154,7 +160,13 @@ namespace app_logic {
 		// computeLayout() is called after the mutation.
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) {
 			derived().pushSnapshot();
-			derived().graph().addSourceToEdge(edge, source);
+			if (edge->isSegment()) {
+				HyperedgePtr origin = edge->getOrigin().lock();
+				derived().graph().addSourceToEdge(origin, source);
+			}
+			else {
+				derived().graph().addSourceToEdge(edge, source);
+			}
 			derived().graph().computeLayout();
 		}
 
@@ -164,7 +176,13 @@ namespace app_logic {
 		// computeLayout() is called after the mutation.
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target) {
 			derived().pushSnapshot();
-			derived().graph().addTargetToEdge(edge, target);
+			if (edge->isSegment()) {
+				HyperedgePtr origin = edge->getOrigin().lock();
+				derived().graph().addTargetToEdge(origin, target);
+			}
+			else {
+				derived().graph().addTargetToEdge(edge, target);
+			}
 			derived().graph().computeLayout();
 		}
 
@@ -196,7 +214,14 @@ namespace app_logic {
 			const std::unordered_set<Node*>& sources_to_remove)
 		{
 			derived().pushSnapshot();
-			derived().graph().removeSourcesFromHyperedge(edge, sources_to_remove, true);
+
+			if (edge->isSegment()) {
+				HyperedgePtr origin = edge->getOrigin().lock();
+				derived().graph().removeSourcesFromHyperedge(origin, sources_to_remove, true);
+			}
+			else {
+				derived().graph().removeSourcesFromHyperedge(edge, sources_to_remove, true);
+			}
 			derived().graph().computeLayout();
 		}
 
@@ -209,7 +234,30 @@ namespace app_logic {
 			const std::unordered_set<Node*>& targets_to_remove)
 		{
 			derived().pushSnapshot();
-			derived().graph().removeTargetsFromHyperedge(edge, targets_to_remove, true);
+			if (edge->isSegment()) {
+				HyperedgePtr origin = edge->getOrigin().lock();
+				derived().graph().removeTargetsFromHyperedge(origin, targets_to_remove, true);
+			}
+			else {
+				derived().graph().removeTargetsFromHyperedge(edge, targets_to_remove, true);
+			}
+			derived().graph().computeLayout();
+		}
+
+		// ── removeHyperedge ─────────────────────────────────────────────────────────
+		//
+		// Snapshots, then delegates to the graph's removeTargetsFromHyperedge with 
+		// all targets, this destroys the entire hyperedge.
+		// computeLayout() is called after the mutation.
+		//
+		void removeHyperedge(const HyperedgePtr& edge) {
+			derived().pushSnapshot();
+			HyperedgePtr origin = edge->isSegment() ? edge->getOrigin().lock() : edge;
+			auto targets = origin->getTargets();
+			std::unordered_set<Node*> targets_set;
+			for (const auto& t : targets)
+				targets_set.insert(t.get());
+			derived().graph().removeTargetsFromHyperedge(origin, targets_set, true);
 			derived().graph().computeLayout();
 		}
 

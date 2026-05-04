@@ -1,6 +1,9 @@
 #pragma once
 #include "Hypergraph.h"
+#include <nlohmann/json.hpp>
 #include <string>
+
+using json = nlohmann::json;
 
 namespace hypergraph_logic {
 
@@ -23,34 +26,23 @@ namespace hypergraph_logic {
 		std::vector<Port> target_ports; // Ports for edges arriving at this node (from above).
 	};
 
-
 	// ============================================================================
 	// GraphicalHypergraph
 	//
-	// Extends Hypergraph with all necessary functionality to support graphical 
+	// Extends Hypergraph with all necessary functionality to support graphical
 	// layout and rendering. This includes:
 	// 1) Crossing minimization via Global Sifting.
 	// 2) Node coordinate assignment via Brandes-Köpf algorithm.
 	// 3) Removing horizontal overlapping of hyperedges in each layer with an MIP.
 	// 4) Assigning ports to the hyperedges and removing vertical overlapping.
 	// 5) Assigning y coordinate for the horizontal span of hyperedges.
-	// 
-	// 
-	// Since all 5 algorithms are independent and can be applied in any order,
-	// I've decided to keep all the code related to them in separate files and
-	// only include the necessary interfaces in this class.
-	// 
-	// 
-	// All the tecnhiques used are based on the paper below:
+	//
+	// All the techniques used are based on the paper below:
 	// Fridman, G., Vasiliev, Y., Puhkalo, V., & Ryzhov, V. (2021).
 	// "A Mixed-Integer Program for Drawing Orthogonal Hyperedges
-	// in a Hierarchical Hypergraph." 
+	// in a Hierarchical Hypergraph."
 	// In: Mathematics 9, no. 16: 1903.
 	// DOI: 10.3390/math9161903
-	// 
-	// There are some parts of the implementation which are described in other
-	// papers, but the main reference for the overall approach is the one above.
-	// 
 	// ============================================================================
 	class GraphicalHypergraph : public Hypergraph {
 	public:
@@ -59,13 +51,10 @@ namespace hypergraph_logic {
 		// ── Unique identity ───────────────────────────────────────────────────────
 		//
 		// Every GraphicalHypergraph receives a unique ID at construction time,
-		// generated from a process-wide monotonically increasing counter.  The ID
+		// generated from a process-wide monotonically increasing counter. The ID
 		// is preserved through clone() and toJSON()/fromJSON() so that the
 		// JointGraphicalHypergraph can recognise a graph it has already
 		// incorporated even after the graph has been serialized and reloaded.
-		//
-		// The ID is intentionally read-only after construction: it identifies the
-		// graph's logical identity, not its content.
 		//
 		const std::string& getId() const { return id_; }
 
@@ -79,46 +68,91 @@ namespace hypergraph_logic {
 		//                    Default: 10 (empirical).
 		//
 		// Returns the total crossing count of the final ordering.
+		//
 		int minimizeCrossings(int sifting_rounds = 10) {
-			int crossings = Hypergraph::minimizeCrossings(sifting_rounds, 0);
-			computeLayout();
-			return crossings;
+			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
 		}
 
+		// ── computeLayout ─────────────────────────────────────────────────────────
+		//
 		// Run the complete layout pipeline, executing stages 2-5 in order.
 		// After this call, all layout data is known and the hypergraph can
 		// be represented graphically.
+		//
 		void computeLayout();
 
-		// This function allows the user to permut the nodes in a layer by drawing
-		// them in a different order. The GUI will be the one to provide the new
-		// x coordinates of the nodes, which will only be interpreted as a way to
-		// order the nodes in the layer, not as actual coordinates. The actual 
-		// coordinates will be re-assigned by the layout algorithm.
+		// ── relocateNodeInLayer ───────────────────────────────────────────────────
+		//
+		// Allows the user to permute the nodes in a layer by providing a new
+		// x coordinate for the node being moved. The coordinate is interpreted
+		// only as an ordering signal — actual coordinates are reassigned by
+		// computeLayout() which is called internally at the end.
+		//
 		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate);
 
+		// ── getX ──────────────────────────────────────────────────────────────────
+		//
+		// Returns the assigned x coordinate of the given node's centre.
+		//
 		double getX(const NodePtr& node) const;
+
+		// ── Layout data accessors (read-only, for the graphical engine) ───────────
+
+		// ── getNodeLayout ─────────────────────────────────────────────────────────
+		//
+		// Returns the full node layout map so that the graphical engine can read
+		// each node's x coordinate and port assignments for rendering.
+		// The map keys are raw Node pointers owned by this graph. The reference
+		// is valid until the next call to computeLayout() or any mutating operation.
+		//
+		const std::unordered_map<Node*, NodeLayout>& getNodeLayout() const {
+			return node_layout_;
+		}
+
+		// ── getEdgeLayout ─────────────────────────────────────────────────────────
+		//
+		// Returns the edge layout map so that the graphical engine can read the
+		// y coordinate of each original hyperedge's horizontal bar.
+		//
+		const std::unordered_map<Hyperedge*, double>& getEdgeLayout() const {
+			return edge_layout_;
+		}
+
+		// ── getLayerLayout ────────────────────────────────────────────────────────
+		//
+		// Returns the layer layout map so that the graphical engine can read the
+		// y coordinate of each layer's node row.
+		//
+		const std::unordered_map<int, double>& getLayerLayout() const {
+			return layer_layout_;
+		}
 
 		// ── Persistence ───────────────────────────────────────────────────────────
 
 		// ── toJSON ────────────────────────────────────────────────────────────────
 		//
-		// Serializes the complete state of the graph — topology, layer ordering,
-		// layout data, and unique ID — to a JSON file at the given path.
+		// Serializes the complete state of the graph into a nlohmann::json object.
+		// Use this overload to embed the graph directly into a larger JSON document
+		// (e.g. a Project save file) without touching the filesystem.
 		//
+		void toJSON(nlohmann::json& j) const;
+
+		// Convenience overload: serializes to a JSON file at the given path.
 		// Throws std::runtime_error if the file cannot be opened for writing.
-		//
 		void toJSON(const std::string& path) const;
 
 		// ── fromJSON ──────────────────────────────────────────────────────────────
 		//
-		// Static factory that reconstructs a GraphicalHypergraph from a JSON file
-		// previously written by toJSON(). The unique ID stored in the file is
-		// restored exactly, so the graph retains its original identity.
+		// Static factory that reconstructs a GraphicalHypergraph from a
+		// nlohmann::json object previously produced by toJSON(json&). Use this
+		// overload to deserialize a graph that is embedded in a larger document.
+		// The unique ID stored in the object is restored exactly.
 		//
+		static GraphicalHypergraph fromJSON(const nlohmann::json& j);
+
+		// Convenience overload: deserializes from a JSON file at the given path.
 		// Throws std::runtime_error if the file cannot be opened or the JSON is
 		// malformed.
-		//
 		static GraphicalHypergraph fromJSON(const std::string& path);
 
 		// ── clone ─────────────────────────────────────────────────────────────────
@@ -134,69 +168,50 @@ namespace hypergraph_logic {
 		//
 		// Assigned once at construction from a process-wide counter.
 		// Preserved verbatim by clone() and fromJSON().
-		// Stored in the protected section so that subclasses (e.g.
-		// JointGraphicalHypergraph) and the persistence functions can access it
-		// directly without a public setter.
 		//
 		std::string id_;
 
-		std::unordered_map<Node*, NodeLayout> node_layout_; // Map from node pointer to its layout data.
-		std::unordered_map<Hyperedge*, double> edge_layout_; // Map from hyperedge pointer to its assigned layout data (y coordinate).
-		std::unordered_map<int, double> layer_layout_; // Map from layer index to its assigned y coordinate.
+		std::unordered_map<Node*, NodeLayout>  node_layout_;
+		std::unordered_map<Hyperedge*, double> edge_layout_;
+		std::unordered_map<int, double>        layer_layout_;
+
+		// ── mergeFrom ─────────────────────────────────────────────────────────────
+		//
+		// Merges the contents of another GraphicalHypergraph (passed by rvalue so
+		// its internal containers can be moved rather than copied) into this graph.
+		//
+		// Layer merging follows the side-by-side rule:
+		//   left = true  — incoming nodes and outgoing edges are prepended.
+		//   left = false — incoming nodes and outgoing edges are appended.
+		//
+		void mergeFrom(GraphicalHypergraph&& other, bool left);
 
 		// ── Stage 2: node x-coordinates ───────────────────────────────────────────
 		//
 		// Assigns an x-coordinate to every node using the Brandes-Köpf algorithm.
-		// Coordinates are in logical pixels (constants defined in LayoutTypes.h).
+		//
 		void assignXCoordinates();
 
 		// ── Stage 3: horizontal order of hyperedge bars ───────────────────────────
 		//
-		// Solves the MIP (equations 26–30, Fridman et al. 2021) for the given layer
-		// to find the vertical ordering of hyperedge horizontal bars that minimises
-		// the number of crossings. outgoing_edges is re-sorted in-place so that a
-		// lower index corresponds to a higher bar on the canvas.
+		// Solves the MIP for the given layer to find the vertical ordering of
+		// hyperedge horizontal bars that minimises the number of crossings.
 		//
-		// Must be called after assignXCoordinates() and before assignPorts().
 		void orderHyperedges(int layer);
 
 		// ── Stage 4: port assignment ───────────────────────────────────────────────
 		//
-		// Iterates over every layer pair (0->1, 1->2,..., n-2->n-1), building and
-		// spacing ports then resolving vertical-segment overlaps for each pair in
-		// turn. After this call every node in the graph has fully populated and
-		// non-overlapping source_ports and target_ports.
+		// Builds and spaces ports for every layer pair and resolves
+		// vertical-segment overlaps.
+		//
 		void assignPorts();
 
-		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────────
+		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────
 		//
-		// It assigns a y coordinate to the horizontal span of each hyperedge, based on
-		// the vertical ordering of the hyperedges in each layer. This is the final
-		// stage of the layout pipeline, and it must be called after all previous stages.
-		// It also assings a y coordinate to each layer, which is also the y coordinate
-		// of the nodes in that layer.
+		// Assigns a y coordinate to the horizontal span of each hyperedge and a
+		// y coordinate to each layer.
+		//
 		void assignYCoordinates();
-
-		// ── mergeFrom ─────────────────────────────────────────────────────────────────
-		//
-		// Merges the contents of another GraphicalHypergraph (passed by rvalue so its
-		// internal containers can be moved rather than copied) into this graph.
-		//
-		// The merge is structural and flat: every node, edge, segment, and layout entry
-		// from other is incorporated into the corresponding collection of this graph.
-		// No parent/child links or hyperedge source/target lists are modified — the
-		// incoming graph is assumed to be already internally consistent, having been
-		// produced by clone().
-		//
-		// Layer merging follows the side-by-side rule:
-		//   left = true  — incoming nodes and outgoing edges are prepended to each
-		//                  layer's existing vectors, so the incoming graph appears to
-		//                  the left of all currently present content.
-		//   left = false — incoming nodes and outgoing edges are appended to each
-		//                  layer's existing vectors, so the incoming graph appears to
-		//                  the right.
-		// Layers that do not yet exist in this graph are created on demand.¡
-		void mergeFrom(GraphicalHypergraph&& other, bool left);
 
 	private:
 		// ── ID generation ─────────────────────────────────────────────────────────

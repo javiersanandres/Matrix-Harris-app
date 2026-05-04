@@ -22,7 +22,13 @@ namespace app_logic {
 		const std::string& label, const HyperedgePtr& edge)
 	{
 		pushSnapshot();
-		NodePtr result = graph_.createNode(label, edge);
+		NodePtr result;
+		if (edge->isSegment()) {
+			result = graph_.createNode(label, edge->getOrigin().lock());
+		}
+		else {
+			result = graph_.createNode(label, edge);
+		}
 		graph_.computeLayout();
 		return result;
 	}
@@ -31,7 +37,13 @@ namespace app_logic {
 		const std::string& label, int layer_position, const HyperedgePtr& edge)
 	{
 		pushSnapshot();
-		NodePtr result = graph_.createSource(label, layer_position, edge);
+		NodePtr result;
+		if (edge->isSegment()) {
+			result = graph_.createSource(label, layer_position, edge->getOrigin().lock());
+		}
+		else {
+			result = graph_.createSource(label, layer_position, edge);
+		}
 		graph_.computeLayout();
 		return result;
 	}
@@ -40,7 +52,13 @@ namespace app_logic {
 		const std::string& label, int layer_position, const HyperedgePtr& edge)
 	{
 		pushSnapshot();
-		NodePtr result = graph_.createTarget(label, layer_position, edge);
+		NodePtr result;
+		if (edge->isSegment()) {
+			result = graph_.createTarget(label, layer_position, edge->getOrigin().lock());
+		}
+		else {
+			result = graph_.createTarget(label, layer_position, edge);
+		}
 		graph_.computeLayout();
 		return result;
 	}

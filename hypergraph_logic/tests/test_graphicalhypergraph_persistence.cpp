@@ -778,7 +778,7 @@ namespace hypergraph_logic {
 
             TEST_F(PersistenceTest, FromJSON_NonexistentFile_ThrowsRuntimeError) {
                 EXPECT_THROW(
-                    GraphicalHypergraph::fromJSON("/nonexistent_dir/no_such_file.json"),
+                    GraphicalHypergraph::fromJSON(std::string("/nonexistent_dir/no_such_file.json")),
                     std::runtime_error);
             }
 
@@ -842,6 +842,143 @@ namespace hypergraph_logic {
                     GraphicalHypergraph::fromJSON(tmp.path));
 
                 assertStructurallyEqual(cloned, loaded);
+            }
+
+            // =============================================================================
+            // 12. toJSON(json&) + fromJSON(const json&) — in-memory overloads
+            //
+            // These overloads are the primitive that Project::save/load uses to embed
+            // graphs directly into a larger JSON document without touching the filesystem.
+            // Every test mirrors its file-path counterpart to prove equivalence.
+            // =============================================================================
+
+            TEST_F(PersistenceTest, InMemory_EmptyGraph_RoundTrips) {
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                EXPECT_EQ(loaded.getLayerCount(), 0);
+                EXPECT_TRUE(loaded.rawNodes().empty());
+                EXPECT_TRUE(loaded.rawEdges().empty());
+            }
+
+            TEST_F(PersistenceTest, InMemory_SimpleGraph_AllInvariantsSatisfied) {
+                buildSimpleGraph();
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                assertAllInvariants(loaded);
+            }
+
+            TEST_F(PersistenceTest, InMemory_LongEdgeGraph_AllInvariantsSatisfied) {
+                buildGraphWithLongEdge();
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                assertAllInvariants(loaded);
+            }
+
+            TEST_F(PersistenceTest, InMemory_DiamondGraph_AllInvariantsSatisfied) {
+                buildDiamondGraph();
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                assertAllInvariants(loaded);
+            }
+
+            TEST_F(PersistenceTest, InMemory_SimpleGraph_StructurallyEqualToOriginal) {
+                buildSimpleGraph();
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                assertStructurallyEqual(g, loaded);
+            }
+
+            TEST_F(PersistenceTest, InMemory_LongEdgeGraph_StructurallyEqualToOriginal) {
+                buildGraphWithLongEdge();
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                assertStructurallyEqual(g, loaded);
+            }
+
+            TEST_F(PersistenceTest, InMemory_IdPreserved) {
+                buildSimpleGraph();
+                const std::string original_id = g.getId();
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j));
+                EXPECT_EQ(loaded.getId(), original_id);
+            }
+
+            TEST_F(PersistenceTest, InMemory_GraphName_Preserved) {
+                buildSimpleGraph();
+                nlohmann::json j;
+                g.toJSON(j);
+                struct NameReader : public GraphicalHypergraph {
+                    explicit NameReader(GraphicalHypergraph&& other)
+                        : GraphicalHypergraph(std::move(other)) {
+                    }
+                    const std::string& pubName() const { return name_; }
+                };
+                auto loaded = NameReader(GraphicalHypergraph::fromJSON(j));
+                EXPECT_EQ(loaded.pubName(), "test_graph");
+            }
+
+            // The in-memory and file-path overloads must produce identical JSON.
+            TEST_F(PersistenceTest, InMemory_ProducesSameJSONAsFilePath) {
+                buildGraphWithLongEdge();
+                TempFile tmp("inmem_vs_file.json");
+
+                // Serialize via file-path overload and read back.
+                g.toJSON(tmp.path);
+                std::ifstream f(tmp.path);
+                nlohmann::json from_file;
+                f >> from_file;
+
+                // Serialize via json& overload.
+                nlohmann::json from_mem;
+                g.toJSON(from_mem);
+
+                EXPECT_EQ(from_file, from_mem);
+            }
+
+            // Embedding a graph in a larger JSON document and extracting it back must
+            // produce a structurally equal graph — this is the Project::save/load pattern.
+            TEST_F(PersistenceTest, InMemory_EmbedInLargerDocument_RoundTrips) {
+                buildGraphWithLongEdge();
+
+                nlohmann::json project_doc;
+                project_doc["version"] = 1;
+                g.toJSON(project_doc["diagram"]);
+
+                auto loaded = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(project_doc.at("diagram")));
+                assertAllInvariants(loaded);
+                assertStructurallyEqual(g, loaded);
+            }
+
+            TEST_F(PersistenceTest, InMemory_DoubleRoundTrip_StableUnderRepetition) {
+                buildGraphWithLongEdge();
+
+                nlohmann::json j1;
+                g.toJSON(j1);
+                auto loaded1 = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j1));
+
+                nlohmann::json j2;
+                loaded1.toJSON(j2);
+                auto loaded2 = TestableGraphicalHypergraph(
+                    GraphicalHypergraph::fromJSON(j2));
+
+                assertAllInvariants(loaded2);
+                assertStructurallyEqual(loaded1, loaded2);
             }
 
         } // namespace persistence

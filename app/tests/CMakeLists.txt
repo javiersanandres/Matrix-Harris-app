@@ -1,17 +1,21 @@
 ﻿# ============================================================================
-# Unit Tests
+# Unit Tests for app layer
 # ============================================================================
 
-add_executable(app_logic_tests)
+add_executable(app_logic_tests
+    # Add test source files here as you create them
+    # test_example.cpp
+)
 
 target_include_directories(app_logic_tests
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../
 )
 
 target_link_libraries(app_logic_tests
     PRIVATE
-        app_logic
+        editors
+        graphical_engine
         GTest::gtest
         GTest::gtest_main
 )

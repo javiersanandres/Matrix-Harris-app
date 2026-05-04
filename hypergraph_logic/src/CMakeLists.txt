@@ -1,19 +1,6 @@
 # ============================================================================
-# JSON (nlohmann) - header-only, fetched from official release tarball
-# ============================================================================
-include(FetchContent)
-
-FetchContent_Declare(
-    json
-    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
-)
-FetchContent_MakeAvailable(json)
-
-# ============================================================================
-# Core Libraries
-# ============================================================================
-
 # Node library
+# ============================================================================
 add_library(node)
 
 target_sources(node
@@ -30,7 +17,9 @@ target_include_directories(node
         $<INSTALL_INTERFACE:include>
 )
 
+# ============================================================================
 # Hyperedge library
+# ============================================================================
 add_library(hyperedge)
 
 target_sources(hyperedge
@@ -51,7 +40,9 @@ target_link_libraries(hyperedge
     PUBLIC node
 )
 
+# ============================================================================
 # Hypergraph library
+# ============================================================================
 add_library(hypergraph)
 
 target_sources(hypergraph
@@ -116,7 +107,20 @@ else()
 endif()
 
 
-# Graphical hypergraph library
+# ============================================================================
+# JSON (nlohmann) - header-only, fetched from official release tarball
+# ============================================================================
+include(FetchContent)
+
+FetchContent_Declare(
+    json
+    URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
+)
+FetchContent_MakeAvailable(json)
+
+# ============================================================================
+# graphical hypergraph library
+# ============================================================================
 add_library(graphical_hypergraph)
 
 target_sources(graphical_hypergraph
