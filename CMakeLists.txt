@@ -52,6 +52,7 @@ endif()
 # ============================================================================
 
 add_subdirectory(hypergraph_logic)
+add_subdirectory(app)
 
 if(BUILD_GRAPHICAL_ENGINE)
     add_subdirectory(graphical_engine)

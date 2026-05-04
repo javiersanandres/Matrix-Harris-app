@@ -7,6 +7,7 @@
 #include <memory>
 
 namespace hypergraph_logic {
+
 	// ============================================================================
 	// JointGraphicalHypergraph
 	//
@@ -25,7 +26,7 @@ namespace hypergraph_logic {
 	// Node-creation API: createNode, createSource and createTarget are disabled.
 	// All other public Hypergraph / GraphicalHypergraph methods (addConnection,
 	// removeNode, removeConnection, removeSourcesFromHyperedge,
-	// removeTargetsFromHyperedge, fuseNodes, computeLayout, …) remain active.
+	// removeTargetsFromHyperedge, fuseNodes, computeLayout, ...) remain active.
 	//
 	// Layer merging: when a graph is incorporated its nodes and edges are placed
 	// into the joint's layers by the same index (layer 0 of the incoming graph
@@ -34,8 +35,14 @@ namespace hypergraph_logic {
 	// incoming nodes and edges are prepended (left=true) or appended (left=false)
 	// to the existing LayerData vectors, reflecting whether the user dropped the
 	// graph to the left or right of all currently present content.
+	//
+	// Singleton guard:
+	// instance_exists_ tracks whether the live (non-snapshot) instance exists.
+	// Snapshot instances created by cloneJoint() carry is_snapshot_ = true and
+	// do not affect the guard: they are internal undo/redo bookkeeping objects,
+	// not user-facing singletons.  Only the instance returned by create() has
+	// is_snapshot_ = false and its destructor resets the guard.
 	// ============================================================================
-
 #ifdef JGH_TEST
 	namespace jointgraphicalhypergraph_tests { class TestableJoint; }
 #endif
@@ -48,16 +55,26 @@ namespace hypergraph_logic {
 
 		// ── create ───────────────────────────────────────────────────────────────
 		//
-		// Factory method — the only way to obtain a JointGraphicalHypergraph.
-		// At most one instance may exist at any time within a single project
+		// Factory method — the only way to obtain a live JointGraphicalHypergraph.
+		// At most one live instance may exist at any time within a single project
 		// scope.  The caller (Project) is responsible for destroying the returned
 		// object before creating a new one for a different project.
 		//
-		// Throws std::logic_error if an instance already exists.
-		//
+		// Throws std::logic_error if a live instance already exists.
 		static std::unique_ptr<JointGraphicalHypergraph> create(const std::string& name);
 
-		// Destructor releases the singleton slot so a new instance can be created.
+		// ── cloneJoint ───────────────────────────────────────────────────────────
+		//
+		// Produces a fully independent deep copy of this joint graph, including all
+		// layout data and the incorporated_ids_ set. The clone is flagged as a
+		// snapshot (is_snapshot_ = true) so its destructor does not release the
+		// singleton slot — snapshot instances are internal undo/redo bookkeeping
+		// objects and must not interfere with the live singleton guard.
+		//
+		// Called exclusively by JointHypergraphEditor::snapshot().
+		std::unique_ptr<JointGraphicalHypergraph> cloneJoint() const;
+
+		// Destructor: releases the singleton slot only if this is the live instance.
 		~JointGraphicalHypergraph();
 
 		// Non-copyable, non-movable — the singleton guarantee would be violated.
@@ -70,7 +87,6 @@ namespace hypergraph_logic {
 		//
 		// Nodes may only enter the joint graph through addHypergraph().
 		// Calling any of these methods throws std::logic_error.
-
 		NodePtr createNode(const std::string&, int, const NodePtr&) {
 			throw std::logic_error(
 				"JointGraphicalHypergraph: createNode is disabled. "
@@ -92,14 +108,15 @@ namespace hypergraph_logic {
 				"Add nodes via addHypergraph().");
 		}
 
-		// ── addHypergraph ─────────────────────────────────────────────────────────────
+		// ── addHypergraph ─────────────────────────────────────────────────────────
 		//
 		// Incorporates a deep copy of the given GraphicalHypergraph into the joint.
 		//
-		// The supplied graph is identified by its unique ID. Attempting to add a graph
-		// whose ID has already been incorporated throws std::invalid_argument. Because
-		// clone() preserves the ID, passing a clone of a previously added graph is
-		// also rejected — the check is on logical identity, not pointer equality.
+		// The supplied graph is identified by its unique ID. Attempting to add a
+		// graph whose ID has already been incorporated throws std::invalid_argument.
+		// Because clone() preserves the ID, passing a clone of a previously added
+		// graph is also rejected — the check is on logical identity, not pointer
+		// equality.
 		//
 		// Internally, addHypergraph clones the source graph and delegates the actual
 		// structural merge to GraphicalHypergraph::mergeFrom(), which splices all
@@ -112,6 +129,7 @@ namespace hypergraph_logic {
 		//                  content (nodes and edges are prepended in each layer).
 		//   left = false — the incoming graph is placed to the right of all existing
 		//                  content (nodes and edges are appended in each layer).
+		//
 		void addHypergraph(GraphicalHypergraph& g, bool left);
 
 		// ── getIncorporatedIds ────────────────────────────────────────────────────
@@ -122,11 +140,28 @@ namespace hypergraph_logic {
 		const std::unordered_set<std::string>& getIncorporatedIds() const;
 
 	private:
-		// Private constructor — use create().
+		// ── Private constructors ──────────────────────────────────────────────────
+
+		// Constructor for live instances (called by create()).
 		explicit JointGraphicalHypergraph(const std::string& name);
 
-		// Singleton guard: true while any instance is alive.
+		// Constructor for snapshot instances (called by cloneJoint()).
+		// Bypasses the singleton guard entirely; is_snapshot_ is set to true.
+		explicit JointGraphicalHypergraph(
+			const std::string& name,
+			const std::unordered_set<std::string>& ids);
+
+		// ── Singleton guard ───────────────────────────────────────────────────────
+		//
+		// true while the live (non-snapshot) instance exists.
+		// Snapshot instances do not set or clear this flag.
+		//
 		static bool instance_exists_;
+
+		// true for snapshot instances created by cloneJoint().
+		// This allows multiple copies without really violating the singleton guarantee,
+		// since logically there is only one joint graph in the current project state.
+		bool is_snapshot_ = false;
 
 		// IDs of graphs that have already been incorporated, used to enforce
 		// the "no duplicate" rule in addHypergraph().
