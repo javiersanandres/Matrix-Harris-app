@@ -3,19 +3,20 @@
 # ============================================================================
 
 add_executable(app_logic_tests
-    # Add test source files here as you create them
-    # test_example.cpp
+    test_editors.cpp
+    test_project.cpp
 )
 
 target_include_directories(app_logic_tests
     PRIVATE
-        ${CMAKE_CURRENT_SOURCE_DIR}/../
+        ${CMAKE_CURRENT_SOURCE_DIR}/../editors/include
+        ${CMAKE_CURRENT_SOURCE_DIR}/../ui/include
 )
 
 target_link_libraries(app_logic_tests
     PRIVATE
         editors
-        graphical_engine
+        ui_lib
         GTest::gtest
         GTest::gtest_main
 )

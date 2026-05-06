@@ -485,7 +485,7 @@ namespace hypergraph_logic {
                 g.computeLayout();
 
                 double x_before = g.getX(A);
-                g.relocateNodeInLayer(A, x_before); // same position — no change expected
+				ASSERT_THROW(g.relocateNodeInLayer(A, x_before), std::invalid_argument);
                 EXPECT_NEAR(g.getX(A), x_before, 1e-9);
             }
 
@@ -536,7 +536,7 @@ namespace hypergraph_logic {
                 double xB = g.getX(B);
                 // Move A slightly but not past B.
                 double new_x = xA + (xB - xA) * 0.3;
-                g.relocateNodeInLayer(A, new_x);
+                ASSERT_THROW(g.relocateNodeInLayer(A, new_x), std::invalid_argument);
 
                 // A must still be to the left of B in the layer order.
                 const auto& nodes = g.layers().at(0).nodes;
@@ -637,17 +637,8 @@ namespace hypergraph_logic {
                 g.createNode("B", 0, A);
                 g.computeLayout();
                 // Layer 0 has only A — moving it should not crash.
-                EXPECT_NO_THROW(g.relocateNodeInLayer(A, g.getX(A) + 50.0));
+                EXPECT_THROW(g.relocateNodeInLayer(A, g.getX(A) + 50.0), std::invalid_argument);
             }
-
-            TEST(RelocateNode, DoesNotThrowOnMoveToSamePosition) {
-                TestGraph g("reloc_same");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                g.computeLayout();
-                EXPECT_NO_THROW(g.relocateNodeInLayer(A, g.getX(A)));
-            }
-
             // ── ConsistencyAfterMultipleRelocations ───────────────────────────────────
 
             TEST(RelocateNode, ConsistentAfterMultipleRelocations) {
@@ -659,9 +650,9 @@ namespace hypergraph_logic {
                 g.computeLayout();
 
                 // Three sequential relocations.
-                g.relocateNodeInLayer(A, g.getX(B) + 10.0);
-                g.relocateNodeInLayer(B, g.getX(A) - 10.0);
-                g.relocateNodeInLayer(A, g.getX(B) + 5.0);
+                ASSERT_NO_THROW(g.relocateNodeInLayer(A, g.getX(B) + 10.0));
+                ASSERT_THROW(g.relocateNodeInLayer(B, g.getX(A) - 10.0), std::invalid_argument);
+                ASSERT_THROW(g.relocateNodeInLayer(A, g.getX(B) + 5.0), std::invalid_argument);
 
                 // After all relocations the layout must still be complete.
                 for (int i = 0; i < 2; ++i)

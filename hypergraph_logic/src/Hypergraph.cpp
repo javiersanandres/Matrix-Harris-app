@@ -874,6 +874,19 @@ namespace hypergraph_logic {
 	void Hypergraph::removeConnection(const NodePtr& parent, const NodePtr& child) {
 		if (!parent || !child) return;
 
+		// Check that the connection actually exists before trying to remove it.
+		bool is_parent = false;
+		for (const auto& p : child->getParents()) {
+			if (p == parent) {
+				is_parent = true;
+				break;
+			}
+		}
+
+		if (!is_parent) {
+			throw std::logic_error("The specified connection does not exist in the diagram.");
+		}
+
 		// Snapshot before modifying
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;
 
@@ -978,6 +991,23 @@ namespace hypergraph_logic {
 	void Hypergraph::removeSourcesFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& sources_to_remove, bool relocation)
 	{
 		if (sources_to_remove.empty() || original_edge->isSegment()) return;
+
+		// This is a check only for user interaction. The user will only introduce this one at a time.
+		if (sources_to_remove.size() == 1) {
+			for (const auto& s : sources_to_remove) {
+				if (!original_edge->containsSource(s->shared_from_this())) {
+					throw std::logic_error("The specified connection does not exist in the diagram.");
+				}
+			}
+		}
+
+
+		for (Node* s : sources_to_remove) {
+			if (!original_edge->containsSource(s->shared_from_this())) {
+				throw std::logic_error("The specified connection does not exist in the diagram.");
+			}
+		}
+
 
 		for (Node* s : sources_to_remove)
 			original_edge->removeSource(s->shared_from_this());
@@ -1103,6 +1133,15 @@ namespace hypergraph_logic {
 	void Hypergraph::removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation)
 	{
 		if (targets_to_remove.empty() || original_edge->isSegment()) return;
+
+		// This is just a check for the user interaction. It introduces removals one at a time.
+		if (targets_to_remove.size() == 1) {
+			for (Node* t : targets_to_remove) {
+				if (!original_edge->containsTarget(t->shared_from_this())) {
+					throw std::logic_error("The specified connection does not exist in the diagram.");
+				}
+			}
+		}
 
 		// Remove targets from the original edge.
 		for (Node* t : targets_to_remove)

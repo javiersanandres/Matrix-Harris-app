@@ -3,6 +3,7 @@
 
 namespace app_logic {
 	using namespace hypergraph_logic;
+
 	// ============================================================================
 	// HypergraphEditor
 	//
@@ -18,37 +19,42 @@ namespace app_logic {
 
 		// ── HypergraphEditor ──────────────────────────────────────────────────────
 		//
-		// Takes ownership of the supplied graph (moved in). The undo and redo stacks start empty.
+		// Takes ownership of the supplied graph (moved in). The undo and redo stacks
+		// start empty.
 		explicit HypergraphEditor(GraphicalHypergraph&& graph);
 
 		// ── Node-creation API (specific to regular graphs) ────────────────────────
 
 		// ── createNode (with parent) ──────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to GraphicalHypergraph::createNode.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts createNode + computeLayout(), and commits the
+		// snapshot to past_ only if both succeed.
 		NodePtr createNode(const std::string& label, int layer_position,
 			const NodePtr& parent);
 
 		// ── createNode (into edge) ────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to GraphicalHypergraph::createNode.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts createNode + computeLayout(), and commits the
+		// snapshot to past_ only if both succeed.
 		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
 
 		// ── createSource ─────────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to GraphicalHypergraph::createSource.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts createSource + computeLayout(), and commits the
+		// snapshot to past_ only if both succeed.
 		NodePtr createSource(const std::string& label, int layer_position,
 			const HyperedgePtr& edge);
 
 		// ── createTarget ─────────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to GraphicalHypergraph::createTarget.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts createTarget + computeLayout(), and commits the
+		// snapshot to past_ only if both succeed.
 		NodePtr createTarget(const std::string& label, int layer_position,
 			const HyperedgePtr& edge);
+
+		// ── canUndo / canRedo predicates ──────────────────────────────────────────
+		bool canUndo() const { return !past_.empty(); }
+		bool canRedo() const { return !future_.empty(); }
 
 	private:
 		friend class HypergraphEditorBase<HypergraphEditor>;
@@ -57,13 +63,25 @@ namespace app_logic {
 		GraphicalHypergraph& graph() { return graph_; }
 		const GraphicalHypergraph& graph() const { return graph_; }
 
-		// ── pushSnapshot() — required by HypergraphEditorBase ─────────────────────
+		// ── takeSnapshot() — required by HypergraphEditorBase ─────────────────────
 		//
-		// Clones the current graph onto past_, enforces the MAX_HISTORY cap, and
+		// Clones the current live graph and returns it by value. Called at the start
+		// of every mutating method before the mutation is attempted. The returned
+		// clone is only committed to past_ if the mutation succeeds.
+		GraphicalHypergraph takeSnapshot() {
+			return graph_.clone();
+		}
+
+		// ── commitSnapshot() — required by HypergraphEditorBase ───────────────────
+		//
+		// Receives a ready-made snapshot (produced by takeSnapshot() before the
+		// mutation ran) and pushes it onto past_. Enforces the MAX_HISTORY cap and
 		// clears future_ so that a new mutation after a sequence of undos discards
 		// all redo states.
-		void pushSnapshot() {
-			past_.push_back(graph_.clone());
+		//
+		// Only called after a mutation has fully succeeded — never on failure.
+		void commitSnapshot(GraphicalHypergraph&& snapshot) {
+			past_.push_back(std::move(snapshot));
 			if (static_cast<int>(past_.size()) > MAX_HISTORY)
 				past_.pop_front();
 			future_.clear();
@@ -74,8 +92,8 @@ namespace app_logic {
 		// Pops the top of src (the stack being restored from), saves the current
 		// graph to dst (the opposite stack), and replaces the live graph with the
 		// popped snapshot. Enforces the MAX_HISTORY cap on dst.
-		// undo() - restoreSnapshot(past_, future_)
-		// redo() - restoreSnapshot(future_, past_)
+		// undo() → restoreSnapshot(past_, future_)
+		// redo() → restoreSnapshot(future_, past_)
 		void restoreSnapshot(std::deque<GraphicalHypergraph>& src,
 			std::deque<GraphicalHypergraph>& dst)
 		{
@@ -85,10 +103,6 @@ namespace app_logic {
 			graph_ = std::move(src.back());
 			src.pop_back();
 		}
-
-		// ── canUndo / canRedo predicates ──────────────────────────────────────────
-		bool canUndo() const { return !past_.empty(); }
-		bool canRedo() const { return !future_.empty(); }
 
 		GraphicalHypergraph graph_;
 		std::deque<GraphicalHypergraph> past_;

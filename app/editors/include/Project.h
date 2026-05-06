@@ -74,13 +74,6 @@ namespace app_logic {
 		//
 		void removeDiagram(int index);
 
-		// ── renameDiagram ─────────────────────────────────────────────────────────
-		//
-		// Renames the diagram at the given index.
-		// Throws std::out_of_range if index is out of bounds.
-		//
-		void renameDiagram(int index, const std::string& new_name);
-
 		// ── getDiagramCount ───────────────────────────────────────────────────────
 		//
 		// Returns the number of regular diagrams in the project (excluding the joint).
@@ -196,7 +189,8 @@ namespace app_logic {
 		// in the state they were in when save() was called.
 		// Throws std::runtime_error if the file cannot be read or is malformed.
 		//
-		static Project load(const std::filesystem::path& path);
+		//static Project load(const std::filesystem::path& path);
+		static std::unique_ptr<Project> load(const std::filesystem::path& path);
 
 	private:
 		std::string name_;
@@ -204,7 +198,7 @@ namespace app_logic {
 		int active_index_ = 0;
 		bool unsaved_changes_ = false;
 
-		std::vector<HypergraphEditor> editors_;
+		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;
 
 		void markUnsaved() { unsaved_changes_ = true; }

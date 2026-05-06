@@ -5,6 +5,9 @@
 #include <stdexcept>
 #include <string>
 
+
+using json = nlohmann::json;
+
 namespace app_logic {
 	using namespace hypergraph_logic;
 
@@ -15,27 +18,22 @@ namespace app_logic {
 	// set of forwarding methods that are common to both HypergraphEditor and
 	// JointHypergraphEditor.
 	//
-	// Template parameter:
-	// Derived must provide two protected members that the base uses:
+	// We cannot keep the undo and redo stacks in the base class because the
+	// snapshot type for JointGraphicalHypergraph is completely different from the
+	// snapshot type for GraphicalHypergraph. So this logic is handled by the
+	// derived classes.
 	//
-	//   GraphType& graph()             — returns the live graph being edited.
-	//   const GraphType& graph() const — const overload of the above.
-	//   void pushSnapshot()            — clones the current state and pushes it
-	//                                    onto past_, enforcing the MAX_HISTORY cap.
-	//   void restoreSnapshot(          — pops the top of src, moves it into the
-	//       std::deque<SnapshotPtr>&,    live graph, and pushes a snapshot of the
-	//       std::deque<SnapshotPtr>&)    old live graph onto dst.
-	// We cannot keep the undo and redo stacks in the base class because the snapshot
-	// type for JointGraphicalHypergraph is completely different from the snapshot type 
-	// for GraphicalHypergraph. So, this logic is handled by the derived classes, and the
-	// base class just needs to call pushSnapshot() and restoreSnapshot() at the right times.
-	// 
-	// Undo / redo model:
-	// Two bounded deques: past_ and future_. I have used deques to allow O(1) 
-	// push and pop from both ends. The logic is as follows:
-	//   1. pushSnapshot() clones the live graph onto past_ and clears future_.
-	//   2. The mutation is applied on the live graph.
-	//   3. computeLayout() is called so coordinates are always current.
+	// Transactional snapshot model:
+	// Every mutating method in this base follows the same explicit sequence:
+	//   1. Clone the live graph via derived().takeSnapshot() into a local variable.
+	//   2. Attempt the mutation (and computeLayout if needed) inside a try block.
+	//   3. On SUCCESS  -> call derived().commitSnapshot(std::move(saved)).
+	//      The snapshot lands on past_ and future_ is cleared only now.
+	//   4. On FAILURE  -> the catch block rethrows. The local clone is destroyed
+	//      automatically. The live graph and the undo stack are left untouched.
+	//
+	// This guarantees that a snapshot is never committed for an operation that
+	// failed, which would waste memory and corrupt the undo history.
 	//
 	// undo(): saves current state to future_, restores top of past_.
 	// redo(): saves current state to past_,   restores top of future_.
@@ -48,23 +46,24 @@ namespace app_logic {
 
 		// This is the maximum number of snapshots that the undo and redo stacks
 		// can hold. When the cap is exceeded, the oldest snapshot is discarded.
-		// It is unlikely that the user will want to undo more than 15 steps, and
+		// It is unlikely that the user will want to undo more than 25 steps, and
 		// keeping more snapshots in memory would be wasteful.
-		static constexpr int MAX_HISTORY = 15;
+		static constexpr int MAX_HISTORY = 25;
 
 		// ── Undo / Redo ───────────────────────────────────────────────────────────
 
 		// ── canUndo ───────────────────────────────────────────────────────────────
 		//
 		// Returns true if there is at least one state in the undo stack.
-		// The graphical engine can use this to enable or disable the undo 
+		// The graphical engine can use this to enable or disable the undo
 		// button in the UI.
 		bool canUndo() const { return derived().canUndo(); }
 
 		// ── canRedo ───────────────────────────────────────────────────────────────
 		//
 		// Returns true if there is at least one state in the redo stack.
-		// The graphical engine can use this to enable or disable the undo 
+		// The graphical engine can use this to enable or disable the redo
+		// button in the UI.
 		bool canRedo() const { return derived().canRedo(); }
 
 		// ── undo ──────────────────────────────────────────────────────────────────
@@ -89,13 +88,10 @@ namespace app_logic {
 			derived().restoreSnapshot(derived().future_, derived().past_);
 		}
 
-		// ── Read-only queries (no snapshot needed) ────────────────────────────────────
+		// ── Read-only queries (no snapshot needed) ────────────────────────────────
 
 		const std::string& getName() const {
 			return derived().graph().getName();
-		}
-		const void setName(const std::string& name) {
-			derived().graph().setName(name);
 		}
 		const std::string& getId() const {
 			return derived().graph().getId();
@@ -126,8 +122,8 @@ namespace app_logic {
 		//
 		// Serializes the current graph state to a JSON file.
 		// Read-only — does not snapshot, does not affect the undo/redo stacks.
-		void toJSON(const std::string& path) const {
-			derived().graph().toJSON(path);
+		void toJSON(json& j) const {
+			derived().graph().toJSON(j);
 		}
 
 		// ── getGraph ──────────────────────────────────────────────────────────────
@@ -143,167 +139,254 @@ namespace app_logic {
 
 		// ── Mutating API shared by both editors ───────────────────────────────────
 
+		// ── setName ───────────────────────────────────────────────────────────────
+		//
+		// Clones the graph, attempts setName, and commits the snapshot only on success.
+		void setName(const std::string& name) {
+			auto saved = derived().takeSnapshot();
+			try {
+				derived().graph().setName(name);
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
+		}
+
+		// ── renameNode ────────────────────────────────────────────────────────────
+		//
+		// Clones the graph, attempts setName on the node, and commits the snapshot
+		// only on success.
+		void renameNode(const NodePtr& node, const std::string& new_name) {
+			auto saved = derived().takeSnapshot();
+			try {
+				node->setName(new_name);
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
+		}
+
 		// ── addConnection ─────────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's addConnection.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts addConnection + computeLayout(), and commits
+		// the snapshot only if both succeed.
 		HyperedgePtr addConnection(const NodePtr& parent, const NodePtr& child) {
-			derived().pushSnapshot();
-			auto result = derived().graph().addConnection(parent, child);
-			derived().graph().computeLayout();
-			return result;
+			auto saved = derived().takeSnapshot();
+			try {
+				HyperedgePtr result = derived().graph().addConnection(parent, child);
+				derived().graph().computeLayout();
+				derived().commitSnapshot(std::move(saved));
+				return result;
+			}
+			catch (...) {
+				throw;
+			}
 		}
 
 		// ── addSourceToEdge ───────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's addSourceToEdge.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts addSourceToEdge (resolving segments to their
+		// origin) + computeLayout(), and commits the snapshot only if both succeed.
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) {
-			derived().pushSnapshot();
-			if (edge->isSegment()) {
-				HyperedgePtr origin = edge->getOrigin().lock();
-				derived().graph().addSourceToEdge(origin, source);
+			auto saved = derived().takeSnapshot();
+			try {
+				if (edge->isSegment()) {
+					HyperedgePtr origin = edge->getOrigin().lock();
+					derived().graph().addSourceToEdge(origin, source);
+				}
+				else {
+					derived().graph().addSourceToEdge(edge, source);
+				}
+				derived().graph().computeLayout();
 			}
-			else {
-				derived().graph().addSourceToEdge(edge, source);
+			catch (...) {
+				throw;
 			}
-			derived().graph().computeLayout();
+			derived().commitSnapshot(std::move(saved));
 		}
 
 		// ── addTargetToEdge ───────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's addTargetToEdge.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts addTargetToEdge (resolving segments to their
+		// origin) + computeLayout(), and commits the snapshot only if both succeed.
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target) {
-			derived().pushSnapshot();
-			if (edge->isSegment()) {
-				HyperedgePtr origin = edge->getOrigin().lock();
-				derived().graph().addTargetToEdge(origin, target);
+			auto saved = derived().takeSnapshot();
+			try {
+				if (edge->isSegment()) {
+					HyperedgePtr origin = edge->getOrigin().lock();
+					derived().graph().addTargetToEdge(origin, target);
+				}
+				else {
+					derived().graph().addTargetToEdge(edge, target);
+				}
+				derived().graph().computeLayout();
 			}
-			else {
-				derived().graph().addTargetToEdge(edge, target);
+			catch (...) {
+				throw;
 			}
-			derived().graph().computeLayout();
+			derived().commitSnapshot(std::move(saved));
 		}
 
 		// ── removeNode ────────────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's removeNode.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts removeNode + computeLayout(), and commits the
+		// snapshot only if both succeed.
 		void removeNode(const NodePtr& node) {
-			derived().pushSnapshot();
-			derived().graph().removeNode(node);
-			derived().graph().computeLayout();
+			auto saved = derived().takeSnapshot();
+			try {
+				derived().graph().removeNode(node);
+				derived().graph().computeLayout();
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
 		}
 
 		// ── removeConnection ──────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's removeConnection.
-		// computeLayout() is called after the mutation.
+		// Clones the graph, attempts removeConnection + computeLayout(), and commits
+		// the snapshot only if both succeed.
 		void removeConnection(const NodePtr& parent, const NodePtr& child) {
-			derived().pushSnapshot();
-			derived().graph().removeConnection(parent, child);
-			derived().graph().computeLayout();
+			auto saved = derived().takeSnapshot();
+			try {
+				derived().graph().removeConnection(parent, child);
+				derived().graph().computeLayout();
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
 		}
 
-		// ── removeSourcesFromHyperedge ────────────────────────────────────────────
+		// ── removeSourceFromHyperedge ────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's removeSourcesFromHyperedge.
-		// computeLayout() is called after the mutation.
-		void removeSourcesFromHyperedge(const HyperedgePtr& edge,
-			const std::unordered_set<Node*>& sources_to_remove)
-		{
-			derived().pushSnapshot();
-
-			if (edge->isSegment()) {
-				HyperedgePtr origin = edge->getOrigin().lock();
-				derived().graph().removeSourcesFromHyperedge(origin, sources_to_remove, true);
+		// Clones the graph, attempts removeSourceFromHyperedge (resolving segments)
+		// + computeLayout(), and commits the snapshot only if both succeed.
+		void removeSourceFromHyperedge(const HyperedgePtr& edge, const NodePtr& source) {
+			auto saved = derived().takeSnapshot();
+			try {
+				if (edge->isSegment()) {
+					HyperedgePtr origin = edge->getOrigin().lock();
+					derived().graph().removeSourcesFromHyperedge(origin, {source.get()}, true);
+				}
+				else {
+					derived().graph().removeSourcesFromHyperedge(edge, {source.get()}, true);
+				}
+				derived().graph().computeLayout();
 			}
-			else {
-				derived().graph().removeSourcesFromHyperedge(edge, sources_to_remove, true);
+			catch (...) {
+				throw;
 			}
-			derived().graph().computeLayout();
+			derived().commitSnapshot(std::move(saved));
 		}
 
-		// ── removeTargetsFromHyperedge ────────────────────────────────────────────
+		// ── removeTargetFromHyperedge ────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's removeTargetsFromHyperedge.
-		// computeLayout() is called after the mutation.
-		//
-		void removeTargetsFromHyperedge(const HyperedgePtr& edge,
-			const std::unordered_set<Node*>& targets_to_remove)
-		{
-			derived().pushSnapshot();
-			if (edge->isSegment()) {
-				HyperedgePtr origin = edge->getOrigin().lock();
-				derived().graph().removeTargetsFromHyperedge(origin, targets_to_remove, true);
+		// Clones the graph, attempts removeTargetFromHyperedge (resolving segments)
+		// + computeLayout(), and commits the snapshot only if both succeed.
+		void removeTargetFromHyperedge(const HyperedgePtr& edge, const NodePtr& target) {
+			auto saved = derived().takeSnapshot();
+			try {
+				if (edge->isSegment()) {
+					HyperedgePtr origin = edge->getOrigin().lock();
+					derived().graph().removeTargetsFromHyperedge(origin, {target.get()}, true);
+				}
+				else {
+					derived().graph().removeTargetsFromHyperedge(edge, {target.get()}, true);
+				}
+				derived().graph().computeLayout();
 			}
-			else {
-				derived().graph().removeTargetsFromHyperedge(edge, targets_to_remove, true);
+			catch (...) {
+				throw;
 			}
-			derived().graph().computeLayout();
+			derived().commitSnapshot(std::move(saved));
 		}
 
-		// ── removeHyperedge ─────────────────────────────────────────────────────────
+		// ── removeHyperedge ───────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's removeTargetsFromHyperedge with 
-		// all targets, this destroys the entire hyperedge.
-		// computeLayout() is called after the mutation.
-		//
+		// Clones the graph, collects all targets of the origin edge, removes them
+		// all (destroying the entire hyperedge) + computeLayout(), and commits the
+		// snapshot only if both succeed.
 		void removeHyperedge(const HyperedgePtr& edge) {
-			derived().pushSnapshot();
-			HyperedgePtr origin = edge->isSegment() ? edge->getOrigin().lock() : edge;
-			auto targets = origin->getTargets();
-			std::unordered_set<Node*> targets_set;
-			for (const auto& t : targets)
-				targets_set.insert(t.get());
-			derived().graph().removeTargetsFromHyperedge(origin, targets_set, true);
-			derived().graph().computeLayout();
+			auto saved = derived().takeSnapshot();
+			try {
+				HyperedgePtr origin = edge->isSegment() ? edge->getOrigin().lock() : edge;
+				auto targets = origin->getTargets();
+				std::unordered_set<Node*> targets_set;
+				for (const auto& t : targets)
+					targets_set.insert(t.get());
+				derived().graph().removeTargetsFromHyperedge(origin, targets_set, true);
+				derived().graph().computeLayout();
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
 		}
 
 		// ── fuseNodes ─────────────────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's fuseNodes.
-		// computeLayout() is called after the mutation.
-		//
+		// Clones the graph, attempts fuseNodes + computeLayout(), and commits the
+		// snapshot only if both succeed.
 		void fuseNodes(const NodePtr& node1, const NodePtr& node2,
 			const std::string& new_label)
 		{
-			derived().pushSnapshot();
-			derived().graph().fuseNodes(node1, node2, new_label);
-			derived().graph().computeLayout();
+			auto saved = derived().takeSnapshot();
+			try {
+				derived().graph().fuseNodes(node1, node2, new_label);
+				derived().graph().computeLayout();
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
 		}
 
 		// ── minimizeCrossings ─────────────────────────────────────────────────────
 		//
-		// Snapshots, runs the global sifting algorithm, then calls computeLayout().
-		// Although minimizeCrossings does not change the topology it does change the
-		// visible ordering of nodes, which the user may want to undo.
+		// Clones the graph, runs the global sifting algorithm + computeLayout(), and
+		// commits the snapshot only if both succeed. Although minimizeCrossings does
+		// not change the topology it does change the visible ordering of nodes, which
+		// the user may want to undo.
 		int minimizeCrossings(int sifting_rounds = 10) {
-			derived().pushSnapshot();
-			int crossings = derived().graph().minimizeCrossings(sifting_rounds);
-			derived().graph().computeLayout();
-			return crossings;
+			auto saved = derived().takeSnapshot();
+			try {
+				int crossings = derived().graph().minimizeCrossings(sifting_rounds);
+				derived().graph().computeLayout();
+				derived().commitSnapshot(std::move(saved));
+				return crossings;
+			}
+			catch (...) {
+				throw;
+			}
 		}
 
 		// ── relocateNodeInLayer ───────────────────────────────────────────────────
 		//
-		// Snapshots, then delegates to the graph's relocateNodeInLayer, which
-		// internally calls computeLayout() itself. We do not need to call
-		// computeLayout() again here.
+		// Clones the graph, attempts relocateNodeInLayer (which calls computeLayout()
+		// internally), and commits the snapshot only on success.
 		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate) {
-			derived().pushSnapshot();
-			derived().graph().relocateNodeInLayer(node, new_x_coordinate);
+			auto saved = derived().takeSnapshot();
+			try {
+				derived().graph().relocateNodeInLayer(node, new_x_coordinate);
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
 		}
 
 	private:
-		// Safely downcast to the derived class. This is a common CRTP pattern that allows
-		// the base class to call methods implemented in the derived class without virtual dispatch.
+		// Safely downcast to the derived class. This is a common CRTP pattern that
+		// allows the base class to call methods implemented in the derived class
+		// without virtual dispatch.
 		Derived& derived() { return static_cast<Derived&>(*this); }
 
-		// This is used for methods which are const in the base. For example, readOnly methods like
-		// getId() or getLayerCount() are const in the base, so they need to be called by a const version of derived().
-		const Derived& derived() const { return static_cast<const Derived&>(*this); } 
+		// Const overload — used by read-only methods (getId, getLayerCount, etc.).
+		const Derived& derived() const { return static_cast<const Derived&>(*this); }
 	};
 
 } // namespace app_logic

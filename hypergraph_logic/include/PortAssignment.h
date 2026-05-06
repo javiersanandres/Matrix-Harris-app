@@ -61,6 +61,7 @@ namespace port_assignment_internal {
 		// ── Port ordering and spacing ──────────────────────────────────────────────
 		void orderPorts(Node* node, std::vector<Port>& ports, bool source) const;
 		double arrangeSymmetrically(Node* node, std::vector<Port>& ports) const;
+		double reduceHorizontalJogs() const;
 
 		// ── Conflict detection ─────────────────────────────────────────────────────
 		std::vector<std::pair<Node*, Node*>> detectConflicts(double min_vertical_sep) const;

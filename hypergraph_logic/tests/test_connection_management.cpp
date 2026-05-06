@@ -779,7 +779,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         auto a = g.createNode("a", 0, nullptr);
         auto b = g.createNode("b", 0, nullptr);
         int edges_before = static_cast<int>(g.getAllHyperedges().size());
-        EXPECT_NO_THROW(g.removeConnection(a, b));
+        EXPECT_THROW(g.removeConnection(a, b), std::logic_error);
         EXPECT_EQ(static_cast<int>(g.getAllHyperedges().size()), edges_before);
     }
 

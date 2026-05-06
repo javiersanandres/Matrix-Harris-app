@@ -163,6 +163,10 @@ namespace hypergraph_logic {
 	}
 
 	void GraphicalHypergraph::computeLayout() {
+		node_layout_.clear();
+		edge_layout_.clear();
+		layer_layout_.clear();
+
 		assignXCoordinates();
 		for (const auto& [layer_idx, _] : layers_) {
 			orderHyperedges(layer_idx);
@@ -174,6 +178,7 @@ namespace hypergraph_logic {
 	void GraphicalHypergraph::relocateNodeInLayer(const NodePtr& node, double new_x_coordinate) {
 		LayerData& layer_data = layers_[node->getLayer()];
 		bool minimize_crossings = false;
+		bool pos_changed = false;
 		bool no_children = node->getChildren().empty();
 		double current_x = node_layout_[node.get()].x;
 
@@ -194,7 +199,7 @@ namespace hypergraph_logic {
 						minimize_crossings = true;
 					}
 					std::iter_swap(it.base() - 1, node_it);
-					break;
+					pos_changed = true;
 				}
 			}
 		}
@@ -212,7 +217,7 @@ namespace hypergraph_logic {
 						minimize_crossings = true;
 					}
 					std::iter_swap(it, node_it);
-					break;
+					pos_changed = true;
 				}
 			}
 		}
@@ -223,7 +228,10 @@ namespace hypergraph_logic {
 			Hypergraph::minimizeCrossings(3, node->getLayer() + 1);
 		}
 
-		computeLayout();
+		if (pos_changed)
+			computeLayout();
+		else 
+			throw std::invalid_argument("New x coordinate does not change the node's position in the layer.");
 	}
 
 } // namespace hypergraph_logic

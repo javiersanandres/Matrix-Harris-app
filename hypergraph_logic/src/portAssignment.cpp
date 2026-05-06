@@ -127,11 +127,32 @@ namespace port_assignment_internal {
                 int pos_b = nodePositionInEdge(b.edge, node);
                 if (pos_a != pos_b) return pos_a > pos_b;
 
+                size_t size_a = 0;
+                size_t size_b = 0;
                 switch (pos_a) {
-                case 2: case 1:
+                case 2:
+                    // If they both draw in position, it might be the case that one of the
+                    // edges has two nodes as rightmost and the other has only one, so we
+                    // break the tie giving priority to the one with fewer rightmost nodes,
+                    // which is more likely to cause crossings if placed in the middle.
+					size_a = rightmost_nodes_.at(a.edge).size();
+                    size_b = rightmost_nodes_.at(b.edge).size();
+                    if (size_a != size_b) {
+                        return size_a < size_b;
+                    }
+                    // If they have the same number, the tie is broken by the hyperedge order, as
+					// executed bellow for pos = 1.
+                case 1:
                     return source ? hyperedge_order_.at(a.edge) < hyperedge_order_.at(b.edge)
                         : hyperedge_order_.at(a.edge) > hyperedge_order_.at(b.edge);
                 case 0:
+                    // The same works for leftmost nodes, but in reverse: the one with fewer leftmost
+					// nodes is more likely to cause crossings if placed in the middle.
+					size_a = leftmost_nodes_.at(a.edge).size();
+					size_b = leftmost_nodes_.at(b.edge).size();
+                    if (size_a != size_b) {
+                        return size_a > size_b;
+                    }
                     return source ? hyperedge_order_.at(a.edge) > hyperedge_order_.at(b.edge)
                         : hyperedge_order_.at(a.edge) < hyperedge_order_.at(b.edge);
                 default: return false;
@@ -158,6 +179,108 @@ namespace port_assignment_internal {
             ports[i].x = min_x + spacing * (i + 1);
         return spacing;
     }
+
+    // ── Reduce horizontal jogs ──────────────────────────────────────────────────────────────
+    //
+    // For hyperedges consisting of just one source and one target, which ports can be aligned
+    // without creating a conflict with the negihbour ports, it is desirable to align them to
+    // prevent creating an unnecessary horizontal jog. This gives the hypergraph a cleaner look.
+    double PortAssigner::reduceHorizontalJogs() const {
+        double min_spacing = MIN_VERTICAL_SEP;
+
+        for (const auto& edge : upper_.outgoing_edges) {
+            if (edge->getSources().size() == 1 && edge->getTargets().size() == 1) {
+                NodePtr src = edge->getSources()[0];
+                NodePtr tgt = edge->getTargets()[0];
+				double src_x = node_layout_.at(src.get()).x;
+				double tgt_x = node_layout_.at(tgt.get()).x;
+                std::vector<Port>& src_ports = node_layout_.at(src.get()).source_ports;
+                int src_index = std::find_if(src_ports.begin(), src_ports.end(),
+                    [&](Port port) {
+                        return port.edge == edge.get();
+                    }) - src_ports.begin();
+
+                std::vector<Port>& tgt_ports = node_layout_.at(tgt.get()).target_ports;
+                int tgt_index = std::find_if(tgt_ports.begin(), tgt_ports.end(),
+                    [&](Port port) {
+                        return port.edge == edge.get();
+                    }) - tgt_ports.begin();
+
+
+                if ((src_x != tgt_x) &&
+                    (std::abs(src_ports[src_index].x - tgt_ports[tgt_index].x) > MIN_VERTICAL_SEP)) {
+                    // The ports differ by a quantity which is no longer a jog, so we don't want to align them.
+                    continue;
+                }
+
+                std::pair<double, double> src_span;
+                std::pair<double, double> tgt_span;
+
+                if (src->isDummy() && tgt->isDummy()) continue; // Don't move ports of dummy nodes, that causes extra jogs and doesn't improve anything.
+
+                if (src->isDummy()) {
+                    src_span = { src_x, src_x };
+                }
+                else {
+                    if (src_index == 0) {
+                        src_span.first = src_x - NODE_WIDTH / 2.0;
+                    }
+                    else {
+                        src_span.first = src_ports[src_index - 1].x;
+                    }
+                    if (src_index == static_cast<int>(src_ports.size()) - 1) {
+                        src_span.second = src_x + NODE_WIDTH / 2.0;
+                    }
+                    else {
+                        src_span.second = src_ports[src_index + 1].x;
+                    }
+                }
+
+                if (tgt->isDummy()) {
+                    tgt_span = { tgt_x, tgt_x };
+                }
+                else {
+                    if (tgt_index == 0) {
+                        tgt_span.first = tgt_x - NODE_WIDTH / 2.0;
+                    }
+                    else {
+                        tgt_span.first = tgt_ports[tgt_index - 1].x;
+                    }
+                    if (tgt_index == static_cast<int>(tgt_ports.size()) - 1) {
+                        tgt_span.second = tgt_x + NODE_WIDTH / 2.0;
+                    }
+                    else {
+                        tgt_span.second = tgt_ports[tgt_index + 1].x;
+                    }
+                }
+
+                if (std::max(src_span.first, tgt_span.first) < std::min(src_span.second, tgt_span.second)) {
+                    // We have intersection between the two spans, so we can align the ports without creating a conflict with the neighbour ports.
+                    double new_x = (std::max(src_span.first, tgt_span.first) + std::min(src_span.second, tgt_span.second)) / 2.0;
+                    double prev_src_x = src_ports[src_index].x;
+                    double prev_tgt_x = tgt_ports[tgt_index].x;
+                    src_ports[src_index].x = new_x;
+                    tgt_ports[tgt_index].x = new_x;
+
+                    // Update the minimum spacing if we have reduced it.
+                    if (prev_src_x < new_x) { // We moved it to the right,
+                        min_spacing = std::min(min_spacing, src_span.second - new_x);
+                    }
+                    else {
+                        min_spacing = std::min(min_spacing, new_x - src_span.first);
+                    }
+                    if (prev_tgt_x < new_x) { // We moved it to the right,
+                        min_spacing = std::min(min_spacing, tgt_span.second - new_x);
+                    }
+                    else {
+                        min_spacing = std::min(min_spacing, new_x - tgt_span.first);
+                    }
+                }
+            }
+        }
+        return min_spacing;
+    }
+
 
 
     // ── buildPorts ────────────────────────────────────────────────────────────────
@@ -190,6 +313,11 @@ namespace port_assignment_internal {
             min_spacing = std::min(min_spacing, arrangeSymmetrically(node.get(), node_layout_[node.get()].source_ports));
         for (const auto& node : lower_.nodes)
             min_spacing = std::min(min_spacing, arrangeSymmetrically(node.get(), node_layout_[node.get()].target_ports));
+
+
+        // Reduce horizontal jogs.
+		min_spacing = std::min(min_spacing, reduceHorizontalJogs());
+
         return min_spacing;
     }
 

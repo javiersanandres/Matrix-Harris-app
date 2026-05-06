@@ -38,8 +38,11 @@ namespace app_logic {
 
 	int Project::addDiagram() {
 		std::string diagram_name("Diagrama nuevo");
-		editors_.emplace_back(GraphicalHypergraph(diagram_name));
-		editors_.back().setName(diagram_name);
+		// unique_ptr: push_back never invalidates existing pointed-to objects,
+		// only the pointers stored inside the vector itself — which we never
+		// hold across a push_back.
+		editors_.push_back(
+			std::make_unique<HypergraphEditor>(GraphicalHypergraph(diagram_name)));
 		active_index_ = static_cast<int>(editors_.size()) - 1;
 		markUnsaved();
 		return active_index_;
@@ -65,13 +68,6 @@ namespace app_logic {
 		markUnsaved();
 	}
 
-	void Project::renameDiagram(int index, const std::string& new_name) {
-		if (index < 0 || index >= static_cast<int>(editors_.size()))
-			throw std::out_of_range("Project::renameDiagram: index out of bounds.");
-		editors_[index].setName(new_name);
-		markUnsaved();
-	}
-
 	int Project::getDiagramCount() const {
 		return static_cast<int>(editors_.size());
 	}
@@ -79,7 +75,7 @@ namespace app_logic {
 	const std::string& Project::getDiagramName(int index) const {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::getDiagramName: index out of bounds.");
-		return editors_[index].getName();
+		return editors_[index]->getName();
 	}
 
 	// ============================================================================
@@ -109,26 +105,26 @@ namespace app_logic {
 		if (active_index_ == -1)
 			throw std::logic_error(
 				"Project::getActiveEditor: joint is active, call getJointEditor().");
-		return editors_[active_index_];
+		return *editors_[active_index_];
 	}
 
 	const HypergraphEditor& Project::getActiveEditor() const {
 		if (active_index_ == -1)
 			throw std::logic_error(
 				"Project::getActiveEditor: joint is active, call getJointEditor().");
-		return editors_[active_index_];
+		return *editors_[active_index_];
 	}
 
 	HypergraphEditor& Project::getEditor(int index) {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::getEditor: index out of bounds.");
-		return editors_[index];
+		return *editors_[index];
 	}
 
 	const HypergraphEditor& Project::getEditor(int index) const {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::getEditor: index out of bounds.");
-		return editors_[index];
+		return *editors_[index];
 	}
 
 	JointHypergraphEditor& Project::getJointEditor() {
@@ -173,7 +169,7 @@ namespace app_logic {
 		json diagrams = json::array();
 		for (const auto& editor : editors_) {
 			json dj;
-			editor.toJSON(dj);
+			editor->toJSON(dj);
 			diagrams.push_back(std::move(dj));
 		}
 		j["diagrams"] = std::move(diagrams);
@@ -204,36 +200,34 @@ namespace app_logic {
 	// load
 	// ============================================================================
 
-	Project Project::load(const std::filesystem::path& path) {
+	std::unique_ptr<Project> Project::load(const std::filesystem::path& path) {
 		std::ifstream in(path);
 		if (!in.is_open())
-			throw std::runtime_error(
-				"Project::load: cannot open file: " + path.string());
+			throw std::runtime_error("Project::load: cannot open file: " + path.string());
 
 		json j;
 		try { in >> j; }
 		catch (const json::parse_error& e) {
-			throw std::runtime_error(
-				std::string("Project::load: JSON parse error: ") + e.what());
+			throw std::runtime_error(std::string("Project::load: JSON parse error: ") + e.what());
 		}
 
-		Project p(j.at("name").get<std::string>());
-		p.editors_.clear();  // discard the initial diagram the constructor created
+		auto p = std::make_unique<Project>(j.at("name").get<std::string>());
+		p->editors_.clear();
 
-		// Restore each diagram directly from its embedded JSON object.
-		for (const auto& dj : j.at("diagrams"))
-			p.editors_.emplace_back(GraphicalHypergraph::fromJSON(dj));
+		for (const auto& dj : j.at("diagrams")) {
+			auto gh = GraphicalHypergraph::fromJSON(dj);
+			p->editors_.emplace_back(std::make_unique<HypergraphEditor>(std::move(gh)));
+		}
 
-		// Release the joint created by the constructor so the singleton slot is
-		// free before fromJSON claims it.
-		p.joint_editor_.reset();
-		p.joint_editor_ = std::make_unique<JointHypergraphEditor>(
+		p->joint_editor_.reset();
+		p->joint_editor_ = std::make_unique<JointHypergraphEditor>(
 			JointGraphicalHypergraph::fromJSON(j.at("joint")));
 
-		p.active_index_ = j.at("active_index").get<int>();
-		p.file_path_ = path;
-		p.unsaved_changes_ = false;
+		p->active_index_ = j.at("active_index").get<int>();
+		p->file_path_ = path;
+		p->unsaved_changes_ = false;
 
 		return p;
 	}
+
 } // namespace app_logic

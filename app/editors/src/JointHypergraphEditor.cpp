@@ -14,9 +14,16 @@ namespace app_logic {
 	}
 
 	void JointHypergraphEditor::addHypergraph(GraphicalHypergraph& g, bool left) {
-		pushSnapshot();
-		joint_->addHypergraph(g, left);
-		// addHypergraph already calls computeLayout() internally, 
-		// so we do not need to call it here again.
+		auto saved = takeSnapshot();
+		try {
+			joint_->addHypergraph(g, left);
+			// addHypergraph already calls computeLayout() internally,
+			// so we do not need to call it here again.
+		}
+		catch (...) {
+			throw;
+		}
+		commitSnapshot(std::move(saved));
 	}
+
 } // namespace app_logic

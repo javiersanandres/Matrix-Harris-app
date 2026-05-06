@@ -820,6 +820,7 @@ namespace hypergraph_logic {
             std::ifstream f(tmp);
             nlohmann::json from_file;
             f >> from_file;
+            f.close();
             fs::remove(tmp);
 
             EXPECT_EQ(from_mem, from_file);
