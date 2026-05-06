@@ -152,12 +152,15 @@ namespace ui {
 
         // Create one scene per regular editor.
         for (int i = 0; i < project_->getDiagramCount(); ++i) {
+            project_->getEditor(i).setOnMutated([this] { project_->markUnsaved(); });
             DiagramScene* scene = createSceneForEditor(i);
             scenes_.push_back(scene);
             zoom_levels_.push_back(0.0);
             tab_bar_->addTab(scene,
                 QString::fromStdString(project_->getDiagramName(i)));
         }
+        project_->getJointEditor().setOnMutated([this] { project_->markUnsaved(); });
+
 
         // Joint scene.
         joint_scene_ = new DiagramScene(&project_->getJointEditor(), this);
@@ -292,6 +295,7 @@ namespace ui {
 
     void MainWindow::onNuevoDiagrama() {
         int new_index = project_->addDiagram();
+        project_->getEditor(new_index).setOnMutated([this] { project_->markUnsaved(); });
         DiagramScene* scene = createSceneForEditor(new_index);
         scenes_.push_back(scene);
         zoom_levels_.push_back(0.0); // 0 means "fit on first view"
@@ -339,8 +343,10 @@ namespace ui {
     }
 
     void MainWindow::onGuardarProyecto() {
-        if (project_->getFilePath().empty())
+        if (project_->getFilePath().empty()) {
             saveWithPath();
+            setWindowTitle(QString::fromStdString(project_->getName()) + " — Matrix-Harris");
+        }
         else
             saveToKnownPath();
     }
@@ -350,11 +356,15 @@ namespace ui {
     }
 
     bool MainWindow::saveWithPath() {
+        QString suggested = QString::fromStdString(project_->getName()) + ".json";
         QString path = QFileDialog::getSaveFileName(
-            this, "Guardar proyecto", QString(), "Proyectos (*.json)");
+            this, "Guardar proyecto", suggested, "Proyectos (*.json)");
         if (path.isEmpty()) return false;
         try {
+            QFileInfo info(path);
+            project_->setName(info.completeBaseName().toStdString());
             project_->save(path.toStdString());
+            setWindowTitle(QString::fromStdString(project_->getName()) + " — Matrix-Harris");
             return true;
         }
         catch (const std::exception& e) {

@@ -114,6 +114,13 @@ namespace hypergraph_logic {
 		//
 		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent);
 
+		// ── createParent  ────────────────────────────────────────────────────────────────────────
+		//
+		// Creates a new real node with the given label and inserts it as a parent of the specified
+		// child node. The new parent is placed at layer 0, guaranteeing the layering depth rule.
+		//
+		NodePtr createParent(const std::string& label, const NodePtr& child);
+
 		// ── createNode (into edge) ────────────────────────────────────────────────────────────────────
 		//
 		// Creates a new real node and inserts it as an intermediate node on an existing hyperedge.

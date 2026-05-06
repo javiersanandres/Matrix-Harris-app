@@ -32,6 +32,12 @@ namespace app_logic {
 		NodePtr createNode(const std::string& label, int layer_position,
 			const NodePtr& parent);
 
+		// ── createParent  ─────────────────────────────────────────────────────────
+		//
+		// Clones the graph, attemps createParent + computeLayout(), and commits the
+		// snapshot to past_ only if both succeed.
+		NodePtr createParent(const std::string& label, const NodePtr& child);
+
 		// ── createNode (into edge) ────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts createNode + computeLayout(), and commits the
@@ -85,6 +91,7 @@ namespace app_logic {
 			if (static_cast<int>(past_.size()) > MAX_HISTORY)
 				past_.pop_front();
 			future_.clear();
+			notifyMutated();
 		}
 
 		// ── restoreSnapshot() — required by HypergraphEditorBase ──────────────────
@@ -102,6 +109,7 @@ namespace app_logic {
 				dst.pop_front();
 			graph_ = std::move(src.back());
 			src.pop_back();
+			notifyMutated();
 		}
 
 		GraphicalHypergraph graph_;

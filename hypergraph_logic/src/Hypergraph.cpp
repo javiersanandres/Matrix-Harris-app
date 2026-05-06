@@ -228,6 +228,47 @@ namespace hypergraph_logic {
 		return node;
 	}
 
+	NodePtr Hypergraph::createParent(const std::string& label, const NodePtr& child) {
+		if (!child) {
+			throw std::invalid_argument("Child node cannot be null when creating a parent.");
+		}
+		NodePtr node = std::make_shared<Node>(label);
+		all_nodes_.push_back(node);
+		addNodeToLayer(0, -1, node);
+		HyperedgePtr edge = createHyperedge({ node }, { child }, -1);
+		if (relocateNodes({ child })) {
+			// We needed to relocate, so we will apply crossing minimization globally from
+			// layer 0 to the deepest layer, since the disruption is global. Also, the relocation
+			// will have assigned the new edge to a layer, so we don't need to do it here.
+			minimizeCrossings(10, 0);
+		}
+		else {
+			// No relocation was needed. Therefore, the new edge can be short, so we just need
+			// to find the best position for the new parent in layer 0 or the edge is not short,
+			// so we need to split it and find the best position for the new parent and any new dummy nodes.
+			int k = edgeIsShort(edge);
+			if (k >= 0) {
+				addHyperedgeToLayer(k, edge);
+				// The new parent is the only node that needs to be minimized, since no relocation is needed.
+				minimizeCrossingsForNodes({ node.get() }, 0, 0);
+			}
+			else {
+				std::unordered_set<Node*> nodes_to_minimize = { node.get() };
+				splitLongEdge(edge);
+				for (const auto& segment : all_hyperedges_[edge]) {
+					for (const auto& s : segment->getSources()) {
+						if (s->isDummy()) {
+							nodes_to_minimize.insert(s.get());
+						}
+					}
+				}
+				minimizeCrossingsForNodes(std::vector<Node*>(nodes_to_minimize.begin(), nodes_to_minimize.end()), 0, child->getLayer() - 1);
+			}
+		}
+
+		return node;
+	}
+
 	NodePtr Hypergraph::createNode(const std::string& label, const HyperedgePtr& edge) {
 		if (!edge) return nullptr;
 		NodePtr node = std::make_shared<Node>(label);
@@ -1133,6 +1174,7 @@ namespace hypergraph_logic {
 	void Hypergraph::removeTargetsFromHyperedge(const HyperedgePtr& original_edge, const std::unordered_set<Node*>& targets_to_remove, bool relocation)
 	{
 		if (targets_to_remove.empty() || original_edge->isSegment()) return;
+		std::vector<NodePtr> targets_to_relocate; // to batch relocate at the end if needed.
 
 		// This is just a check for the user interaction. It introduces removals one at a time.
 		if (targets_to_remove.size() == 1) {
@@ -1144,8 +1186,10 @@ namespace hypergraph_logic {
 		}
 
 		// Remove targets from the original edge.
-		for (Node* t : targets_to_remove)
+		for (Node* t : targets_to_remove) {
 			original_edge->removeTarget(t->shared_from_this());
+			targets_to_relocate.push_back(t->shared_from_this());
+		}
 
 		// Remove real parent/child links on real nodes.
 		for (const auto& s : original_edge->getSources()) {
@@ -1162,7 +1206,7 @@ namespace hypergraph_logic {
 			if (original_edge->getLayer() >= 0) {
 				removeHyperedgeFromLayer(original_edge->getLayer(), original_edge);
 			}
-			if (relocation) relocateNodes(original_edge->getTargets());
+			if (relocation) relocateNodes(targets_to_relocate);
 			return;
 		}
 
@@ -1243,7 +1287,7 @@ namespace hypergraph_logic {
 		// upward. Collect all affected nodes and batch-relocate.
 		// ----------------------------------------------------------------
 		if (relocation) {
-			if (relocateNodes(original_edge->getTargets())) {
+			if (relocateNodes(targets_to_relocate)) {
 				int start_layer = INT_MAX;
 				for (const auto& tgt : original_edge->getTargets()) {
 					for (const auto& p : tgt->getParents()) {

@@ -379,6 +379,20 @@ namespace app_logic {
 			derived().commitSnapshot(std::move(saved));
 		}
 
+
+		// -─ onMutated callback ───────────────────────────────────────────────────────
+		//
+		// Callback function for when the graph is mutated. The graphical engine uses
+		// this to know when the project has unsaved changes.
+		void setOnMutated(std::function<void()> callback) {
+			on_mutated_ = std::move(callback);
+		}
+
+		// This should be called by the derived class at the end of commitSnapshot() after
+		void notifyMutated() {
+			if (on_mutated_) on_mutated_();
+		}
+
 	private:
 		// Safely downcast to the derived class. This is a common CRTP pattern that
 		// allows the base class to call methods implemented in the derived class
@@ -387,6 +401,9 @@ namespace app_logic {
 
 		// Const overload — used by read-only methods (getId, getLayerCount, etc.).
 		const Derived& derived() const { return static_cast<const Derived&>(*this); }
+
+		// The callback function for notifying the project of unsaved mutations.
+		std::function<void()> on_mutated_;
 	};
 
 } // namespace app_logic

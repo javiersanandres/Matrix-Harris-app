@@ -73,6 +73,7 @@ namespace app_logic {
 			if (static_cast<int>(past_.size()) > MAX_HISTORY)
 				past_.pop_front();
 			future_.clear();
+			notifyMutated();
 		}
 
 		// ── restoreSnapshot() — required by HypergraphEditorBase ──────────────────
@@ -90,6 +91,7 @@ namespace app_logic {
 				dst.pop_front();
 			joint_ = std::move(src.back());
 			src.pop_back();
+			notifyMutated();
 		}
 
 		std::unique_ptr<JointGraphicalHypergraph> joint_;

@@ -27,6 +27,21 @@ namespace app_logic {
 		}
 	}
 
+	NodePtr HypergraphEditor::createParent(
+		const std::string& label, const NodePtr& child)
+	{
+		auto saved = takeSnapshot();
+		try {
+			NodePtr result = graph_.createParent(label, child);
+			graph_.computeLayout();
+			commitSnapshot(std::move(saved));
+			return result;
+		}
+		catch (...) {
+			throw;
+		}
+	}
+
 	NodePtr HypergraphEditor::createNode(
 		const std::string& label, const HyperedgePtr& edge)
 	{

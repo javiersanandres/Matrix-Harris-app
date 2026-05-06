@@ -192,6 +192,7 @@ namespace app_logic {
 		//static Project load(const std::filesystem::path& path);
 		static std::unique_ptr<Project> load(const std::filesystem::path& path);
 
+		void markUnsaved() { unsaved_changes_ = true; }
 	private:
 		std::string name_;
 		std::filesystem::path file_path_;
@@ -200,8 +201,6 @@ namespace app_logic {
 
 		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;
-
-		void markUnsaved() { unsaved_changes_ = true; }
 	};
 
 } // namespace app_logic

@@ -72,6 +72,13 @@ namespace ui {
             [](Hyperedge* edge, const QPainterPath& path) {
                 return new HyperedgeItem(edge, path);
             });
+
+        // Normalize: set sceneRect to the actual items bounding box,
+        // with a small margin. This makes the scene origin consistent
+        // regardless of the sign convention in the layout algorithm.
+        QRectF bounds = itemsBoundingRect();
+        if (!bounds.isEmpty())
+            setSceneRect(bounds.adjusted(-20, -20, 20, 20));
     }
 
     // ============================================================================
@@ -143,6 +150,7 @@ namespace ui {
         }
 
         QMenu menu;
+		menu.addAction("Crear nodo arriba", [this, node] { onCreateNodeAbove(node); });
         menu.addAction("Crear nodo debajo", [this, node] { onCreateNodeBelow(node); });
         menu.addSeparator();
         menu.addAction("Añadir conexión arriba", [this, node] { onBeginAddConnectionParent(node); });
@@ -266,6 +274,20 @@ namespace ui {
     // Node operations
     // ============================================================================
 
+    void DiagramScene::onCreateNodeAbove(Node* child) {
+        NodePtr child_ptr = child ? child->shared_from_this() : nullptr;
+        try {
+			NodePtr new_node = regular_editor_->createParent("Nuevo nodo", child_ptr);
+            rebuild();
+            emit graphChanged();
+            // Start inline rename immediately.
+            auto it = node_items_.find(new_node.get());
+            if (it != node_items_.end()) startInlineRename(it->second);
+        }
+        catch (const std::exception& e) { showError(e); }
+	}
+    
+    
     void DiagramScene::onCreateNodeBelow(Node* parent) {
         NodePtr parent_ptr = parent ? parent->shared_from_this() : nullptr;
         try {

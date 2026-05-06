@@ -145,7 +145,6 @@ namespace app_logic {
 
 	void Project::setName(const std::string& name) {
 		name_ = name;
-		markUnsaved();
 	}
 
 	const std::filesystem::path& Project::getFilePath() const {

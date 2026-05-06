@@ -138,7 +138,8 @@ namespace ui {
         // ── Slot-like private methods called from context menus ───────────────────
 
         // Node operations
-        void onCreateNodeBelow(hypergraph_logic::Node* parent);
+		void onCreateNodeAbove(hypergraph_logic::Node* parent);
+        void onCreateNodeBelow(hypergraph_logic::Node* child);
         void onCreateNodeIntoEdge(hypergraph_logic::Hyperedge* edge);
         void onCreateSource(hypergraph_logic::Hyperedge* edge);
         void onCreateTarget(hypergraph_logic::Hyperedge* edge);
