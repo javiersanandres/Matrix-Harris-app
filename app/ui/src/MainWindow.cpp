@@ -326,6 +326,7 @@ namespace ui {
             if (joint_scene_) { delete joint_scene_; joint_scene_ = nullptr; }
             // Rebuild tab bar.
             while (tab_bar_->tabCount() > 0) tab_bar_->removeTab(0);
+            setWindowTitle(QString::fromStdString(project_->getName()) + " — Matrix-Harris");
             buildFromProject();
         }
         catch (const std::exception& e) {
@@ -347,8 +348,9 @@ namespace ui {
             saveWithPath();
             setWindowTitle(QString::fromStdString(project_->getName()) + " — Matrix-Harris");
         }
-        else
+        else {
             saveToKnownPath();
+        }
     }
 
     void MainWindow::onGuardarComo() {
@@ -377,6 +379,7 @@ namespace ui {
     bool MainWindow::saveToKnownPath() {
         try {
             project_->save();
+            setWindowTitle(QString::fromStdString(project_->getName()) + " — Matrix-Harris");
             return true;
         }
         catch (const std::exception& e) {

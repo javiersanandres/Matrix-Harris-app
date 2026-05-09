@@ -189,22 +189,21 @@ namespace port_assignment_internal {
     double PortAssigner::reduceHorizontalJogs() const {
         double min_spacing = MIN_VERTICAL_SEP;
 
-        // The following lambda tryes to align one specific source port and one specific
+        // The following lambda tries to align one specific source port and one specific
         // target port of the same edge by moving both to the midpoint of the intersection of
         // their corresponding spans. The span of a port is the horizontal interval where it
         // can be moved without creating a conflict with its neighbour ports.
         auto alignPort = [&](Node* src_node, Node* tgt_node,
             std::vector<Port>& src_ports, int si,
-            std::vector<Port>& tgt_ports, int ti) {
+            std::vector<Port>& tgt_ports, int ti) -> bool {
                 double src_x = node_layout_.at(src_node).x;
                 double tgt_x = node_layout_.at(tgt_node).x;
 
                 if ((src_x != tgt_x) &&
                     (std::abs(src_ports[si].x - tgt_ports[ti].x) > MIN_VERTICAL_SEP))
-                    return;
+                    return false;
 
-                // Moving two dummy nodes creates jogs anyway, so we skip that case.
-                if (src_node->isDummy() && tgt_node->isDummy()) return;
+                if (src_node->isDummy() && tgt_node->isDummy()) return false;
 
                 std::pair<double, double> src_span, tgt_span;
 
@@ -213,11 +212,9 @@ namespace port_assignment_internal {
                 }
                 else {
                     src_span.first = (si == 0)
-                        ? src_x - NODE_WIDTH / 2.0
-                        : src_ports[si - 1].x;
+                        ? src_x - NODE_WIDTH / 2.0 : src_ports[si - 1].x;
                     src_span.second = (si == static_cast<int>(src_ports.size()) - 1)
-                        ? src_x + NODE_WIDTH / 2.0
-                        : src_ports[si + 1].x;
+                        ? src_x + NODE_WIDTH / 2.0 : src_ports[si + 1].x;
                 }
 
                 if (tgt_node->isDummy()) {
@@ -225,16 +222,14 @@ namespace port_assignment_internal {
                 }
                 else {
                     tgt_span.first = (ti == 0)
-                        ? tgt_x - NODE_WIDTH / 2.0
-                        : tgt_ports[ti - 1].x;
+                        ? tgt_x - NODE_WIDTH / 2.0 : tgt_ports[ti - 1].x;
                     tgt_span.second = (ti == static_cast<int>(tgt_ports.size()) - 1)
-                        ? tgt_x + NODE_WIDTH / 2.0
-                        : tgt_ports[ti + 1].x;
+                        ? tgt_x + NODE_WIDTH / 2.0 : tgt_ports[ti + 1].x;
                 }
 
                 double inter_lo = std::max(src_span.first, tgt_span.first);
                 double inter_hi = std::min(src_span.second, tgt_span.second);
-                if (inter_lo >= inter_hi) return;
+                if (inter_lo > inter_hi) return false;
 
                 double new_x = (inter_lo + inter_hi) / 2.0;
                 double prev_src_x = src_ports[si].x;
@@ -246,6 +241,7 @@ namespace port_assignment_internal {
                     prev_src_x < new_x ? src_span.second - new_x : new_x - src_span.first);
                 min_spacing = std::min(min_spacing,
                     prev_tgt_x < new_x ? tgt_span.second - new_x : new_x - tgt_span.first);
+                return true;
             };
 
         auto findPortIndex = [](const std::vector<Port>& ports, const Hyperedge* edge) {
@@ -257,61 +253,122 @@ namespace port_assignment_internal {
 		//  1) The edge has only one source and one target, so we can align those two ports.
 		//  2) The edge has two leftmost nodes, one source and one target, so we can align those two ports.
 		//  3) The edge has two rightmost nodes, one source and one target, so we can align those two ports.
+        // 
+        // We will also keep track of the adjusted ports to arrange them symmetrically at the end.
+        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_src;
+        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_tgt;
         for (const auto& edge : upper_.outgoing_edges) {
             Hyperedge* e = edge.get();
 
             const auto& lv = leftmost_nodes_.at(e);
             const auto& rv = rightmost_nodes_.at(e);
 
-			// Case 1: only one source and one target.
+            // Case 1: one source, one target.
             if (edge->getSources().size() == 1 && edge->getTargets().size() == 1) {
                 Node* src_node = edge->getSources()[0].get();
                 Node* tgt_node = edge->getTargets()[0].get();
-                std::vector<Port>& src_ports = node_layout_.at(src_node).source_ports;
-                std::vector<Port>& tgt_ports = node_layout_.at(tgt_node).target_ports;
-                alignPort(src_node, tgt_node, src_ports, findPortIndex(src_ports, e),
-                    tgt_ports, findPortIndex(tgt_ports, e));
+                auto& src_ports = node_layout_.at(src_node).source_ports;
+                auto& tgt_ports = node_layout_.at(tgt_node).target_ports;
+                int si = findPortIndex(src_ports, e);
+                int ti = findPortIndex(tgt_ports, e);
+                if (alignPort(src_node, tgt_node, src_ports, si, tgt_ports, ti)) {
+                    adjusted_src[src_node].insert(&src_ports[si]);
+                    adjusted_tgt[tgt_node].insert(&tgt_ports[ti]);
+                }
                 continue;
             }
 
-			// Case 2: two leftmost nodes, one a source and one a target.
+            // Case 2: two leftmost nodes.
             if (lv.size() == 2) {
-                // Identify which of the two leftmost nodes is a source and which is a target.
-				Node* src_node = nullptr;
-				Node* tgt_node = nullptr;
-                if (edge->containsSource(lv.front()->shared_from_this())) {
-					src_node = lv.front();
-					tgt_node = lv.back();
+                bool front_is_src = edge->containsSource(lv.front()->shared_from_this());
+                Node* src_node = front_is_src ? lv.front() : lv.back();
+                Node* tgt_node = front_is_src ? lv.back() : lv.front();
+                auto& src_ports = node_layout_.at(src_node).source_ports;
+                auto& tgt_ports = node_layout_.at(tgt_node).target_ports;
+                int si = findPortIndex(src_ports, e);
+                int ti = findPortIndex(tgt_ports, e);
+                if (alignPort(src_node, tgt_node, src_ports, si, tgt_ports, ti)) {
+                    adjusted_src[src_node].insert(&src_ports[si]);
+                    adjusted_tgt[tgt_node].insert(&tgt_ports[ti]);
                 }
-                else {
-					src_node = lv.back();
-					tgt_node = lv.front();
-                }
-                std::vector<Port>& src_ports = node_layout_.at(src_node).source_ports;
-                std::vector<Port>& tgt_ports = node_layout_.at(tgt_node).target_ports;
-                alignPort(src_node, tgt_node, src_ports, findPortIndex(src_ports, e),
-                    tgt_ports, findPortIndex(tgt_ports, e));
             }
 
-			// Case 3: two rightmost nodes, one a source and one a target.
+            // Case 3: two rightmost nodes.
             if (rv.size() == 2) {
-                Node* src_node = nullptr;
-                Node* tgt_node = nullptr;
-				if (edge->containsSource(rv.front()->shared_from_this())) {
-                    src_node = rv.front();
-                    tgt_node = rv.back();
+                bool front_is_src = edge->containsSource(rv.front()->shared_from_this());
+                Node* src_node = front_is_src ? rv.front() : rv.back();
+                Node* tgt_node = front_is_src ? rv.back() : rv.front();
+                auto& src_ports = node_layout_.at(src_node).source_ports;
+                auto& tgt_ports = node_layout_.at(tgt_node).target_ports;
+                int si = findPortIndex(src_ports, e);
+                int ti = findPortIndex(tgt_ports, e);
+                if (alignPort(src_node, tgt_node, src_ports, si, tgt_ports, ti)) {
+                    adjusted_src[src_node].insert(&src_ports[si]);
+                    adjusted_tgt[tgt_node].insert(&tgt_ports[ti]);
                 }
-                else {
-                    src_node = rv.back();
-                    tgt_node = rv.front();
-                }
-                std::vector<Port>& src_ports = node_layout_.at(src_node).source_ports;
-                std::vector<Port>& tgt_ports = node_layout_.at(tgt_node).target_ports;
-                alignPort(src_node, tgt_node, src_ports, findPortIndex(src_ports, e),
-                    tgt_ports, findPortIndex(tgt_ports, e));
             }
         }
 
+        // Redistribute symetrically the free ports.
+        for (auto& [node, fixed] : adjusted_src)
+            min_spacing = std::min(min_spacing,
+                redistributePorts(node_layout_.at(node).source_ports, fixed,
+                    node_layout_.at(node).x));
+        for (auto& [node, fixed] : adjusted_tgt)
+            min_spacing = std::min(min_spacing,
+                redistributePorts(node_layout_.at(node).target_ports, fixed,
+                    node_layout_.at(node).x));
+
+        return min_spacing;
+    }
+
+    double PortAssigner::redistributePorts(std::vector<Port>& ports,
+        const std::unordered_set<Port*>& fixed,
+        double node_x) const
+    {
+        if (static_cast<int>(ports.size()) <= 1) return MIN_VERTICAL_SEP;
+
+        double left_boundary = node_x - NODE_WIDTH / 2.0;
+        double right_boundary = node_x + NODE_WIDTH / 2.0;
+        double min_spacing = MIN_VERTICAL_SEP;
+
+        // Collect the x coordinate of the anchors: fixed ports and node boundaries.
+        // The spacing between the gaps defined by these anchors will be used to 
+        // redistribute the free ports evenly.
+        std::vector<double> anchors;
+        anchors.push_back(left_boundary);
+        for (Port& p : ports)
+            if (fixed.count(&p)) anchors.push_back(p.x);
+        anchors.push_back(right_boundary);
+
+        int anchor_idx = 0;
+        std::vector<Port*> current_gap;
+
+        auto populateGap = [&]() {
+            if (current_gap.empty()) return;
+            double lo = anchors[anchor_idx];
+            double hi = anchors[anchor_idx + 1];
+            int    k = static_cast<int>(current_gap.size());
+            double spacing = (hi - lo) / (k + 1);
+            min_spacing = std::min(min_spacing, spacing);
+            for (int idx = 0; idx < k; ++idx)
+                current_gap[idx]->x = lo + spacing * (idx + 1);
+            current_gap.clear();
+            };
+
+        // Ports are already sorted by ascending x coordinate, so we can just loop over
+        // them and collect the free ports in the current gap until we hit a fixed port,
+        // at which point we populate the gap.
+        for (Port& p : ports) {
+            if (fixed.count(&p)) {
+                populateGap();
+                ++anchor_idx;
+            }
+            else {
+                current_gap.push_back(&p);
+            }
+        }
+        populateGap(); // handle any trailing free ports after the last fixed anchor
         return min_spacing;
     }
 
