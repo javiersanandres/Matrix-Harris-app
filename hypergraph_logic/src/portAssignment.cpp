@@ -182,105 +182,138 @@ namespace port_assignment_internal {
 
     // ── Reduce horizontal jogs ──────────────────────────────────────────────────────────────
     //
-    // For hyperedges consisting of just one source and one target, which ports can be aligned
-    // without creating a conflict with the negihbour ports, it is desirable to align them to
-    // prevent creating an unnecessary horizontal jog. This gives the hypergraph a cleaner look.
+    // For hyperedges consisting of just one source and one target or with two nodes sharing the
+    // rightmost or leftmost position, which ports can be aligned without creating a conflict with 
+    // the neighbour ports, it is desirable to align them to prevent from creating an unnecessary 
+    // horizontal jog. This gives the hypergraph a cleaner look.
     double PortAssigner::reduceHorizontalJogs() const {
         double min_spacing = MIN_VERTICAL_SEP;
 
-        for (const auto& edge : upper_.outgoing_edges) {
-            if (edge->getSources().size() == 1 && edge->getTargets().size() == 1) {
-                NodePtr src = edge->getSources()[0];
-                NodePtr tgt = edge->getTargets()[0];
-				double src_x = node_layout_.at(src.get()).x;
-				double tgt_x = node_layout_.at(tgt.get()).x;
-                std::vector<Port>& src_ports = node_layout_.at(src.get()).source_ports;
-                int src_index = std::find_if(src_ports.begin(), src_ports.end(),
-                    [&](Port port) {
-                        return port.edge == edge.get();
-                    }) - src_ports.begin();
-
-                std::vector<Port>& tgt_ports = node_layout_.at(tgt.get()).target_ports;
-                int tgt_index = std::find_if(tgt_ports.begin(), tgt_ports.end(),
-                    [&](Port port) {
-                        return port.edge == edge.get();
-                    }) - tgt_ports.begin();
-
+        // The following lambda tryes to align one specific source port and one specific
+        // target port of the same edge by moving both to the midpoint of the intersection of
+        // their corresponding spans. The span of a port is the horizontal interval where it
+        // can be moved without creating a conflict with its neighbour ports.
+        auto alignPort = [&](Node* src_node, Node* tgt_node,
+            std::vector<Port>& src_ports, int si,
+            std::vector<Port>& tgt_ports, int ti) {
+                double src_x = node_layout_.at(src_node).x;
+                double tgt_x = node_layout_.at(tgt_node).x;
 
                 if ((src_x != tgt_x) &&
-                    (std::abs(src_ports[src_index].x - tgt_ports[tgt_index].x) > MIN_VERTICAL_SEP)) {
-                    // The ports differ by a quantity which is no longer a jog, so we don't want to align them.
-                    continue;
-                }
+                    (std::abs(src_ports[si].x - tgt_ports[ti].x) > MIN_VERTICAL_SEP))
+                    return;
 
-                std::pair<double, double> src_span;
-                std::pair<double, double> tgt_span;
+                // Moving two dummy nodes creates jogs anyway, so we skip that case.
+                if (src_node->isDummy() && tgt_node->isDummy()) return;
 
-                if (src->isDummy() && tgt->isDummy()) continue; // Don't move ports of dummy nodes, that causes extra jogs and doesn't improve anything.
+                std::pair<double, double> src_span, tgt_span;
 
-                if (src->isDummy()) {
+                if (src_node->isDummy()) {
                     src_span = { src_x, src_x };
                 }
                 else {
-                    if (src_index == 0) {
-                        src_span.first = src_x - NODE_WIDTH / 2.0;
-                    }
-                    else {
-                        src_span.first = src_ports[src_index - 1].x;
-                    }
-                    if (src_index == static_cast<int>(src_ports.size()) - 1) {
-                        src_span.second = src_x + NODE_WIDTH / 2.0;
-                    }
-                    else {
-                        src_span.second = src_ports[src_index + 1].x;
-                    }
+                    src_span.first = (si == 0)
+                        ? src_x - NODE_WIDTH / 2.0
+                        : src_ports[si - 1].x;
+                    src_span.second = (si == static_cast<int>(src_ports.size()) - 1)
+                        ? src_x + NODE_WIDTH / 2.0
+                        : src_ports[si + 1].x;
                 }
 
-                if (tgt->isDummy()) {
+                if (tgt_node->isDummy()) {
                     tgt_span = { tgt_x, tgt_x };
                 }
                 else {
-                    if (tgt_index == 0) {
-                        tgt_span.first = tgt_x - NODE_WIDTH / 2.0;
-                    }
-                    else {
-                        tgt_span.first = tgt_ports[tgt_index - 1].x;
-                    }
-                    if (tgt_index == static_cast<int>(tgt_ports.size()) - 1) {
-                        tgt_span.second = tgt_x + NODE_WIDTH / 2.0;
-                    }
-                    else {
-                        tgt_span.second = tgt_ports[tgt_index + 1].x;
-                    }
+                    tgt_span.first = (ti == 0)
+                        ? tgt_x - NODE_WIDTH / 2.0
+                        : tgt_ports[ti - 1].x;
+                    tgt_span.second = (ti == static_cast<int>(tgt_ports.size()) - 1)
+                        ? tgt_x + NODE_WIDTH / 2.0
+                        : tgt_ports[ti + 1].x;
                 }
 
-                if (std::max(src_span.first, tgt_span.first) < std::min(src_span.second, tgt_span.second)) {
-                    // We have intersection between the two spans, so we can align the ports without creating a conflict with the neighbour ports.
-                    double new_x = (std::max(src_span.first, tgt_span.first) + std::min(src_span.second, tgt_span.second)) / 2.0;
-                    double prev_src_x = src_ports[src_index].x;
-                    double prev_tgt_x = tgt_ports[tgt_index].x;
-                    src_ports[src_index].x = new_x;
-                    tgt_ports[tgt_index].x = new_x;
+                double inter_lo = std::max(src_span.first, tgt_span.first);
+                double inter_hi = std::min(src_span.second, tgt_span.second);
+                if (inter_lo >= inter_hi) return;
 
-                    // Update the minimum spacing if we have reduced it.
-                    if (prev_src_x < new_x) { // We moved it to the right,
-                        min_spacing = std::min(min_spacing, src_span.second - new_x);
-                    }
-                    else {
-                        min_spacing = std::min(min_spacing, new_x - src_span.first);
-                    }
-                    if (prev_tgt_x < new_x) { // We moved it to the right,
-                        min_spacing = std::min(min_spacing, tgt_span.second - new_x);
-                    }
-                    else {
-                        min_spacing = std::min(min_spacing, new_x - tgt_span.first);
-                    }
+                double new_x = (inter_lo + inter_hi) / 2.0;
+                double prev_src_x = src_ports[si].x;
+                double prev_tgt_x = tgt_ports[ti].x;
+                src_ports[si].x = new_x;
+                tgt_ports[ti].x = new_x;
+
+                min_spacing = std::min(min_spacing,
+                    prev_src_x < new_x ? src_span.second - new_x : new_x - src_span.first);
+                min_spacing = std::min(min_spacing,
+                    prev_tgt_x < new_x ? tgt_span.second - new_x : new_x - tgt_span.first);
+            };
+
+        auto findPortIndex = [](const std::vector<Port>& ports, const Hyperedge* edge) {
+            return static_cast<int>(std::find_if(ports.begin(), ports.end(),
+                [edge](const Port& p) { return p.edge == edge; }) - ports.begin());
+            };
+        
+        // We loop over the edges, there are three cases to consider:
+		//  1) The edge has only one source and one target, so we can align those two ports.
+		//  2) The edge has two leftmost nodes, one source and one target, so we can align those two ports.
+		//  3) The edge has two rightmost nodes, one source and one target, so we can align those two ports.
+        for (const auto& edge : upper_.outgoing_edges) {
+            Hyperedge* e = edge.get();
+
+            const auto& lv = leftmost_nodes_.at(e);
+            const auto& rv = rightmost_nodes_.at(e);
+
+			// Case 1: only one source and one target.
+            if (edge->getSources().size() == 1 && edge->getTargets().size() == 1) {
+                Node* src_node = edge->getSources()[0].get();
+                Node* tgt_node = edge->getTargets()[0].get();
+                std::vector<Port>& src_ports = node_layout_.at(src_node).source_ports;
+                std::vector<Port>& tgt_ports = node_layout_.at(tgt_node).target_ports;
+                alignPort(src_node, tgt_node, src_ports, findPortIndex(src_ports, e),
+                    tgt_ports, findPortIndex(tgt_ports, e));
+                continue;
+            }
+
+			// Case 2: two leftmost nodes, one a source and one a target.
+            if (lv.size() == 2) {
+                // Identify which of the two leftmost nodes is a source and which is a target.
+				Node* src_node = nullptr;
+				Node* tgt_node = nullptr;
+                if (edge->containsSource(lv.front()->shared_from_this())) {
+					src_node = lv.front();
+					tgt_node = lv.back();
                 }
+                else {
+					src_node = lv.back();
+					tgt_node = lv.front();
+                }
+                std::vector<Port>& src_ports = node_layout_.at(src_node).source_ports;
+                std::vector<Port>& tgt_ports = node_layout_.at(tgt_node).target_ports;
+                alignPort(src_node, tgt_node, src_ports, findPortIndex(src_ports, e),
+                    tgt_ports, findPortIndex(tgt_ports, e));
+            }
+
+			// Case 3: two rightmost nodes, one a source and one a target.
+            if (rv.size() == 2) {
+                Node* src_node = nullptr;
+                Node* tgt_node = nullptr;
+				if (edge->containsSource(rv.front()->shared_from_this())) {
+                    src_node = rv.front();
+                    tgt_node = rv.back();
+                }
+                else {
+                    src_node = rv.back();
+                    tgt_node = rv.front();
+                }
+                std::vector<Port>& src_ports = node_layout_.at(src_node).source_ports;
+                std::vector<Port>& tgt_ports = node_layout_.at(tgt_node).target_ports;
+                alignPort(src_node, tgt_node, src_ports, findPortIndex(src_ports, e),
+                    tgt_ports, findPortIndex(tgt_ports, e));
             }
         }
+
         return min_spacing;
     }
-
 
 
     // ── buildPorts ────────────────────────────────────────────────────────────────

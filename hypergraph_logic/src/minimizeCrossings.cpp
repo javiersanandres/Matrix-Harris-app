@@ -760,7 +760,7 @@ namespace hypergraph_logic {
 	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer) {
 		if (getLayers().empty()) return 0;
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
-		GlobalSifter sifter(start_layer, last_layer, layers_, false);
+		GlobalSifter sifter(start_layer, last_layer, layers_, true);
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.runSifting(sifting_rounds);
 		sifter.writeBack();

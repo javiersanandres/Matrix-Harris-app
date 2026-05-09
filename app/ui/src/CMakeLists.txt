@@ -54,8 +54,3 @@ target_link_libraries(ui_lib
 )
 
 set_target_properties(ui_lib PROPERTIES AUTOMOC ON)
-
-# ── Main executable ───────────────────────────────────────────────────────────
-add_executable(HypergraphApp main.cpp)
-target_link_libraries(HypergraphApp PRIVATE ui_lib)
-set_target_properties(HypergraphApp PROPERTIES AUTOMOC ON)
