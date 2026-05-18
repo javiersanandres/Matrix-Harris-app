@@ -20,6 +20,18 @@ namespace hypergraph_logic {
 	};
 
 	// ============================================================================
+	// TransitiveRemovalResult
+	//
+	// Custom result type for removeTransitiveConnections, this was a patch for a
+	// very weird and specific case.
+	// ============================================================================
+	struct TransitiveRemovalResult {
+		int min_affected_layer;
+		bool extended_edge_was_rebuilt;
+	};
+
+
+	// ============================================================================
 	// Hypergraph
 	//
 	// A directed layered hierarchical hypergraph  H = (V, E, λ).
@@ -506,7 +518,11 @@ namespace hypergraph_logic {
 		// INT_MAX if no splitting occurred, signalling to the caller that no new dummy nodes need
 		// to be placed by a subsequent crossing minimization pass.
 		//
-		int removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children);
+		TransitiveRemovalResult removeTransitiveConnections(
+								const std::vector<NodePtr>& parents,
+								const std::vector<NodePtr>& children,
+								const HyperedgePtr& extended_edge = nullptr,
+								const NodePtr& added_target = nullptr);
 
 		// ── relocateNodes ────────────────────────────────────────────────────────────────────────────
 		//

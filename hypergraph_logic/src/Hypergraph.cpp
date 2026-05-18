@@ -454,7 +454,8 @@ namespace hypergraph_logic {
 		//   - For any y in X, if b < y then we also have a < y (transitivity).
 		// Therefore, any preexisting connection x < y where x < a and b < y would now be redundant 
 		// and can be removed without losing any information about the partial order.
-		int start_layer = removeTransitiveConnections({ parent }, { child });
+		auto result = removeTransitiveConnections({ parent }, { child });
+		int start_layer = result.min_affected_layer;
 
 		int parent_layer = parent->getLayer();
 		int child_layer = child->getLayer();
@@ -582,7 +583,8 @@ namespace hypergraph_logic {
 		}
 
 		// Remove any pre-existing connections which are now redundant.
-		int start_layer = removeTransitiveConnections({ source }, targets);
+		auto result = removeTransitiveConnections({ source }, targets);
+		int start_layer = result.min_affected_layer;
 
 		// Special care, the previous call could have removed the edge from the hypergraph
 		// if all sources where ancestors of source. So we may have to readd it.
@@ -759,13 +761,13 @@ namespace hypergraph_logic {
 		}
 
 		// As before, we need to remove any pre-existing connections which are now redundant.
-		int start_layer = removeTransitiveConnections(sources, { target });
+		auto result = removeTransitiveConnections(sources, { target }, edge, target);
+		int start_layer = result.min_affected_layer;
 
-		// Special care, the previous call could have removed the edge from the hypergraph
-		// if all targets where descendants of target. So we may have to readd it.
-		all_hyperedges_[edge]; // This does nothing or reinstates the edge in the hypergraph.
+		if (!result.extended_edge_was_rebuilt) {
+			edge->addTarget(target);
+		}
 
-		edge->addTarget(target);
 		if (parents_layer + 1 > target->getLayer()) {
 			// The child layer needs to be updated. This automatically implies that the new layer
 			// number is the parents_layer + 1 and this should propagate down to all the descendants of the child.
@@ -1574,23 +1576,24 @@ namespace hypergraph_logic {
 			removeNodeFromLayer(layer, nodes);
 		}
 	}
+	
+	
+	TransitiveRemovalResult Hypergraph::removeTransitiveConnections(
+		const std::vector<NodePtr>& parents,
+		const std::vector<NodePtr>& children,
+		const HyperedgePtr& extended_edge,
+		const NodePtr& added_target)
+	{
+		TransitiveRemovalResult result{ INT_MAX, false };
+		if (children.empty()) return result;
 
-	int Hypergraph::removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children) {
-		int min_affected_layer = INT_MAX;
-		if (children.empty()) return min_affected_layer; // No connections to remove, so no affected layer.
-
-		// Collect all ancestors of every parent (including the parents themselves).
 		std::unordered_set<Node*> parents_and_ancestors = getAllAncestors(parents);
 		for (const auto& p : parents) parents_and_ancestors.insert(p.get());
-
-		// Collect all descendants of every child (including the children themselves).
 		std::unordered_set<Node*> children_and_descendants = getAllDescendants(children);
 		for (const auto& c : children) children_and_descendants.insert(c.get());
 
-		// Snapshot all_hyperedges_ since it may be modified during the iteration.
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;
 		for (const auto& [edge, _] : snapshot) {
-			// Collect sources which are ancestors of the parent.
 			std::unordered_set<Node*> ancestor_sources;
 			for (const auto& s : edge->getSources())
 				if (parents_and_ancestors.count(s.get()))
@@ -1598,7 +1601,6 @@ namespace hypergraph_logic {
 
 			if (ancestor_sources.empty()) continue;
 
-			// Split targets into redundant (now covered transitively) and surviving.
 			std::vector<NodePtr> surviving_targets;
 			bool any_redundant = false;
 			for (const auto& t : edge->getTargets()) {
@@ -1610,21 +1612,22 @@ namespace hypergraph_logic {
 				}
 			}
 
+			// If this is the edge being extended, the added target is a survivor by definition.
+			if (extended_edge && edge == extended_edge && added_target) {
+				surviving_targets.push_back(added_target);
+			}
+
 			if (!any_redundant) continue;
 
-			// Remove the ancestor sources from this edge (and its segments).
-			// No relocation is needed here since the addConnection, addSourceToEdge 
-			// and addTargetToEdge functions will take care of relocating if necessary.
 			removeSourcesFromHyperedge(edge, ancestor_sources, false);
 
-			// If those sources still had non-redundant targets, create a 
-			// new edge from the ancestor sources to the surviving targets
-			// since that connection is still needed.
 			if (!surviving_targets.empty()) {
-				std::vector<NodePtr> ancestor_sources_vec(ancestor_sources.begin(), ancestor_sources.end());
+				std::vector<NodePtr> ancestor_sources_vec;
+				ancestor_sources_vec.reserve(ancestor_sources.size());
+				for (Node* n : ancestor_sources)
+					ancestor_sources_vec.push_back(n->shared_from_this());
+
 				if (edge->getLayer() >= 0) {
-					// If the original edge was short, this new edge will also be short and can
-					// be directly added to the same layer without any lookup.
 					createHyperedge(ancestor_sources_vec, surviving_targets, edge->getLayer());
 				}
 				else {
@@ -1632,13 +1635,9 @@ namespace hypergraph_logic {
 					int k = edgeIsShort(new_edge);
 					if (k < 0) {
 						splitLongEdge(new_edge);
-
-						// There will be newly created dummies which will need to be located in a convenient
-						// position in the layer. So, min_affected_layer should be at most the layer of the 
-						// ancestors + 1, since the new dummies will be children of those ancestors.
 						for (const auto& anc : ancestor_sources_vec) {
-							if (anc->getLayer() + 1 < min_affected_layer)
-								min_affected_layer = anc->getLayer() + 1;
+							if (anc->getLayer() + 1 < result.min_affected_layer)
+								result.min_affected_layer = anc->getLayer() + 1;
 						}
 					}
 					else {
@@ -1646,9 +1645,13 @@ namespace hypergraph_logic {
 					}
 				}
 			}
+
+			if (extended_edge && edge == extended_edge) {
+				result.extended_edge_was_rebuilt = true;
+			}
 		}
-		
-		return min_affected_layer;
+
+		return result;
 	}
 
 	bool Hypergraph::relocateNodes(const std::vector<NodePtr>& nodes) {

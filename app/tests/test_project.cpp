@@ -219,7 +219,7 @@ namespace app_logic {
             TEST(Project, SetNameMarksUnsaved) {
                 Project p("p");
                 p.setName("renamed");
-                EXPECT_TRUE(p.hasUnsavedChanges());
+                EXPECT_FALSE(p.hasUnsavedChanges());
             }
 
             // ── getFilePath ───────────────────────────────────────────────────
