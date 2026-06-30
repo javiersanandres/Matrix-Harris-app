@@ -8,7 +8,7 @@ A Harris Matrix is a stratigraphic recording method, devised by archaeologist Ed
 
 ## The problem
 
-Drawing Harris Matrix diagrams by hand is slow and error-prone, especially for large or complex excavations. The difficulty becomes particularly acute when a research team excavates several separate areas of the same site and later needs to **merge** the individual diagrams into a single, coherent global picture (for example, when the same volcanic ash layer appears in different excavation zones and must be linked across them). No existing tool — free or commercial — properly supported this merging workflow, which motivated the development of this application.
+Drawing Harris Matrix diagrams by hand is slow and error-prone, especially for large or complex excavations. The difficulty becomes particularly acute when a research team excavates several separate areas of the same site and later needs to **merge** the individual diagrams into a single, coherent global picture (for example, when the same volcanic ash layer appears in different excavation zones and must be linked across them). No existing tool properly supported this merging workflow, which motivated the development of this application. Also, I have been unable to find any application which automates the creation of hierarchical hypergraphs (or DAGs) with orthogonal routing, this would be the first one.
 
 ## What this application does
 
@@ -40,4 +40,4 @@ The codebase is split into clearly separated layers:
 
 ## Project status
 
-This is the result of a university thesis project. A full technical write-up — covering the theoretical background, the complete algorithmic design, the architecture, and the validation/usability results — is available as an accompanying PDF document.
+This is the result of a university thesis project. A full technical write-up is available as an accompanying PDF document.
