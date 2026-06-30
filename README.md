@@ -1,6 +1,6 @@
 # Matrix-Harris App
 
-A desktop application for creating, editing and automatically laying out **Harris Matrix diagrams**, developed as a Computer Science Engineering thesis (TFG) at Universidad Autónoma de Madrid, in collaboration with the Instituto Universitario de Bio-Orgánica Antonio González and its PAST research group (Prehistoria y Arqueología del Espacio y el Tiempo).
+A desktop application for creating, editing and automatically laying out **Harris Matrix diagrams**, developed as a Computer Science Engineering thesis (TFG) at Universidad Autónoma de Madrid.
 
 ## What is a Harris Matrix?
 
