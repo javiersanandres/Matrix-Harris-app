@@ -222,6 +222,14 @@ namespace hypergraph_logic {
 		return k;
 	}
 
+	void Hypergraph::settleAndMinimizeIfSplit(const HyperedgePtr& edge) {
+		std::vector<Node*> nodes_to_minimize;
+		int min_layer = INT_MAX, max_layer = 0;
+		if (settleEdgePlacementAndCollectDummies(edge, nodes_to_minimize, min_layer, max_layer) < 0) {
+			minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
+		}
+	}
+
 	void Hypergraph::collapseToShortLayer(const HyperedgePtr& edge, int k) {
 		dissolveSegments({ edge.get() });
 		addHyperedgeToLayer(k, edge);
@@ -265,6 +273,7 @@ namespace hypergraph_logic {
 			minimizeCrossings(10, start_layer);
 		}
 	}
+
 
 	// ============================================================================
 	// Layer queries
@@ -443,17 +452,75 @@ namespace hypergraph_logic {
 		return node;
 	}
 
+
 	HyperedgePtr Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child) {
 		if (!child || !parent) return nullptr;
 		if (child == parent) {
 			throw std::invalid_argument("A node cannot be connected to itself.");
 		}
 
+		// Check for possible regroupings, that is, the parent and child are 
+		// already linked through some hyperedge and this function call is a
+		// way for them to be linked by a binary hyperedge. The hyperedge that
+		// links them will suffer modifications and (at most) two other hyperedges
+		// will be created: the one that links parent and child directly and possibly
+		// another one from the already existing hyperedge sources (without the parent)
+		// to the child. Note that this scenario has nothing to do with adding a 
+		// connection but regrouping the ones already established. It is readily seen
+		// that neither cycles nor relocations can occur. 
+		bool already_connected = false;
+		for (const auto& p : child->getParents()) {
+			if (p == parent) {
+				already_connected = true;
+				break;
+			}
+		}
+
+		if (already_connected) {
+			// Find the specific hyperedge that links them (guaranteed to exist and be unique).
+			for (const auto& [edge, _] : all_hyperedges_) {
+				if (!edge->containsSource(parent) || !edge->containsTarget(child)) continue;
+
+				std::vector<NodePtr> remaining_sources;
+				std::vector<NodePtr> remaining_targets;
+				for (const auto& source : edge->getSources()) {
+					if (source != parent) remaining_sources.push_back(source);
+				}
+				for (const auto& target : edge->getTargets()) {
+					if (target != child) remaining_targets.push_back(target);
+				}
+
+				if (remaining_sources.empty() && remaining_targets.empty()) {
+					// Nothing to do, the connection already exists in the diagram
+					throw std::logic_error("This connection already exists in the diagram.");
+				}
+				else if (remaining_sources.empty()) {
+					// Remove target from edge and create a new one that links parent and child
+					removeTargetsFromHyperedge(edge, { child.get() }, false);
+				}
+				else {
+					// Remove source from edge and create a new one that links parent and child
+					removeSourcesFromHyperedge(edge, { parent.get() }, false);
+				}
+
+				auto new_edge = createHyperedge({ parent }, { child }, -1);
+				settleAndMinimizeIfSplit(new_edge);
+
+				if (!remaining_sources.empty() && !remaining_targets.empty()) {
+					// If there are both remaining sources and targets, the previous removeSources call
+					// removed the connection between parent and remaining targets, so we reinstate it.
+					auto new_edge2 = createHyperedge({ parent }, remaining_targets, -1);
+					settleAndMinimizeIfSplit(new_edge2);
+				}
+
+				return new_edge;
+			}
+		}
+
 		//  Check for redundancy connections (the child already has this parent in its ancestry)
 		if (parentIsInAncestors({ child }, parent)) {
 			throw std::logic_error("This connection already exists in the diagram.");
 		}
-
 		// Temporarily add the connection and check for cycles
 		child->addParent(parent);
 		parent->addChild(child);
@@ -603,13 +670,7 @@ namespace hypergraph_logic {
 					// Add a new hyperedge with the remaining targets from affected hyperedges from the source.
 					// This avoids data loss since the source was removed from those hyperedges before.
 					HyperedgePtr new_edge = createHyperedge({ source }, remaining_targets, -1);
-
-					std::vector<Node*> new_edge_nodes_to_minimize;
-					int new_edge_min_layer = INT_MAX, new_edge_max_layer = 0;
-					if (settleEdgePlacementAndCollectDummies(new_edge, new_edge_nodes_to_minimize, new_edge_min_layer, new_edge_max_layer) < 0) {
-						// The new edge had to be split; place its new dummy nodes.
-						minimizeCrossingsForNodes(new_edge_nodes_to_minimize, new_edge_min_layer, new_edge_max_layer);
-					}
+					settleAndMinimizeIfSplit(new_edge);
 				}
 			}
 		}
@@ -760,13 +821,7 @@ namespace hypergraph_logic {
 					// Add a new hyperedge with the remaining sources from affected hyperedges to the target.
 					// This avoids data loss since the target was removed from those hyperedges before.
 					HyperedgePtr new_edge = createHyperedge(remaining_sources, { target }, -1);
-
-					std::vector<Node*> new_edge_nodes_to_minimize;
-					int new_edge_min_layer = INT_MAX, new_edge_max_layer = 0;
-					if (settleEdgePlacementAndCollectDummies(new_edge, new_edge_nodes_to_minimize, new_edge_min_layer, new_edge_max_layer) < 0) {
-						// The new edge had to be split; place its new dummy nodes.
-						minimizeCrossingsForNodes(new_edge_nodes_to_minimize, new_edge_min_layer, new_edge_max_layer);
-					}
+					settleAndMinimizeIfSplit(new_edge);
 				}
 			}
 		}
@@ -1531,24 +1586,19 @@ namespace hypergraph_logic {
 			if (!surviving_targets.empty()) {
 				std::vector<NodePtr> ancestor_sources_vec;
 				ancestor_sources_vec.reserve(ancestor_sources.size());
-				for (Node* n : ancestor_sources)
+				for (Node* n : ancestor_sources) {
 					ancestor_sources_vec.push_back(n->shared_from_this());
-
-				if (edge->getLayer() >= 0) {
-					createHyperedge(ancestor_sources_vec, surviving_targets, edge->getLayer());
 				}
-				else {
-					const auto& new_edge = createHyperedge(ancestor_sources_vec, surviving_targets, -1);
-					if (settleEdgePlacement(new_edge) < 0) {
-						for (const auto& anc : ancestor_sources_vec) {
-							if (anc->getLayer() + 1 < min_affected_layer)
-								min_affected_layer = anc->getLayer() + 1;
-						}
+
+				const auto& new_edge = createHyperedge(ancestor_sources_vec, surviving_targets, -1);
+				if (settleEdgePlacement(new_edge) < 0) {
+					for (const auto& anc : ancestor_sources_vec) {
+						if (anc->getLayer() + 1 < min_affected_layer)
+							min_affected_layer = anc->getLayer() + 1;
 					}
 				}
 			}
 		}
-
 		return min_affected_layer;
 	}
 

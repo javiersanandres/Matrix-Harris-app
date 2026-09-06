@@ -502,6 +502,16 @@ namespace hypergraph_logic {
 		//
 		int settleEdgePlacementAndCollectDummies(const HyperedgePtr& edge, std::vector<Node*>& seed_nodes, int& min_layer, int& max_layer, bool include_real_sources = true);
 
+
+		// ── settleAndMinimizeIfSplit ──────────────────────────────────────────────────────────────────
+		//
+		// Convenience wrapper for the common case of settling a freshly created edge that has no
+		// existing node to seed the minimization with: if the edge had to be split, its new dummy nodes
+		// are placed via minimizeCrossingsForNodes; if it turned out short, nothing further is done,
+		// since a short edge introduces no new dummy nodes to place.
+		//
+		void settleAndMinimizeIfSplit(const HyperedgePtr& edge);
+
 		// ── collapseToShortLayer ──────────────────────────────────────────────────────────────────────
 		//
 		// Used when an existing (possibly already-split) edge has just become short again after losing
