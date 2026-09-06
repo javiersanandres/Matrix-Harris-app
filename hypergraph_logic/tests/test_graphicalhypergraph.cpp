@@ -619,14 +619,12 @@ namespace hypergraph_logic {
                 g.relocateNodeInLayer(A, xC + 20.0);
 
                 const auto& nodes = g.layers().at(0).nodes;
-                // Only one swap: A should be between B and C or just after B,
-                // but not necessarily all the way to the end.
-                // The key check: A is no longer at the front.
+                // A should be after C
                 auto itA = std::find(nodes.begin(), nodes.end(), A);
                 EXPECT_NE(itA, nodes.begin()) << "A should have moved at least one position";
                 // And there should be exactly one neighbour before it now (B swapped in).
-                EXPECT_EQ(std::distance(nodes.begin(), itA), 1)
-                    << "only one swap should have occurred";
+                EXPECT_EQ(std::distance(nodes.begin(), itA), 2)
+                    << "two swaps should have occurred";
             }
 
             // ── DoesNotThrowOnEdgeCases ───────────────────────────────────────────────

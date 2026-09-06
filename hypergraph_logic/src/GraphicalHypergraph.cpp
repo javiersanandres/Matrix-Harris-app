@@ -198,7 +198,9 @@ namespace hypergraph_logic {
 						// algorithm after the swap, to ensure the new layout is as good as possible.
 						minimize_crossings = true;
 					}
-					std::iter_swap(it.base() - 1, node_it);
+					auto neighbour_it = it.base() - 1;
+					std::iter_swap(neighbour_it, node_it);
+					node_it = neighbour_it;
 					pos_changed = true;
 				}
 			}
@@ -217,6 +219,7 @@ namespace hypergraph_logic {
 						minimize_crossings = true;
 					}
 					std::iter_swap(it, node_it);
+					node_it = it;
 					pos_changed = true;
 				}
 			}

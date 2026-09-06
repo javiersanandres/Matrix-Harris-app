@@ -31,7 +31,10 @@ namespace ui {
                 try {
                     regular_editor_->relocateNodeInLayer(node->shared_from_this(), new_x);
                 }
-                catch (const std::exception& e) { showError(e); }
+                catch (const std::exception&) { 
+                    rebuild(); 
+                    return;                
+                }
                 rebuild();
                 emit graphChanged();
             });

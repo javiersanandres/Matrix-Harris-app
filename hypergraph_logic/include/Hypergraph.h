@@ -20,18 +20,6 @@ namespace hypergraph_logic {
 	};
 
 	// ============================================================================
-	// TransitiveRemovalResult
-	//
-	// Custom result type for removeTransitiveConnections, this was a patch for a
-	// very weird and specific case.
-	// ============================================================================
-	struct TransitiveRemovalResult {
-		int min_affected_layer;
-		bool extended_edge_was_rebuilt;
-	};
-
-
-	// ============================================================================
 	// Hypergraph
 	//
 	// A directed layered hierarchical hypergraph  H = (V, E, λ).
@@ -464,6 +452,93 @@ namespace hypergraph_logic {
 		//
 		int edgeIsShort(const HyperedgePtr& edge);
 
+		// ── settleEdgePlacement ───────────────────────────────────────────────────────────────────────
+		//
+		// Places a freshly created (unsegmented, unlayered) hyperedge into the layer structure: if the
+		// edge is short, it is registered directly at its source layer via addHyperedgeToLayer; otherwise
+		// it is decomposed into segments via splitLongEdge.
+		//
+		// This is the "decide short vs. long and act accordingly" step that recurs at every call site
+		// that creates or settles a hyperedge with no prior segment/layer state to clean up first.
+		// Compare with resettleEdge, below, which additionally handles an edge that may already be
+		// registered in a layer and/or already have segments from a previous split.
+		//
+		// Returns the value of edgeIsShort(edge): the source layer k >= 0 if the edge is short, or -1 if
+		// it needed to be split.
+		//
+		int settleEdgePlacement(const HyperedgePtr& edge);
+
+		// ── collectSegmentDummies ─────────────────────────────────────────────────────────────────────
+		//
+		// Scans every segment of an already-split edge and appends each dummy source node found to
+		// out_nodes, widening min_layer/max_layer to cover the layer range spanned by those sources.
+		// Does not modify the edge itself; assumes splitLongEdge has already been called. min_layer/
+		// max_layer are only ever widened, never narrowed, so callers should pre-populate them with
+		// whatever bounds are relevant on top of which the split's dummies should be considered.
+		//
+		// include_real_sources controls whether the very first segment's real (non-dummy) sources also
+		// count towards the bounds. Because splitLongEdge's first segment is the only one with no carry
+		// dummy among its sources (see splitLongEdge), the two modes can differ by exactly one layer at
+		// the shallow end: with include_real_sources = true (the default), min_layer can reach down to
+		// the edge's original source layer; with false, it only reaches the layer of the first dummy,
+		// one layer deeper. Pass false to reproduce a call site that historically only considered dummy
+		// nodes when computing its sifting range.
+		//
+		void collectSegmentDummies(const HyperedgePtr& edge, std::vector<Node*>& out_nodes, int& min_layer, int& max_layer, bool include_real_sources = true);
+
+		// ── settleEdgePlacementAndCollectDummies ─────────────────────────────────────────────────────
+		//
+		// Combines settleEdgePlacement with collectSegmentDummies: places the edge, and if it had to be
+		// split, collects the newly created dummy nodes into seed_nodes and widens min_layer/max_layer
+		// accordingly. If the edge is short, seed_nodes/min_layer/max_layer are left exactly as the
+		// caller passed them in, so callers should pre-populate them with whatever nodes/bounds are
+		// relevant to the short case before calling this (this is what almost every call site that
+		// creates or rebuilds a hyperedge needs immediately afterwards, to know what to hand to
+		// minimizeCrossingsForNodes).
+		//
+		// include_real_sources is forwarded to collectSegmentDummies; see its comment above.
+		//
+		// Returns the same value as settleEdgePlacement.
+		//
+		int settleEdgePlacementAndCollectDummies(const HyperedgePtr& edge, std::vector<Node*>& seed_nodes, int& min_layer, int& max_layer, bool include_real_sources = true);
+
+		// ── collapseToShortLayer ──────────────────────────────────────────────────────────────────────
+		//
+		// Used when an existing (possibly already-split) edge has just become short again after losing
+		// some of its sources or targets: dissolves any existing segments and registers the edge at
+		// layer k directly.
+		//
+		void collapseToShortLayer(const HyperedgePtr& edge, int k);
+
+		// ── resettleEdge ──────────────────────────────────────────────────────────────────────────────
+		//
+		// Re-evaluates the placement of an edge that may already be registered in a layer and/or already
+		// have segments (used after node relocation, where an edge's shortness may have changed as a
+		// side effect). If the edge is now short, any existing segments are dissolved and the edge is
+		// moved to the correct layer (a no-op if it is already there); if it is long, it is (re-)split
+		// via splitLongEdge, which itself dissolves any stale segments before rebuilding them.
+		//
+		void resettleEdge(const HyperedgePtr& edge);
+
+		// ── minimizeCrossingsAfterRelocation ──────────────────────────────────────────────────────────
+		//
+		// Called right after applyRelocationAndPropagate to run the disruptive, many-rounds sifting pass
+		// that such a relocation warrants. The floor of the sifting range (start_layer) is pulled up to
+		// no deeper than one layer below the shallowest of reference_nodes, so that any new dummy nodes
+		// introduced by the relocation are covered even if start_layer was already set from an earlier,
+		// unrelated adjustment.
+		//
+		void minimizeCrossingsAfterRelocation(const std::vector<NodePtr>& reference_nodes, int start_layer);
+
+		// ── minimizeCrossingsForRelocatedTargets ──────────────────────────────────────────────────────
+		//
+		// Called after relocating the targets of original_edge, when the caller has no more specific
+		// start_layer of its own to offer: recomputes the shallowest layer among the parents of
+		// original_edge's (now possibly relocated) targets, and runs global sifting from there if that
+		// layer is shallower than any target's current layer.
+		//
+		void minimizeCrossingsForRelocatedTargets(const HyperedgePtr& original_edge);
+
 		// ============================================================================
 		// Helper methods for connection management
 		// ============================================================================
@@ -513,16 +588,39 @@ namespace hypergraph_logic {
 		// This enforces the Hasse-diagram invariant: no connection exists if it can be inferred by
 		// following other connections transitively.
 		//
+		// edge_to_skip, if provided, is excluded from the scan entirely. This is needed when a caller
+		// has just created a replacement edge that exactly represents the connection currently being
+		// added (parents -> children): without exclusion, that replacement would be found by this
+		// function as a trivial self-match (its sources are among parents, its target is among
+		// children) and be destroyed with nothing put in its place, silently discarding the very
+		// connection the caller just built.
+		//
 		// Returns the shallowest layer at which a new dummy node was created as a result of splitting
 		// a trimmed edge (i.e. ancestor_layer + 1 for the shallowest ancestor involved). Returns
 		// INT_MAX if no splitting occurred, signalling to the caller that no new dummy nodes need
 		// to be placed by a subsequent crossing minimization pass.
 		//
-		TransitiveRemovalResult removeTransitiveConnections(
-								const std::vector<NodePtr>& parents,
-								const std::vector<NodePtr>& children,
-								const HyperedgePtr& extended_edge = nullptr,
-								const NodePtr& added_target = nullptr);
+		int removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children, const HyperedgePtr& edge_to_skip = nullptr);
+
+		// ── resolveOwnRedundantTargets ────────────────────────────────────────────────────────────────
+		//
+		// Used exclusively by addTargetToEdge, right before its sources are extended to also reach
+		// `target`: strips any of edge's pre-existing targets that become transitively redundant once
+		// edge's sources can reach them via `target` (and anything target already reaches). If this
+		// drains every target from edge, edge is dissolved by the strip itself, and a fresh replacement
+		// {edge's sources} -> {target} is built and settled in its place.
+		//
+		// Returns the replacement edge if edge was dissolved and replaced this way — in that case the
+		// caller must not use edge any further, must not call edge->addTarget(target) itself (the
+		// replacement already carries that connection), and must pass the returned edge as edge_to_skip
+		// to any subsequent removeTransitiveConnections call, or that call will find and destroy it as
+		// a trivial self-match. Returns nullptr if edge survived (possibly with some targets removed),
+		// in which case the caller's normal edge->addTarget(target) is still required.
+		//
+		// out_start_layer is only ever lowered, never raised, so callers should pre-seed it with
+		// whatever bound is already relevant.
+		//
+		HyperedgePtr resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, int& out_start_layer);
 
 		// ── relocateNodes ────────────────────────────────────────────────────────────────────────────
 		//

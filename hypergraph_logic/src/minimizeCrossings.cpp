@@ -212,6 +212,10 @@ namespace sifting_internal {
 		const std::unordered_map<Node*, int>& lower_pos,
 		int layer)
 	{
+
+		if (!S_.g1_layers.contains(layer)) {
+			return;
+		}
 		std::vector<int>& hub_indices = S_.g1_layers.at(layer);
 
 		std::sort(hub_indices.begin(), hub_indices.end(),

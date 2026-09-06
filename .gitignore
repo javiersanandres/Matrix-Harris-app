@@ -24,7 +24,6 @@ bld/
 [Ll]og/
 [Ll]ogs/
 out/
-ui/
 
 # CMake
 CMakeCache.txt

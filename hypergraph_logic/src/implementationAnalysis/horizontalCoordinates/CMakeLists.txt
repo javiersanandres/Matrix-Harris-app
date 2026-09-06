@@ -1,7 +1,7 @@
 # Set CMAKE_PREFIX_PATH to help find Qt6
 # Append to existing path rather than replacing it
-list(APPEND CMAKE_PREFIX_PATH "C:/Qt2/6.11.0/msvc2022_64")
-find_package(Qt6 6.11 REQUIRED COMPONENTS Core Gui Widgets)
+list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.2/msvc2022_64")
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
 
 # ============================================================================
 # JSON (nlohmann) - header-only, fetched from official release tarball

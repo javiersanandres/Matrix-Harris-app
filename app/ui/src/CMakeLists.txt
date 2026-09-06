@@ -9,7 +9,7 @@
 # ============================================================================
 
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
-list(APPEND CMAKE_PREFIX_PATH "C:/Qt2/6.11.0/msvc2022_64")
+list(APPEND CMAKE_PREFIX_PATH "C:/Qt/6.11.2/msvc2022_64")
 
 add_library(ui_lib)
 
