@@ -8,7 +8,9 @@
 //   - Protected methods exposed via TestableHypergraph:
 //       addNodeToLayer, removeNodeFromLayer (ptr + set overloads)
 //       addHyperedgeToLayer, removeHyperedgeFromLayer (ptr + set overloads)
-//       splitLongEdge, dissolveSegments
+//       splitLongEdge, dissolveSegments, resyncSegmentEndpoints
+//       splitLongEdge's segment/dummy reuse on resplit (identity preservation,
+//       partial resync, and stale cleanup when the split shrinks or shifts)
 //       applyRelocationAndPropagate (single + batch)
 //       removeTransitiveConnections
 //       parentIsInAncestors, childIsInDescendants
@@ -48,6 +50,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         // Edge management
         void pub_splitLongEdge(const HyperedgePtr& e) { splitLongEdge(e); }
         void pub_dissolveSegments(const std::unordered_set<Hyperedge*>& es) { dissolveSegments(es); }
+        void pub_resyncSegmentEndpoints(const HyperedgePtr& seg, const std::vector<NodePtr>& new_sources, const std::vector<NodePtr>& new_targets) {
+            resyncSegmentEndpoints(seg, new_sources, new_targets);
+        }
         HyperedgePtr pub_createHyperedge(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
             return createHyperedge(sources, targets, layer);
         }
@@ -142,6 +147,22 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         for (const auto& e : g.getAllHyperedges())
             if (!e->isSegment() && edgeHasSource(e, n)) return e;
         return nullptr;
+    }
+
+    static bool eachNodeInExactlyOneLayer(const TestableHypergraph& g) {
+        std::unordered_map<Node*, int> count;
+        for (const auto& [l, data] : g.getLayers())
+            for (const auto& n : data.nodes) count[n.get()]++;
+        for (const auto& [n, c] : count) if (c != 1) return false;
+        return true;
+    }
+
+    static bool layerOrderIsConsistent(const TestableHypergraph& g) {
+        for (const auto& n : g.getAllNodes())
+            for (const auto& p : n->getParents())
+                if (!p->isDummy() && !n->isDummy())
+                    if (n->getLayer() <= p->getLayer()) return false;
+        return true;
     }
 
     // =============================================================================
@@ -457,6 +478,213 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         int segs_before = countSegmentEdges(g);
         g.pub_splitLongEdge(edge);  // should do nothing
         EXPECT_EQ(countSegmentEdges(g), segs_before);
+    }
+
+    // =============================================================================
+    // 6a. splitLongEdge — reuse of the previous split on resplit
+    // =============================================================================
+    //
+    // These verify the behaviour change: resplitting an already-split edge must
+    // reuse the segments/dummies for transitions that are unaffected, rather than
+    // dissolving and rebuilding the whole chain from scratch every time.
+
+    TEST_F(HypergraphInternalsTest, SplitLongEdge_ReSplitWithNoStructuralChange_PreservesAllIdentities) {
+        auto r = g.createNode("r", 0, nullptr);
+        auto n1 = g.createNode("n1", 0, r);
+        auto n2 = g.createNode("n2", 0, n1);
+        auto n3 = g.createNode("n3", 0, n2);
+        auto r2 = g.createNode("r2", 0, nullptr);
+        g.addConnection(r2, n3); // splits into segments at layers 0,1,2 with dummies at 1,2
+
+        auto edge = findOriginalEdgeWithSource(g, r2);
+        ASSERT_NE(edge, nullptr);
+
+        // Snapshot every segment and dummy belonging to this edge's split.
+        std::vector<HyperedgePtr> segs_before = g.rawEdges()[edge];
+        std::vector<NodePtr> dummies_before;
+        for (int l = 1; l <= 2; ++l)
+            for (const auto& n : g.getNodesAt(l)) if (n->isDummy()) dummies_before.push_back(n);
+        ASSERT_EQ(segs_before.size(), 3u);
+        ASSERT_EQ(dummies_before.size(), 2u);
+
+        // Nothing about the graph changed, so resplitting must be a pure no-op:
+        // the exact same segment and dummy objects should still be in place.
+        g.pub_splitLongEdge(edge);
+
+        EXPECT_EQ(g.rawEdges()[edge], segs_before) << "Resplitting with no change must not recreate any segment";
+
+        std::vector<NodePtr> dummies_after;
+        for (int l = 1; l <= 2; ++l)
+            for (const auto& n : g.getNodesAt(l)) if (n->isDummy()) dummies_after.push_back(n);
+        EXPECT_EQ(dummies_after, dummies_before) << "Resplitting with no change must not recreate any dummy";
+    }
+
+    TEST_F(HypergraphInternalsTest, SplitLongEdge_ResplitAfterRelocationDeepens_ReusesUnaffectedShallowChain) {
+        auto r = g.createNode("r", 0, nullptr);
+        auto n1 = g.createNode("n1", 0, r);
+        auto n2 = g.createNode("n2", 0, n1);
+        auto n3 = g.createNode("n3", 0, n2);
+        auto r2 = g.createNode("r2", 0, nullptr);
+        g.addConnection(r2, n3); // r2 -> n3, segments at layers 0,1,2; dummies at 1,2
+
+        auto edge = findOriginalEdgeWithSource(g, r2);
+        ASSERT_NE(edge, nullptr);
+
+        // r2 stays put, so the shallowest transition (layer 0, feeding the layer-1
+        // dummy) is untouched by anything that happens further down the chain.
+        HyperedgePtr seg0_before, seg1_before;
+        for (const auto& seg : g.rawEdges()[edge]) {
+            if (seg->getLayer() == 0) seg0_before = seg;
+            if (seg->getLayer() == 1) seg1_before = seg;
+        }
+        ASSERT_NE(seg0_before, nullptr);
+        ASSERT_NE(seg1_before, nullptr);
+
+        NodePtr dummy1_before, dummy2_before;
+        for (const auto& n : g.getNodesAt(1)) if (n->isDummy()) dummy1_before = n;
+        for (const auto& n : g.getNodesAt(2)) if (n->isDummy()) dummy2_before = n;
+        ASSERT_NE(dummy1_before, nullptr);
+        ASSERT_NE(dummy2_before, nullptr);
+
+        // Relocate n1 much deeper: n2 and n3 (and therefore the long edge's real
+        // target) get pushed down with it, forcing r2 -> n3 to be resplit with a
+        // longer chain than before.
+        g.pub_applyRelocationAndPropagate(n1, 3);
+        ASSERT_GE(n3->getLayer(), 5);
+
+        // Layers 0 and 1 of the chain are unaffected by the deepening: the segment
+        // at layer 0 and the dummy at layer 1 should be the exact same objects.
+        bool seg0_reused = false, seg1_reused = false;
+        for (const auto& seg : g.rawEdges()[edge]) {
+            if (seg == seg0_before) seg0_reused = true;
+            if (seg == seg1_before) seg1_reused = true;
+        }
+        EXPECT_TRUE(seg0_reused) << "Segment at layer 0 should be reused, not recreated";
+        EXPECT_TRUE(seg1_reused) << "Segment at layer 1 should be reused, not recreated";
+        EXPECT_TRUE(layerContainsNode(g, 1, dummy1_before)) << "Dummy at layer 1 should be reused, not recreated";
+        EXPECT_TRUE(layerContainsNode(g, 2, dummy2_before)) << "Dummy at layer 2 should be reused, not recreated";
+
+        EXPECT_TRUE(allSegmentEdgesAreShort(g));
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+        EXPECT_TRUE(eachNodeInExactlyOneLayer(g));
+    }
+
+    TEST_F(HypergraphInternalsTest, SplitLongEdge_ResplitAfterShrink_RemovesOnlyStaleSegmentsAndDummies) {
+        auto r = g.createNode("r", 0, nullptr);
+        auto n1 = g.createNode("n1", 0, r);
+        auto n2 = g.createNode("n2", 0, n1);
+        auto n3 = g.createNode("n3", 0, n2);
+        auto n4 = g.createNode("n4", 0, n3);
+        auto n5 = g.createNode("n5", 0, n4);
+        auto r2 = g.createNode("r2", 0, nullptr);
+
+        auto edge = g.pub_createHyperedge({ r2 }, { n5 }, -1);
+        r2->addChild(n5); n5->addParent(r2);
+        g.pub_splitLongEdge(edge); // 5-layer gap: segments at 0..4, dummies at 1..4
+        ASSERT_EQ(countSegmentEdges(g), 5);
+
+        HyperedgePtr seg0_before;
+        for (const auto& seg : g.rawEdges()[edge]) if (seg->getLayer() == 0) seg0_before = seg;
+        ASSERT_NE(seg0_before, nullptr);
+        NodePtr dummy1_before;
+        for (const auto& n : g.getNodesAt(1)) if (n->isDummy()) dummy1_before = n;
+        ASSERT_NE(dummy1_before, nullptr);
+
+        // Simulate n5 relocating much shallower (as if some other structural
+        // change had already moved it), collapsing the gap from 5 layers to 2.
+        g.pub_removeNodeFromLayer(5, n5);
+        g.pub_addNodeToLayer(2, -1, n5);
+
+        g.pub_splitLongEdge(edge);
+
+        // Only one transition remains beyond the source layer now.
+        EXPECT_EQ(countSegmentEdges(g), 2);
+        EXPECT_EQ(g.rawEdges()[edge].size(), 2u);
+        EXPECT_EQ(countDummyNodesInLayer(g, 3), 0) << "Stale dummy at layer 3 must be cleaned up";
+        EXPECT_EQ(countDummyNodesInLayer(g, 4), 0) << "Stale dummy at layer 4 must be cleaned up";
+
+        // The transition nearest the (unmoved) source is still the same object.
+        bool seg0_reused = false;
+        for (const auto& seg : g.rawEdges()[edge]) if (seg == seg0_before) seg0_reused = true;
+        EXPECT_TRUE(seg0_reused) << "Segment at layer 0 should be reused, not recreated";
+        EXPECT_TRUE(layerContainsNode(g, 1, dummy1_before)) << "Dummy at layer 1 should be reused, not recreated";
+
+        EXPECT_TRUE(allSegmentEdgesAreShort(g));
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+        EXPECT_TRUE(eachNodeInExactlyOneLayer(g));
+    }
+
+    // =============================================================================
+    // 6b. resyncSegmentEndpoints
+    // =============================================================================
+    //
+    // Direct tests of the helper splitLongEdge uses to reuse a segment in place:
+    // it should touch only endpoints that actually changed, and keep the
+    // dummy/real parent-child wiring in sync with the same rules
+    // createHyperedge(origin, ...) uses when building a segment from scratch.
+
+    TEST_F(HypergraphInternalsTest, ResyncSegmentEndpoints_NoChange_IsNoOp) {
+        auto d = std::make_shared<Node>();     // dummy source
+        auto t = std::make_shared<Node>("t");  // real target
+        auto seg = g.pub_createHyperedge(WeakHyperedgePtr{}, { d }, { t }, 0);
+        d->addChild(t); // mirrors the dummy->real wiring createHyperedge(origin, ...) performs
+
+        g.pub_resyncSegmentEndpoints(seg, { d }, { t });
+
+        ASSERT_EQ(seg->getSources().size(), 1u);
+        ASSERT_EQ(seg->getTargets().size(), 1u);
+        EXPECT_TRUE(edgeHasSource(seg, d));
+        EXPECT_TRUE(edgeHasTarget(seg, t));
+        EXPECT_EQ(d->getChildren().size(), 1u) << "Link must not be duplicated";
+    }
+
+    TEST_F(HypergraphInternalsTest, ResyncSegmentEndpoints_AddedRealTarget_LinksDummySourceOnly) {
+        auto d = std::make_shared<Node>();
+        auto t1 = std::make_shared<Node>("t1");
+        auto t2 = std::make_shared<Node>("t2");
+        auto seg = g.pub_createHyperedge(WeakHyperedgePtr{}, { d }, { t1 }, 0);
+        d->addChild(t1);
+
+        g.pub_resyncSegmentEndpoints(seg, { d }, { t1, t2 });
+
+        EXPECT_TRUE(edgeHasTarget(seg, t2));
+        bool d_has_t2_child = false;
+        for (const auto& c : d->getChildren()) if (c == t2) d_has_t2_child = true;
+        EXPECT_TRUE(d_has_t2_child) << "dummy -> real must set the dummy's child link";
+        for (const auto& p : t2->getParents()) EXPECT_NE(p, d) << "real target must not gain the dummy as a visible parent";
+    }
+
+    TEST_F(HypergraphInternalsTest, ResyncSegmentEndpoints_RemovedDummyTarget_UnlinksParentOnly) {
+        auto s = std::make_shared<Node>("s");  // real source
+        auto d1 = std::make_shared<Node>();    // dummy target to be dropped
+        auto d2 = std::make_shared<Node>();    // dummy target that stays
+        auto seg = g.pub_createHyperedge(WeakHyperedgePtr{}, { s }, { d1, d2 }, 0);
+        d1->addParent(s); d2->addParent(s); // real -> dummy: only the dummy's parent link is set
+
+        g.pub_resyncSegmentEndpoints(seg, { s }, { d2 });
+
+        EXPECT_FALSE(edgeHasTarget(seg, d1));
+        EXPECT_TRUE(edgeHasTarget(seg, d2));
+        for (const auto& p : d1->getParents()) EXPECT_NE(p, s) << "dropped dummy must be unlinked from its real parent";
+        bool d2_still_has_parent = false;
+        for (const auto& p : d2->getParents()) if (p == s) d2_still_has_parent = true;
+        EXPECT_TRUE(d2_still_has_parent) << "kept dummy's link must survive untouched";
+    }
+
+    TEST_F(HypergraphInternalsTest, ResyncSegmentEndpoints_DummyToDummy_LinksBothWays) {
+        auto d1 = std::make_shared<Node>();
+        auto d2 = std::make_shared<Node>();
+        auto seg = g.pub_createHyperedge(WeakHyperedgePtr{}, { d1 }, {}, 0);
+
+        g.pub_resyncSegmentEndpoints(seg, { d1 }, { d2 });
+
+        EXPECT_TRUE(edgeHasTarget(seg, d2));
+        bool d1_has_child = false;
+        for (const auto& c : d1->getChildren()) if (c == d2) d1_has_child = true;
+        bool d2_has_parent = false;
+        for (const auto& p : d2->getParents()) if (p == d1) d2_has_parent = true;
+        EXPECT_TRUE(d1_has_child) << "dummy -> dummy must set the child link";
+        EXPECT_TRUE(d2_has_parent) << "dummy -> dummy must set the parent link";
     }
 
     // =============================================================================
@@ -1012,22 +1240,6 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
     // 20. INTENSIVE — complex topology and extreme cases for protected methods
     // =============================================================================
-
-    static bool eachNodeInExactlyOneLayer(const TestableHypergraph& g) {
-        std::unordered_map<Node*, int> count;
-        for (const auto& [l, data] : g.getLayers())
-            for (const auto& n : data.nodes) count[n.get()]++;
-        for (const auto& [n, c] : count) if (c != 1) return false;
-        return true;
-    }
-
-    static bool layerOrderIsConsistent(const TestableHypergraph& g) {
-        for (const auto& n : g.getAllNodes())
-            for (const auto& p : n->getParents())
-                if (!p->isDummy() && !n->isDummy())
-                    if (n->getLayer() <= p->getLayer()) return false;
-        return true;
-    }
 
     // ---- splitLongEdge extreme cases ----------------------------------------------
 

@@ -581,16 +581,32 @@ namespace hypergraph_logic {
 		// in every intermediate layer so that the layering invariant is satisfied.
 		//
 		// The algorithm groups sources and targets by layer, then iterates layer-by-layer from the
-		// shallowest source to the deepest target. For each step L → L+1, a segment edge is created
+		// shallowest source to the deepest target. For each step L → L+1, a segment edge is needed
 		// whose sources are the real sources at layer L (if any) plus a carry dummy produced by the
 		// previous segment, and whose targets are the real targets at layer L+1 (if any) plus a new
-		// carry dummy that will feed the next segment. This carry dummy threads the signal through
-		// layers that have neither real sources nor real targets.
+		// carry dummy that will feed the next segment.
 		//
-		// If the edge was already split (segments exist), the old segments are dissolved before
-		// splitting again, ensuring the segment list always reflects the current node positions.
+		// If the edge was already split (segments exist), the previous split is reused rather than
+		// torn down and rebuilt: since a segment's source layer L and its carry dummy's layer L+1
+		// uniquely identify that step of the chain, any transition L that is still needed after
+		// resplitting simply has its existing segment and its existing carry dummy kept exactly where 
+		// it is, rather than replaced.
 		//
 		void splitLongEdge(const HyperedgePtr& long_edge);
+
+		// ── resyncSegmentEndpoints ────────────────────────────────────────────────────────────────
+		//
+		// Used by splitLongEdge to reuse an existing segment hyperedge instead of recreating it:
+		// adjusts the segment's sources/targets in place to match new_sources/new_targets exactly,
+		// touching only the endpoints that actually changed, and keeps the dummy/real parent-child
+		// wiring in sync with the same rules createHyperedge(origin, ...) applies when building a
+		// segment from scratch (dummy→dummy links both ways, dummy→real / real→dummy link one way,
+		// real→real adds no link since that's already on the original edge).
+		//
+		// No-ops entirely, touching neither the segment's endpoints nor any parent/child links, if
+		// new_sources/new_targets already match what the segment currently has.
+		//
+		void resyncSegmentEndpoints(const HyperedgePtr& segment, const std::vector<NodePtr>& new_sources, const std::vector<NodePtr>& new_targets);
 
 		// ── dissolveSegments ─────────────────────────────────────────────────────────────────────────
 		//

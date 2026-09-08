@@ -1525,9 +1525,79 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Helper methods for connection management
 	// ============================================================================
+	 
+	void Hypergraph::resyncSegmentEndpoints(const HyperedgePtr& segment, const std::vector<NodePtr>& new_sources, const std::vector<NodePtr>& new_targets) {
+		auto old_sources = segment->getSources();
+		auto old_targets = segment->getTargets();
+
+		std::unordered_set<Node*> old_src_set, new_src_set, old_tgt_set, new_tgt_set;
+		for (const auto& s : old_sources) old_src_set.insert(s.get());
+		for (const auto& s : new_sources) new_src_set.insert(s.get());
+		for (const auto& t : old_targets) old_tgt_set.insert(t.get());
+		for (const auto& t : new_targets) new_tgt_set.insert(t.get());
+
+		std::vector<NodePtr> removed_sources, added_sources, kept_sources;
+		for (const auto& s : old_sources)
+			(new_src_set.count(s.get()) ? kept_sources : removed_sources).push_back(s);
+		for (const auto& s : new_sources)
+			if (!old_src_set.count(s.get())) added_sources.push_back(s);
+
+		std::vector<NodePtr> removed_targets, added_targets, kept_targets;
+		for (const auto& t : old_targets)
+			(new_tgt_set.count(t.get()) ? kept_targets : removed_targets).push_back(t);
+		for (const auto& t : new_targets)
+			if (!old_tgt_set.count(t.get())) added_targets.push_back(t);
+
+		if (removed_sources.empty() && added_sources.empty() &&
+			removed_targets.empty() && added_targets.empty())
+			return; // Nothing changed for this segment; leave it (and its links) untouched.
+
+		auto link = [](const NodePtr& s, const NodePtr& t) {
+			bool sd = s->isDummy(), td = t->isDummy();
+			if (sd && td) { s->addChild(t); t->addParent(s); }
+			else if (sd) { s->addChild(t); }
+			else if (td) { t->addParent(s); }
+			};
+		auto unlink = [](const NodePtr& s, const NodePtr& t) {
+			bool sd = s->isDummy(), td = t->isDummy();
+			if (sd && td) { s->removeChild(t); t->removeParent(s); }
+			else if (sd) { s->removeChild(t); }
+			else if (td) { t->removeParent(s); }
+			};
+
+		// Break links involving anything that is leaving the segment.
+		for (const auto& s : removed_sources)
+			for (const auto& t : old_targets)
+				unlink(s, t);
+		for (const auto& t : removed_targets)
+			for (const auto& s : kept_sources)
+				unlink(s, t);
+
+		// Apply the structural change to the segment itself.
+		for (const auto& s : removed_sources) segment->removeSource(s);
+		for (const auto& t : removed_targets) segment->removeTarget(t);
+		for (const auto& s : added_sources) segment->addSource(s);
+		for (const auto& t : added_targets) segment->addTarget(t);
+
+		// Establish links involving anything that is newly joining the segment.
+		for (const auto& s : added_sources)
+			for (const auto& t : new_targets)
+				link(s, t);
+		for (const auto& t : added_targets)
+			for (const auto& s : kept_sources)
+				link(s, t);
+	}
+
 	void Hypergraph::splitLongEdge(const HyperedgePtr& long_edge) {
 		if (long_edge->isSegment()) return;
-		if (!all_hyperedges_[long_edge].empty()) dissolveSegments({ long_edge.get() }); // If it was already split, dissolve the previous segments before splitting again.
+
+		std::unordered_map<int, HyperedgePtr> old_segments_by_layer;
+		std::unordered_map<int, NodePtr> old_dummies_by_layer; // keyed by the layer the dummy sits at (L+1)
+		for (const auto& seg : all_hyperedges_[long_edge]) {
+			old_segments_by_layer[seg->getLayer()] = seg;
+			for (const auto& t : seg->getTargets())
+				if (t->isDummy()) old_dummies_by_layer[t->getLayer()] = t;
+		}
 
 		// ----------------------------------------------------------------
 		// Group sources and targets by layer
@@ -1545,12 +1615,20 @@ namespace hypergraph_logic {
 		int max_src_layer = sources_by_layer.rbegin()->first;
 		int max_tgt_layer = targets_by_layer.rbegin()->first;
 
-		if (min_src_layer >= max_tgt_layer - 1) return; // No splitting needed, the edge is not long.
+		if (min_src_layer >= max_tgt_layer - 1) {
+			// No splitting needed any more: dissolve whatever split existed before.
+			if (!old_segments_by_layer.empty()) dissolveSegments({ long_edge.get() });
+			return;
+		}
 
 		// If it needs to be split, the edge should me removed from its current layer (if any).
 		if (long_edge->getLayer() >= 0) {
 			removeHyperedgeFromLayer(long_edge->getLayer(), long_edge);
 		}
+
+		std::vector<HyperedgePtr> new_segments;
+		std::unordered_set<Hyperedge*> reused_segments;
+		std::unordered_set<Node*> reused_dummies;
 
 		// carry_dummy: produced by the previous segment, feeds into the next.
 		NodePtr carry_dummy = nullptr;
@@ -1582,9 +1660,18 @@ namespace hypergraph_logic {
 					seg_targets.push_back(t);
 
 			if (L + 1 < max_tgt_layer) {
-				carry_dummy = std::make_shared<Node>();
-				all_nodes_.push_back(carry_dummy);
-				addNodeToLayer(L + 1, -1, carry_dummy);
+				// Reuse the previous split's dummy at this layer if there was one:
+				// it keeps its identity  instead of being destroyed and replaced.
+				auto dummy_it = old_dummies_by_layer.find(L + 1);
+				if (dummy_it != old_dummies_by_layer.end()) {
+					carry_dummy = dummy_it->second;
+					reused_dummies.insert(carry_dummy.get());
+				}
+				else {
+					carry_dummy = std::make_shared<Node>();
+					all_nodes_.push_back(carry_dummy);
+					addNodeToLayer(L + 1, -1, carry_dummy);
+				}
 				seg_targets.push_back(carry_dummy);
 			}
 			else {
@@ -1592,11 +1679,56 @@ namespace hypergraph_logic {
 			}
 
 			// ------------------------------------------------------------
-			// Create the segment hyperedge for this L -> L+1 transition.
-			// It automatically deals with the parent/child wiring.
+			// Reuse the previous split's segment at this layer if there was
+			// one, re-pointing its endpoints in place; otherwise create a
+			// fresh segment hyperedge for this L -> L+1 transition. Either
+			// way the parent/child wiring ends up identical.
 			// ------------------------------------------------------------
-			createHyperedge(long_edge, seg_sources, seg_targets, L);
+			auto seg_it = old_segments_by_layer.find(L);
+			HyperedgePtr seg;
+			if (seg_it != old_segments_by_layer.end()) {
+				seg = seg_it->second;
+				reused_segments.insert(seg.get());
+				resyncSegmentEndpoints(seg, seg_sources, seg_targets);
+			}
+			else {
+				seg = createHyperedge(long_edge, seg_sources, seg_targets, L);
+			}
+
+			new_segments.push_back(seg);
 		}
+
+		// ----------------------------------------------------------------
+		// Anything left over from the previous split that wasn't reused no
+		// longer belongs to this edge's chain (the split shrank or shifted)
+		// and must be torn down: its segment removed from its layer, and any
+		// dummy that isn't feeding into the new split erased entirely.
+		// ----------------------------------------------------------------
+		std::map<int, std::unordered_set<Hyperedge*>> stale_segments_by_layer;
+		for (const auto& [layer, seg] : old_segments_by_layer)
+			if (!reused_segments.count(seg.get())) stale_segments_by_layer[layer].insert(seg.get());
+
+		std::map<int, std::unordered_set<Node*>> stale_dummies_by_layer;
+		std::unordered_set<Node*> stale_dummy_set;
+		for (const auto& [layer, dummy] : old_dummies_by_layer) {
+			if (reused_dummies.count(dummy.get())) continue;
+			stale_dummies_by_layer[layer].insert(dummy.get());
+			stale_dummy_set.insert(dummy.get());
+		}
+
+		for (const auto& [layer, edges] : stale_segments_by_layer)
+			removeHyperedgeFromLayer(layer, edges);
+		for (const auto& [layer, nodes] : stale_dummies_by_layer)
+			removeNodeFromLayer(layer, nodes);
+
+		if (!stale_dummy_set.empty()) {
+			all_nodes_.erase(
+				std::remove_if(all_nodes_.begin(), all_nodes_.end(),
+					[&](const NodePtr& n) { return stale_dummy_set.count(n.get()) > 0; }),
+				all_nodes_.end());
+		}
+
+		all_hyperedges_[long_edge] = new_segments;
 	}
 
 	void Hypergraph::dissolveSegments(const std::unordered_set<Hyperedge*>& long_edges) {
