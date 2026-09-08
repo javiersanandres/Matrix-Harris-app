@@ -237,4 +237,24 @@ namespace hypergraph_logic {
 			throw std::invalid_argument("New x coordinate does not change the node's position in the layer.");
 	}
 
+	int GraphicalHypergraph::choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const {
+		if (!node) return -1;
+
+		auto node_it = node_layout_.find(node.get());
+		if (node_it == node_layout_.end()) return -1;   // never laid out before
+		const double x = node_it->second.x;
+
+		auto layer_it = layers_.find(new_layer);
+		if (layer_it == layers_.end()) return -1;       // brand new layer
+
+		const auto& existing_nodes = layer_it->second.nodes;
+		for (size_t i = 0; i < existing_nodes.size(); ++i) {
+			auto sibling_it = node_layout_.find(existing_nodes[i].get());
+			if (sibling_it == node_layout_.end()) continue;
+			if (sibling_it->second.x > x) return static_cast<int>(i);
+		}
+		return -1;
+	}
+
+
 } // namespace hypergraph_logic

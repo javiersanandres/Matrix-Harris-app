@@ -274,7 +274,6 @@ namespace hypergraph_logic {
 		}
 	}
 
-
 	// ============================================================================
 	// Layer queries
 	// ============================================================================
@@ -452,7 +451,6 @@ namespace hypergraph_logic {
 		return node;
 	}
 
-
 	HyperedgePtr Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child) {
 		if (!child || !parent) return nullptr;
 		if (child == parent) {
@@ -580,7 +578,7 @@ namespace hypergraph_logic {
 			// number is the parent_layer + 1 and this should propagate down to all the descendants of the child.
 			edge = createHyperedge({ parent }, { child }, parent_layer);
 
-			applyRelocationAndPropagate({ {child, parent_layer + 1} });
+			applyRelocationAndPropagate({ {child, resolveTargetLayer(child)} });
 
 			// We run global sifting from the min_layer of all parents to the affected child. Since this operation is
 			// quite disruptive, we will allow more rounds of sifting to try to minimize crossings as much as possible.
@@ -683,17 +681,8 @@ namespace hypergraph_logic {
 		all_hyperedges_[edge]; // This does nothing or reinstates the edge in the hypergraph.
 
 		edge->addSource(source);
-		int parent_layer = source->getLayer();
-		std::vector<std::pair<NodePtr, int>> relocations;
-		for (const auto& t : targets) {
-			if (parent_layer + 1 > t->getLayer()) {
-				// The child layer needs to be updated. This automatically implies that the new layer
-				// number is the parent_layer + 1 and this should propagate down to all the descendants of the child.
-				relocations.push_back({ t, parent_layer + 1 });
-			}
-		}
 
-		if (relocations.empty()) {
+		if (!relocateNodes(targets)) {
 			// No targets need to be relocated. But this edge could have some ancestors of the new source
 			// as sources, which have been removed in the removeTransitiveConnections call, so the new edge
 			// could be long or short depending on the case.
@@ -702,7 +691,6 @@ namespace hypergraph_logic {
 			int k = settleEdgePlacementAndCollectDummies(edge, nodes_to_minimize, min_layer, max_layer);
 
 			if (k < 0 && start_layer < INT_MAX) {
-				// Update the start_layer to be the minimum layer of the new dummy nodes created by splitting the edge.
 				for (const auto& src : edge->getSources()) {
 					if (src->getLayer() + 1 < start_layer) {
 						start_layer = src->getLayer() + 1;
@@ -710,24 +698,16 @@ namespace hypergraph_logic {
 				}
 			}
 			else if (k < 0) {
-				// No new dummy nodes were created when removing redundant connections, so it is just a matter of placing
-				// the new dummy nodes created by splitting the edge in good positions to minimize crossings.
 				minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
 			}
 
 			if (start_layer < INT_MAX) {
-				// We needed to remove some redundant connections, which lead to the creation of new dummy nodes
-				// in between the layers. Therefore, at this point, we run global sifting from the start_layer.
 				minimizeCrossings(3, start_layer);
 			}
-
 		}
 		else {
-			applyRelocationAndPropagate(relocations);
-
-			// After relocations are applied, we need to minimize crossings for all the affected nodes, starting from
-			// the shallowest dummy node (which will be located in the sources top layer + 1). Since this is a very
-			// disruptive operation, we will allow more rounds of sifting to try to minimize crossings as much as possible.
+			// relocateNodes already moved the targets and propagated to their descendants via
+			// applyRelocationAndPropagate. Same disruptive-relocation sifting as before.
 			minimizeCrossingsAfterRelocation(edge->getSources(), start_layer);
 		}
 	}
@@ -842,7 +822,7 @@ namespace hypergraph_logic {
 		}
 
 		if (parents_layer + 1 > target->getLayer()) {
-			applyRelocationAndPropagate({ {target, parents_layer + 1} });
+			applyRelocationAndPropagate({ {target, resolveTargetLayer(target)} });
 			minimizeCrossingsAfterRelocation(sources, start_layer);
 		}
 		else {
@@ -915,34 +895,37 @@ namespace hypergraph_logic {
 					}
 				}
 
-				relocateNodes(relocations_vec);
+				if (relocateNodes(relocations_vec)) {
+					int start_layer = INT_MAX;
+					for (const auto& t : relocations_vec) {
+						if (t->getLayer() < start_layer) start_layer = t->getLayer();
+					}
+					minimizeCrossings(10, start_layer);
+				}
 			}
 			else {
 				// If it has both parents and children, the parents need to assume the connections 
-				// to the children to aovid losing information.
+				// to the children to avoid losing information.
 
 				// First, remove it from targets and sources. In both cases, we avoid early relocation
 				// since more updates will come after.
-				std::vector<HyperedgePtr> target_edges;
-				std::vector<HyperedgePtr> source_edges;
 				for (const auto& [edge, _] : snapshot) {
 					if (edge->containsSource(node)) {
 						removeSourcesFromHyperedge(edge, { node.get() }, false);
-						source_edges.push_back(edge);
 					}
 
 					if (edge->containsTarget(node)) {
 						removeTargetsFromHyperedge(edge, { node.get() }, false);
-						target_edges.push_back(edge);
 					}
 				}
 
-				// Now we rewire the parents to the children and relocate them if necessary.
 				HyperedgePtr edge = createHyperedge(parents, children, -1);
 
-				// Now we need to apply relocation and splitting if necessary.
-				if (!relocateNodes(edge->getTargets())) {
-					settleEdgePlacement(edge);
+				if (relocateNodes(edge->getTargets())) {
+					minimizeCrossingsAfterRelocation(parents, INT_MAX);
+				}
+				else {
+					settleAndMinimizeIfSplit(edge);
 				}
 			}
 		}
@@ -1026,22 +1009,11 @@ namespace hypergraph_logic {
 	{
 		if (sources_to_remove.empty() || original_edge->isSegment()) return;
 
-		// This is a check only for user interaction. The user will only introduce this one at a time.
-		if (sources_to_remove.size() == 1) {
-			for (const auto& s : sources_to_remove) {
-				if (!original_edge->containsSource(s->shared_from_this())) {
-					throw std::logic_error("The specified connection does not exist in the diagram.");
-				}
-			}
-		}
-
-
 		for (Node* s : sources_to_remove) {
 			if (!original_edge->containsSource(s->shared_from_this())) {
 				throw std::logic_error("The specified connection does not exist in the diagram.");
 			}
 		}
-
 
 		for (Node* s : sources_to_remove)
 			original_edge->removeSource(s->shared_from_this());
@@ -1061,7 +1033,13 @@ namespace hypergraph_logic {
 			if (original_edge->getLayer() >= 0) {
 				removeHyperedgeFromLayer(original_edge->getLayer(), original_edge);
 			}
-			if (relocation) relocateNodes(original_edge->getTargets());
+
+			if (relocation) {
+				if (relocateNodes(original_edge->getTargets())) {
+					minimizeCrossingsForRelocatedTargets(original_edge);
+				}
+			}
+			cleanUp();
 			return;
 		}
 
@@ -1071,6 +1049,7 @@ namespace hypergraph_logic {
 			// The edge is now short. The targets don't update their layer, since the remaining
 			// sources are in the immediate shallower layer.
 			collapseToShortLayer(original_edge, k);
+			cleanUp();
 			return;
 		}
 
@@ -1140,6 +1119,7 @@ namespace hypergraph_logic {
 				minimizeCrossingsForRelocatedTargets(original_edge);
 			}
 		}
+		cleanUp();
 	}
 
 	static bool allTargetsDead(const HyperedgePtr& seg, const std::unordered_set<Node*>& dead_dummies, const std::unordered_set<Node*>& removed_targets)
@@ -1187,7 +1167,16 @@ namespace hypergraph_logic {
 			if (original_edge->getLayer() >= 0) {
 				removeHyperedgeFromLayer(original_edge->getLayer(), original_edge);
 			}
-			if (relocation) relocateNodes(targets_to_relocate);
+			if (relocation) {
+				if (relocateNodes(targets_to_relocate)) {
+					int start_layer = INT_MAX;
+					for (const auto& t : targets_to_relocate) {
+						if (t->getLayer() < start_layer) start_layer = t->getLayer();
+					}
+					minimizeCrossings(10, start_layer);
+				}
+			}
+			cleanUp();
 			return;
 		}
 
@@ -1196,6 +1185,7 @@ namespace hypergraph_logic {
 		if (k >= 0) {
 			// The edge is now short, so just collapse the segments and add it to the new layer.
 			collapseToShortLayer(original_edge, k);
+			cleanUp();
 			return;
 		}
 
@@ -1271,6 +1261,7 @@ namespace hypergraph_logic {
 				minimizeCrossingsForRelocatedTargets(original_edge);
 			}
 		}
+		cleanUp();
 	}
 
 	// ============================================================================
@@ -1282,95 +1273,106 @@ namespace hypergraph_logic {
 			throw std::invalid_argument("Cannot fuse a node with itself.");
 		}
 
+		// Always keep the shallower node as the surviving object, and absorb the deeper one.
+		// This ensures a relocation is always needed in case nodes layers differ.
+		const NodePtr& survivor = (node1->getLayer() <= node2->getLayer()) ? node1 : node2;
+		const NodePtr& absorbed = (survivor == node1) ? node2 : node1;
+
 		// Store the previous configuration of the nodes to be able to rollback in case of cycle creation.
-		const auto parents2 = node2->getParents();
-		const auto children2 = node2->getChildren();
-		std::unordered_set<Node*> parents1_set; // for quick lookup later on.
-		std::unordered_set<Node*> children1_set; // for quick lookup later on.
-		for (const auto& p : node1->getParents()) parents1_set.insert(p.get());
-		for (const auto& c : node1->getChildren()) children1_set.insert(c.get());
+		const auto parents_absorbed = absorbed->getParents();
+		const auto children_absorbed = absorbed->getChildren();
+		std::unordered_set<Node*> parents_survivor_set; // for quick lookup later on.
+		std::unordered_set<Node*> children_survivor_set; // for quick lookup later on.
+		for (const auto& p : survivor->getParents()) parents_survivor_set.insert(p.get());
+		for (const auto& c : survivor->getChildren()) children_survivor_set.insert(c.get());
 
 		// Temporarily fuse the nodes moving all parents and children to one while disconnecting the other
-		for (const auto& p : parents2) {
-			if (!parents1_set.count(p.get())) {
-				p->replaceChild(node2, node1);
-				node1->addParent(p);
+		for (const auto& p : parents_absorbed) {
+			if (!parents_survivor_set.count(p.get())) {
+				p->replaceChild(absorbed, survivor);
+				survivor->addParent(p);
 			}
 			else {
-				p->removeChild(node2);
+				p->removeChild(absorbed);
 			}
 		}
 
-		for (const auto& c : children2) {
-			if (!children1_set.count(c.get())) {
-				c->replaceParent(node2, node1);
-				node1->addChild(c);
+		for (const auto& c : children_absorbed) {
+			if (!children_survivor_set.count(c.get())) {
+				c->replaceParent(absorbed, survivor);
+				survivor->addChild(c);
 			}
 			else {
-				c->removeParent(node2);
+				c->removeParent(absorbed);
 			}
 		}
 
-		if (checkCycles(node1)) {
+		if (checkCycles(survivor)) {
 			// Rollback
-			for (const auto& p : parents2) {
-				if (!parents1_set.count(p.get())) {
-					p->replaceChild(node1, node2);
-					node1->removeParent(p);
+			for (const auto& p : parents_absorbed) {
+				if (!parents_survivor_set.count(p.get())) {
+					p->replaceChild(survivor, absorbed);
+					survivor->removeParent(p);
 				}
 				else {
-					p->addChild(node2);
+					p->addChild(absorbed);
 				}
 			}
 
-			for (const auto& c : children2) {
-				if (!children1_set.count(c.get())) {
-					c->replaceParent(node1, node2);
-					node1->removeChild(c);
+			for (const auto& c : children_absorbed) {
+				if (!children_survivor_set.count(c.get())) {
+					c->replaceParent(survivor, absorbed);
+					survivor->removeChild(c);
 				}
 				else {
-					c->addParent(node2);
+					c->addParent(absorbed);
 				}
 			}
 			throw std::logic_error("Fusing these nodes would create a cycle in the diagram.");
 		}
 
 		// Now we know that no cycles are added, we can safely fuse the nodes.
-		node1->setName(new_name);
+		survivor->setName(new_name);
+		if (survivor->getLayer() != absorbed->getLayer()) {
+			survivor->setDesiredLayer(absorbed->getDesiredLayer());
+		}
+		else {
+			survivor->setDesiredLayer(std::max(survivor->getDesiredLayer(), absorbed->getDesiredLayer()));
+		}
 
-		// Modify all hyperedges in which node2 participated to replace it with node1.
+		// Modify all hyperedges in which the absorbed node participated to replace it with the survivor.
 		std::vector<HyperedgePtr> modified_edges;
 		for (const auto& edge : getAllHyperedges()) {
-			if (edge->containsSource(node2)) {
-				if (edge->containsSource(node1)) {
-					// If node1 is already a source of this edge, we just need to remove node2 from the sources without replacement.
-					edge->removeSource(node2);
+			if (edge->containsSource(absorbed)) {
+				if (edge->containsSource(survivor)) {
+					// If survivor is already a source of this edge, we just need to remove absorbed from the sources without replacement.
+					edge->removeSource(absorbed);
 				}
 				else {
-					edge->replaceSource(node2, node1);
+					edge->replaceSource(absorbed, survivor);
 				}
 				if (!edge->isSegment()) modified_edges.push_back(edge);
 				continue;
 			}
-			if (edge->containsTarget(node2)) {
-				if (edge->containsTarget(node1)) {
-					// If node1 is already a target of this edge, we just need to remove node2 from the targets without replacement.
-					edge->removeTarget(node2);
+			if (edge->containsTarget(absorbed)) {
+				if (edge->containsTarget(survivor)) {
+					// If survivor is already a target of this edge, we just need to remove absorbed from the targets without replacement.
+					edge->removeTarget(absorbed);
 				}
 				else {
-					edge->replaceTarget(node2, node1);
+					edge->replaceTarget(absorbed, survivor);
 				}
 				if (!edge->isSegment()) modified_edges.push_back(edge);
 				continue;
 			}
-			if (!edge->isSegment() && (edge->containsSource(node1) || edge->containsTarget(node1))) {
+			if (!edge->isSegment() && (edge->containsSource(survivor) || edge->containsTarget(survivor))) {
 				modified_edges.push_back(edge);
 			}
 		}
 
-		// Remove the node from the graph and from its layer.
-		all_nodes_.erase(std::remove(all_nodes_.begin(), all_nodes_.end(), node2), all_nodes_.end());
-		removeNodeFromLayer(node2->getLayer(), node2);
+		// Remove the absorbed node from the graph and from its layer.
+		all_nodes_.erase(std::remove(all_nodes_.begin(), all_nodes_.end(), absorbed), all_nodes_.end());
+		removeNodeFromLayer(absorbed->getLayer(), absorbed);
 
 		// Now it may be possible that some hyperedges have been "duplicated" in the sense
 		// that they have the same sources and targets after the fusion, so we need to remove 
@@ -1404,19 +1406,119 @@ namespace hypergraph_logic {
 			all_hyperedges_.erase(ptr);
 		}
 
-		// Relocate the new node. If no relocation is needed for this node, that 
-		// implicitly means that node1 and node2 were both in the same layer and
-		// the fusion doesn't change any other layer number, so no relocation is
-		// needed for any other node.
-		if (relocateNodes({ node1 })) {
-			// Run global sifting for all the affected nodes.
-			int start_layer = node1->getLayer();
-			for (const auto& parent : node1->getParents()) {
+		// Relocate the surviving node. Since it was chosen as the shallower of the two, absorbing
+		// the deeper node's parents can only ever push it deeper (never shallower) — the one
+		// direction the relocation machinery fully supports. If no relocation is needed, that
+		// implicitly means both nodes were already at the same layer and the fusion doesn't change
+		// any other layer number either, so nothing else needs relocating.
+		if (relocateNodes({ survivor })) {
+			// applyRelocationAndPropagate already re-settled every edge touching survivor (as
+			// source or target) via its own Phase 1/Phase 3 sweep, which covers every surviving
+			// entry in modified_edges, since each one touches survivor directly.
+			int start_layer = survivor->getLayer();
+			for (const auto& parent : survivor->getParents()) {
 				if (parent->getLayer() + 1 < start_layer) {
 					start_layer = parent->getLayer() + 1;
 				}
 			}
 			minimizeCrossings(10, start_layer);
+		}
+		else {
+			minimizeCrossingsForNodes({ survivor.get() }, survivor->getLayer(), survivor->getLayer());
+		}
+	}
+
+	// ============================================================================
+	// Node layer management
+	// ============================================================================
+	void Hypergraph::relabelLayerContents(const LayerData& data, int new_layer) {
+		for (const auto& node : data.nodes) {
+			node->setLayer(new_layer);
+			// desired_layer_ is only ever -1 or exactly equal to the node's current layer, 
+			// so if it's active it must currently equal the layer being relabelled.
+			if (node->getDesiredLayer() != -1) {
+				node->setDesiredLayer(new_layer);
+			}
+		}
+		for (const auto& edge : data.outgoing_edges) {
+			edge->setLayer(new_layer);
+		}
+	}
+
+	void Hypergraph::renumberLayersFrom(int from_layer) {
+		if (layers_.empty()) return;
+
+		std::map<int, LayerData> shifted;
+		for (auto& [old_layer, data] : layers_) {
+			int new_layer = (old_layer >= from_layer) ? old_layer + 1 : old_layer;
+			if (new_layer != old_layer) relabelLayerContents(data, new_layer);
+			shifted[new_layer] = std::move(data);
+		}
+
+		layers_ = std::move(shifted);
+	}
+
+	void Hypergraph::relocateNodeToLayer(const NodePtr& node, int desired_layer) {
+		if (!node || layers_.empty()) return;
+
+		int last_layer = prev(layers_.end())->first;
+
+		if (desired_layer == -1) {
+			// Special case, this means we want to create another layer (shallower than 0)
+			// and place the node in it. All layer numbers need to be incremented by 1.
+
+			if (!node->getParents().empty()) {
+				throw std::logic_error("The desired layer breaks the layering invariant.");
+			}
+			
+			if (node->getLayer() == 0 && layers_.at(0).nodes.size() == 1) {
+				// Moving the node could potentially cause a gap, so we do not allow it.
+				throw std::logic_error("Node is already placed at the shallowest layer.");
+			}
+
+			// Shift all layer numbers by 1.
+			renumberLayersFrom(0);
+			node->setDesiredLayer(-1);
+			
+			if (relocateNodes({node})) { // This will for sure be true.
+				minimizeCrossings(3, 1);
+			}
+		}
+		else if (desired_layer > last_layer) {
+			// Another special case, we want to create another layer (deeper than the last)
+			// and place the node in it.
+			
+			if (node->getParents().empty() &&
+				node->getLayer() == last_layer &&
+				layers_.at(last_layer).nodes.size() == 1) {
+				// Moving the node could potentially originate a gap, so we do not allow it.
+				throw std::logic_error("Node is already placed at the deepest layer.");
+			}
+
+			node->setDesiredLayer(last_layer + 1);
+			relocateNodes({ node });
+			if (!node->getParents().empty()) {
+				minimizeCrossingsAfterRelocation(node->getParents(), INT_MAX);
+			}
+		}
+		else {
+			auto parents = node->getParents();
+			int depth_rule_layer = parents.empty() ? 0
+				: (*std::max_element(parents.begin(), parents.end(),
+					[](const NodePtr& a, const NodePtr& b) { return a->getLayer() < b->getLayer(); }
+				))->getLayer() + 1;
+
+			if (desired_layer < depth_rule_layer) {
+				throw std::logic_error("The desired layer breaks the layering invariant.");
+			}
+
+			node->setDesiredLayer(desired_layer == depth_rule_layer ? -1 : desired_layer);
+
+			if (desired_layer == node->getLayer()) return;
+
+			int start_layer = std::min(node->getLayer(), desired_layer);
+			applyRelocationAndPropagate({ {node, desired_layer} });
+			minimizeCrossingsAfterRelocation(parents, start_layer);
 		}
 	}
 
@@ -1633,21 +1735,30 @@ namespace hypergraph_logic {
 		return new_edge;
 	}
 
+	int Hypergraph::resolveTargetLayer(const NodePtr& node) {
+		auto parents = node->getParents();
+		int depth_rule_layer = parents.empty() ? 0
+			: (*std::max_element(parents.begin(), parents.end(),
+				[](const NodePtr& a, const NodePtr& b) { return a->getLayer() < b->getLayer(); }
+			))->getLayer() + 1;
+
+		int desired = node->getDesiredLayer();
+		if (desired == -1) return depth_rule_layer;
+
+		if (desired <= depth_rule_layer) {
+			node->setDesiredLayer(-1);
+			return depth_rule_layer;
+		}
+		return desired;                  
+	}
+
 	bool Hypergraph::relocateNodes(const std::vector<NodePtr>& nodes) {
 		std::vector<std::pair<NodePtr, int>> relocations;
 		for (const auto& node : nodes) {
-			auto parents = node->getParents();
-
-			int correct_layer = parents.empty() ? 0
-				: (*std::max_element(parents.begin(), parents.end(),
-					[](const NodePtr& a, const NodePtr& b) {
-						return a->getLayer() < b->getLayer();
-					}))->getLayer() + 1;
-
-			if (correct_layer != node->getLayer())
-				relocations.push_back({ node, correct_layer });
+			int target_layer = resolveTargetLayer(node);
+			if (target_layer != node->getLayer())
+				relocations.push_back({ node, target_layer });
 		}
-
 		if (!relocations.empty()) {
 			applyRelocationAndPropagate(relocations);
 			return true;
@@ -1667,7 +1778,7 @@ namespace hypergraph_logic {
 
 		for (const auto& [node, new_layer] : relocations) {
 			removeNodeFromLayer(node->getLayer(), node);
-			addNodeToLayer(new_layer, -1, node);
+			addNodeToLayer(new_layer, choosePositionForRelocatedNode(new_layer, node), node);
 			relocated_nodes.insert(node.get());
 			vec_relocated_nodes.push_back(node);
 		}
@@ -1711,18 +1822,14 @@ namespace hypergraph_logic {
 
 		for (auto& [layer, nodes] : affected_by_layer) {
 			for (auto it = nodes.begin(); it != nodes.end();) {
-				auto parents = (*it)->getParents();
-				int new_depth = parents.empty() ? 0
-					: (*std::max_element(parents.begin(), parents.end(),
-						[](const NodePtr& a, const NodePtr& b) {
-							return a->getLayer() < b->getLayer();
-						}))->getLayer() + 1;
+				NodePtr node_ptr = (*it)->shared_from_this();
+				int new_depth = resolveTargetLayer(node_ptr);
 
 				if (new_depth == layer) {
-					it = nodes.erase(it); // Prevent removing from layer if the node does not need to relocate.
+					it = nodes.erase(it);
 				}
 				else {
-					addNodeToLayer(new_depth, -1, (*it)->shared_from_this());
+					addNodeToLayer(new_depth, choosePositionForRelocatedNode(new_depth, node_ptr), node_ptr);
 					++it;
 				}
 			}
@@ -1750,6 +1857,31 @@ namespace hypergraph_logic {
 		cleanUp();
 	}
 
+	void Hypergraph::compactLayerNumbers() {
+		if (layers_.empty()) return;
+
+		// Cheap check first: if the keys are already 0, 1, 2, ... with no gaps, there's
+		// nothing to do, and this is the common case after every operation that didn't
+		// touch a layer boundary.
+		int expected = 0;
+		bool dense = true;
+		for (const auto& [layer, data] : layers_) {
+			if (layer != expected) { dense = false; break; }
+			++expected;
+		}
+		if (dense) return;
+
+		std::map<int, LayerData> compacted;
+		int new_layer = 0;
+		for (auto& [old_layer, data] : layers_) {
+			if (new_layer != old_layer) relabelLayerContents(data, new_layer);
+			compacted[new_layer] = std::move(data);
+			++new_layer;
+		}
+
+		layers_ = std::move(compacted);
+	}
+
 	void Hypergraph::cleanUp() {
 		std::vector<int> empty;
 		for (const auto& [l, data] : layers_)
@@ -1757,6 +1889,8 @@ namespace hypergraph_logic {
 				empty.push_back(l);
 		for (int l : empty)
 			layers_.erase(l);
+
+		compactLayerNumbers();
 	}
 
 	static bool isNodeInNeighboursHelper(const NodePtr& node, const NodePtr& target, int target_layer, bool search_up, std::unordered_set<Node*>& visited) {

@@ -25,7 +25,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash>& rawEdges() {
             return all_hyperedges_;
         }
-		int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
+        int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
     };
 
     // =============================================================================
@@ -931,7 +931,336 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
     }
 
     // =============================================================================
-    // 12. INTENSIVE — complex topology and extreme cases
+    // 12. createParent
+    // =============================================================================
+
+    TEST_F(ConnectionManagementTest, CreateParent_PlacedAtLayerZero) {
+        auto c = g.createNode("c", 0, nullptr);
+        auto p = g.createParent("p", c);
+        EXPECT_EQ(p->getLayer(), 0);
+        EXPECT_TRUE(layerContainsNode(g, 0, p));
+        EXPECT_TRUE(nodeInAllNodes(g, p));
+    }
+
+    TEST_F(ConnectionManagementTest, CreateParent_EdgeCreatedToChild) {
+        auto c = g.createNode("c", 0, nullptr);
+        auto p = g.createParent("p", c);
+        auto edge = findEdgeWithSourceAndTarget(g, p, c);
+        EXPECT_NE(edge, nullptr);
+    }
+
+    TEST_F(ConnectionManagementTest, CreateParent_ParentChildLinksSet) {
+        auto c = g.createNode("c", 0, nullptr);
+        auto p = g.createParent("p", c);
+        auto children = p->getChildren();
+        EXPECT_NE(std::find(children.begin(), children.end(), c), children.end());
+        auto parents = c->getParents();
+        EXPECT_NE(std::find(parents.begin(), parents.end(), p), parents.end());
+    }
+
+    TEST_F(ConnectionManagementTest, CreateParent_ChildWasAtLayerZero_ChildRelocatesDown) {
+        // c starts as a root at layer 0; giving it a new parent at layer 0 forces c down.
+        auto c = g.createNode("c", 0, nullptr);
+        ASSERT_EQ(c->getLayer(), 0);
+        g.createParent("p", c);
+        EXPECT_EQ(c->getLayer(), 1);
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, CreateParent_ChildAlreadyDeepEnough_NoRelocationNeeded) {
+        // c has another, deeper parent already, so the new parent at layer 0 doesn't force a move.
+        auto other = g.createNode("other", 0, nullptr);
+        auto c = g.createNode("c", 0, other); // c at layer 1
+        auto p = g.createParent("p", c);      // p at layer 0, same as other
+        EXPECT_EQ(c->getLayer(), 1);
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, CreateParent_NullChild_Throws) {
+        EXPECT_THROW(g.createParent("p", nullptr), std::invalid_argument);
+    }
+
+    // =============================================================================
+    // 13. removeSourcesFromHyperedge / removeTargetsFromHyperedge (direct public calls)
+    // =============================================================================
+
+    TEST_F(ConnectionManagementTest, RemoveSourcesFromHyperedge_RemovesLinkAndEdge) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        auto c = g.createNode("c", 0, nullptr);
+        auto edge = g.addConnection(a, c);
+        g.addSourceToEdge(edge, b); // edge now has sources {a, b}, target {c}
+        g.removeSourcesFromHyperedge(edge, { a.get() }, true);
+        auto children = a->getChildren();
+        EXPECT_EQ(std::find(children.begin(), children.end(), c), children.end())
+            << "a->c link should be gone";
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, RemoveSourcesFromHyperedge_AllSourcesRemoved_DissolvesEdge) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto c = g.createNode("c", 0, a);
+        auto edge = findEdgeWithSourceAndTarget(g, a, c);
+        ASSERT_NE(edge, nullptr);
+        g.removeSourcesFromHyperedge(edge, { a.get() }, true);
+        EXPECT_TRUE(g.rawEdges().find(edge) == g.rawEdges().end());
+    }
+
+    TEST_F(ConnectionManagementTest, RemoveSourcesFromHyperedge_WithRelocation_ChildMovesUp) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        g.relocateNodeToLayer(b, 3); // isolated, valid override
+        auto c = g.createNode("c", 0, nullptr);
+        g.addConnection(a, c);
+        auto edge = g.addConnection(b, c); // c's depth rule now driven by b (layer 1) -> c at 2
+        ASSERT_EQ(c->getLayer(), 2);
+        g.removeSourcesFromHyperedge(edge, { b.get() }, true);
+        EXPECT_EQ(c->getLayer(), 1) << "c should move back up now that only 'a' remains as a parent";
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, RemoveSourcesFromHyperedge_NoGapsLeftBehind) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        g.relocateNodeToLayer(b, 3);
+        auto c = g.createNode("c", 0, nullptr);
+        g.addConnection(a, c);
+        auto edge = g.addConnection(b, c);
+        g.removeSourcesFromHyperedge(edge, { b.get() }, true);
+        int expected = 0;
+        for (const auto& [layer, data] : g.getLayers())
+            EXPECT_EQ(layer, expected++) << "Layer numbers must stay dense from 0";
+    }
+
+    TEST_F(ConnectionManagementTest, RemoveTargetsFromHyperedge_RemovesLinkAndEdge) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        auto c = g.createNode("c", 0, nullptr);
+        auto edge = g.addConnection(a, b);
+        g.addTargetToEdge(edge, c); // edge now has target {b, c}
+        g.removeTargetsFromHyperedge(edge, { b.get() }, true);
+        auto parents = b->getParents();
+        EXPECT_EQ(std::find(parents.begin(), parents.end(), a), parents.end())
+            << "a->b link should be gone";
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, RemoveTargetsFromHyperedge_AllTargetsRemoved_DissolvesEdge) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, a);
+        auto edge = findEdgeWithSourceAndTarget(g, a, b);
+        ASSERT_NE(edge, nullptr);
+        g.removeTargetsFromHyperedge(edge, { b.get() }, true);
+        EXPECT_TRUE(g.rawEdges().find(edge) == g.rawEdges().end());
+    }
+
+    TEST_F(ConnectionManagementTest, RemoveTargetsFromHyperedge_ThrowsOnNonExistentConnection) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        auto c = g.createNode("c", 0, nullptr);
+        auto edge = g.addConnection(a, b);
+        EXPECT_THROW(g.removeTargetsFromHyperedge(edge, { c.get() }, false), std::logic_error);
+    }
+
+    // =============================================================================
+    // 14. getName / setName
+    // =============================================================================
+
+    TEST_F(ConnectionManagementTest, GetName_ReturnsConstructorName) {
+        EXPECT_EQ(g.getName(), "test");
+    }
+
+    TEST_F(ConnectionManagementTest, SetName_UpdatesName) {
+        g.setName("renamed");
+        EXPECT_EQ(g.getName(), "renamed");
+    }
+
+    // =============================================================================
+    // 15. relocateNodeToLayer
+    // =============================================================================
+
+    // ---- null / no-op ---------------------------------------------------------
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_NullNode_NoThrowNoOp) {
+        EXPECT_NO_THROW(g.relocateNodeToLayer(nullptr, 3));
+    }
+
+    // ---- plain branch: desired_layer between depth_rule_layer and last_layer --
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_BelowDepthRule_Throws) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p); // depth rule 1
+        EXPECT_THROW(g.relocateNodeToLayer(c, 0), std::logic_error);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_ExactlyAtCurrentLayer_NoOp) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        EXPECT_NO_THROW(g.relocateNodeToLayer(c, 1));
+        EXPECT_EQ(c->getLayer(), 1);
+        EXPECT_EQ(c->getDesiredLayer(), -1);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_DeeperThanDepthRule_SetsOverrideAndMoves) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p); // depth rule 1
+        g.relocateNodeToLayer(c, 4);
+        EXPECT_EQ(c->getLayer(), 2);
+        EXPECT_EQ(c->getDesiredLayer(), 2);
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_CreatesDummyChainForMultiLayerJump) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        g.relocateNodeToLayer(c, 4);
+        g.relocateNodeToLayer(c, 4);
+        g.relocateNodeToLayer(c, 4);
+        EXPECT_GE(countDummyNodesInLayer(g, 1), 1);
+        EXPECT_GE(countDummyNodesInLayer(g, 2), 1);
+        EXPECT_GE(countDummyNodesInLayer(g, 3), 1);
+        EXPECT_TRUE(allSegmentEdgesAreShort(g));
+        auto edge = findEdgeWithSource(g, p);
+        edge->removeTarget(c);
+        EXPECT_TRUE(c->getLayer(), 1);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_PropagatesToDescendantsWithNoOtherAnchor) {
+        auto root = g.createNode("root", 0, nullptr);
+        auto n1 = g.createNode("n1", 0, root);
+        auto n2 = g.createNode("n2", 0, n1);
+        g.relocateNodeToLayer(n1, 3);
+        EXPECT_EQ(n1->getLayer(), 3);
+        EXPECT_EQ(n2->getLayer(), 4);
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_DescendantWithOwnDeeperOverride_NotForcedBack) {
+        auto root = g.createNode("root", 0, nullptr);
+        auto n1 = g.createNode("n1", 0, root);
+        auto n2 = g.createNode("n2", 0, n1);
+        g.relocateNodeToLayer(n2, 6); // n2 has its own override, well past n1's depth rule
+        g.relocateNodeToLayer(n2, 6); // n2 has its own override, well past n1's depth rule
+        g.relocateNodeToLayer(n1, 2); // n1 moves deeper, but not deep enough to threaten n2's override
+        EXPECT_EQ(n1->getLayer(), 2);
+        EXPECT_EQ(n2->getLayer(), 4) << "n2's own valid override should be left alone";
+        EXPECT_EQ(n2->getDesiredLayer(), 4);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_OverrideClearedWhenMovedBackToDepthRule) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        g.relocateNodeToLayer(c, 4);
+        g.relocateNodeToLayer(c, 4);
+        g.relocateNodeToLayer(c, 4);
+        ASSERT_EQ(c->getDesiredLayer(), 4);
+        g.relocateNodeToLayer(c, 1); // back to the plain depth rule
+        EXPECT_EQ(c->getLayer(), 1);
+        EXPECT_EQ(c->getDesiredLayer(), -1);
+    }
+
+    // ---- desired_layer == -1 branch: new shallowest layer ----------------------
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_MinusOne_NodeWithParents_Throws) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        EXPECT_THROW(g.relocateNodeToLayer(c, -1), std::logic_error);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_MinusOne_SoleOccupantOfLayerZero_Throws) {
+        auto a = g.createNode("a", 0, nullptr);
+        EXPECT_THROW(g.relocateNodeToLayer(a, -1), std::logic_error);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_MinusOne_NotSoleOccupant_ShiftsEverythingAndPlacesNodeAtZero) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        g.relocateNodeToLayer(a, -1);
+        EXPECT_EQ(a->getLayer(), 0);
+        EXPECT_EQ(b->getLayer(), 1);
+        EXPECT_TRUE(layerContainsNode(g, 0, a));
+        EXPECT_TRUE(layerContainsNode(g, 1, b));
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_MinusOne_ChildrenFollowIfNoOtherAnchor) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto child = g.createNode("child", 0, a);
+        auto other = g.createNode("other", 0, nullptr); // keeps layer 0 from being sole-occupied by 'a'
+        g.relocateNodeToLayer(a, -1);
+        EXPECT_EQ(a->getLayer(), 0);
+        EXPECT_EQ(child->getLayer(), 1) << "child must still be exactly below 'a'";
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_MinusOne_NoGapsLeftBehind) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto child = g.createNode("child", 0, a);
+        auto other = g.createNode("other", 0, nullptr);
+        g.relocateNodeToLayer(a, -1);
+        int expected = 0;
+        for (const auto& [layer, data] : g.getLayers())
+            EXPECT_EQ(layer, expected++) << "Layer numbers must stay dense from 0";
+    }
+
+    // ---- desired_layer beyond last_layer branch: new deepest layer -------------
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_BeyondLastLayer_SoleOccupantNoParents_Throws) {
+        auto a = g.createNode("a", 0, nullptr); // only node, layer 0 is also last_layer
+        EXPECT_THROW(g.relocateNodeToLayer(a, 5), std::logic_error);
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_BeyondLastLayer_NotSoleOccupant_Succeeds) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr); // shares layer 0 (the current last_layer) with a
+        g.relocateNodeToLayer(a, 5);
+        EXPECT_EQ(a->getLayer(), 1); // normalized to last_layer+1, not the literal 5
+        EXPECT_TRUE(layerContainsNode(g, 0, b));
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_BeyondLastLayer_WithParent_CreatesDummyChainNoGap) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto leaf = g.createNode("leaf", 0, p); // leaf at layer 1, last_layer == 1
+        g.relocateNodeToLayer(leaf, 10);
+        EXPECT_EQ(leaf->getLayer(), 2) << "Normalized to last_layer+1";
+        EXPECT_GE(countDummyNodesInLayer(g, 1), 1) << "p->leaf now spans two layers, needs a dummy";
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+        int expected = 0;
+        for (const auto& [layer, data] : g.getLayers())
+            EXPECT_EQ(layer, expected++) << "Layer numbers must stay dense from 0";
+    }
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_BeyondLastLayer_IsolatedNode_NoCrash) {
+        // Regression test: an isolated node (no parents, no children) sent past last_layer must
+        // not crash minimizeCrossingsAfterRelocation with an INT_MAX sentinel.
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        EXPECT_NO_THROW(g.relocateNodeToLayer(a, 5));
+        EXPECT_EQ(a->getLayer(), 1);
+    }
+
+    // ---- combined / gap-safety regression ---------------------------------------
+
+    TEST_F(ConnectionManagementTest, RelocateNodeToLayer_Stress_SequenceOfRelocations_NoGapsEver) {
+        auto root = g.createNode("root", 0, nullptr);
+        auto n1 = g.createNode("n1", 0, root);
+        auto n2 = g.createNode("n2", 0, n1);
+        auto iso = g.createNode("iso", 0, nullptr);
+
+        g.relocateNodeToLayer(n1, 4);     // n1 jumps deep; n2 cascades to 5; dummies fill 1-3
+        g.relocateNodeToLayer(iso, 100);  // normalizes to last_layer+1, stays adjacent, no gap
+        g.removeConnection(root, n1);     // orphans n1; its override (4) survives with no parents;
+        // the dummy chain through 1-3 dissolves, opening a real gap
+
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+        int expected = 0;
+        for (const auto& [layer, data] : g.getLayers()) {
+            EXPECT_FALSE(data.nodes.empty() && data.outgoing_edges.empty())
+                << "Layer " << layer << " should have been cleaned up if empty";
+            EXPECT_EQ(layer, expected++) << "Layer numbers must stay dense from 0";
+        }
+    }
+
+    // =============================================================================
+    // 16. INTENSIVE — complex topology and extreme cases
     // =============================================================================
 
     // Helper: every node appears in exactly one layer
@@ -975,7 +1304,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         auto z3 = g.createNode("z3", 0, z2);
         auto z4 = g.createNode("z4", 0, z3);
 
-		EXPECT_THROW(g.addConnection(z0, z2), std::logic_error);
+        EXPECT_THROW(g.addConnection(z0, z2), std::logic_error);
         EXPECT_THROW(g.addConnection(z0, z3), std::logic_error);
         EXPECT_THROW(g.addConnection(z1, z3), std::logic_error);
         EXPECT_THROW(g.addConnection(z1, z4), std::logic_error);
@@ -1375,7 +1704,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         // left and right have a common parent (top) and common child (bottom)
         g.fuseNodes(left, right, "mid");
         EXPECT_EQ(g.getAllHyperedges().size(), 2u);
-   
+
         // Instead: add an unrelated pair and fuse them
         auto x = g.createNode("x", 0, nullptr);
         auto y = g.createNode("y", 0, nullptr);
@@ -1439,7 +1768,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         g.removeNode(ma);
         g.removeNode(mb);
 
-		auto edge = findEdgeWithSourceAndTarget(g, ra, lb);
+        auto edge = findEdgeWithSourceAndTarget(g, ra, lb);
 
         EXPECT_FALSE(nodeInAllNodes(g, ma));
         EXPECT_FALSE(nodeInAllNodes(g, mb));

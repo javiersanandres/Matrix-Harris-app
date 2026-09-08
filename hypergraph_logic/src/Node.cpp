@@ -9,13 +9,15 @@ namespace hypergraph_logic {
 	Node::Node(std::string name)
 		: is_dummy_(false)
 		, name_(std::move(name))
-		, layer_(0) {
+		, layer_(0)
+		, desired_layer_(-1) {
 	}
 
 	Node::Node()
 		: is_dummy_(true)
 		, name_("")
-		, layer_(0) {
+		, layer_(0)
+		, desired_layer_(-1) {
 	}
 
 	bool Node::isDummy() const noexcept {
@@ -36,6 +38,14 @@ namespace hypergraph_logic {
 
 	void Node::setLayer(int layer) noexcept {
 		layer_ = layer;
+	}
+
+	int Node::getDesiredLayer() const noexcept {
+		return desired_layer_;
+	}
+
+	void Node::setDesiredLayer(int desired_layer) noexcept {
+		desired_layer_ = desired_layer;
 	}
 
 	// ============================================================================

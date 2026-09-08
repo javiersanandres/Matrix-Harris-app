@@ -36,7 +36,7 @@ namespace hypergraph_logic {
 
 	class Node : public std::enable_shared_from_this<Node> {
 		friend class Hypergraph;  // Allow Hypergraph to set layer
-		friend class GraphicalHypergraph;  // Allow GraphicalHypergraph to access layout data
+		friend class GraphicalHypergraph;  // Allow GraphicalHypergraph to set layer
 	public:
 		// ── Node (real) ───────────────────────────────────────────────────────────────────────────────
 		//
@@ -84,6 +84,18 @@ namespace hypergraph_logic {
 		// The value is kept in sync by the graph whenever the node is relocated.
 		//
 		int getLayer() const noexcept;
+
+		// ── getDesiredLayer ───────────────────────────────────────────────────────────────────────────
+		//
+		// Returns the layer the user has explicitly requested for this node via
+		// Hypergraph::relocateNodeToLayer, or -1 if no such override is currently in effect and the
+		// node is simply following the default depth rule (layer = max(parent layers) + 1).
+		//
+		// An override is only ever recorded while it is *doing something*, i.e. while it places the
+		// node strictly deeper than the depth rule would. The owning Hypergraph clears it back to -1
+		// automatically the moment it stops making a difference.
+		//
+		int getDesiredLayer() const noexcept;
 
 		// ====================================================================
 		// Adjacency queries
@@ -194,9 +206,13 @@ namespace hypergraph_logic {
 		/// Set the layer this node belongs to (called by Hypergraph only)
 		void setLayer(int layer) noexcept;
 
+		/// Set (or clear, with -1) the user-requested layer override (called by Hypergraph only)
+		void setDesiredLayer(int desired_layer) noexcept;
+
 		bool is_dummy_;
 		std::string name_; // empty for dummy nodes
 		int layer_;  // Layer assignment by hypergraph
+		int desired_layer_;  // User-requested layer override, or -1. Managed by Hypergraph only.
 		std::vector<WeakNodePtr> parents_;
 		std::vector<WeakNodePtr> children_;
 	};

@@ -336,6 +336,28 @@ namespace hypergraph_logic {
 		//
 		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_label);
 
+		// ============================================================================
+		// Node layer management
+		// ============================================================================
+		// 
+		// ── relocateNodeToLayer ───────────────────────────────────────────────────────────────────────
+		//
+		// Lets the caller override the default depth rule for a single node, placing it at
+		// `desired_layer` instead of the layer the rule would normally assign. This relaxes the
+		// depth rule from an equality to the inequality
+		//
+		//     layer(v) >= max{ layer(p) : p is a parent of v } + 1        (1)
+		//
+		// (0 if v has no parents), i.e. the node may be pushed to any layer at or below (deeper than)
+		// the one the rule would normally give it, but never above it.
+		//
+		// If desired_layer equals the depth-rule layer exactly, this is equivalent to clearing any
+		// existing override. Otherwise the override is recorded (getDesiredLayer() == desired_layer) 
+		// and will stick until a later structural change either makes the depth rule catch up with it,
+		// or pushes the depth rule past it.
+		//
+		void relocateNodeToLayer(const NodePtr& node, int desired_layer);
+
 	protected:
 		std::string name_;
 
@@ -632,17 +654,52 @@ namespace hypergraph_logic {
 		//
 		HyperedgePtr resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, int& out_start_layer);
 
+		// ── resolveTargetLayer ───────────────────────────────────────────────────────────────────────
+		//
+		// Computes the layer a node should currently occupy, following the depth rule or desired_layer
+		// field of the node. The computation is performed in the following manner:
+		// 
+		//   - If node has no override (getDesiredLayer() == -1), returns the depth-rule layer.
+		//   - If the override is still strictly deeper than the depth-rule layer, it is honoured
+		//     as-is and returned unchanged.
+		//   - If the override is no longer doing anything (it now equals the depth-rule layer) or is 
+		//     no longer valid (it is now shallower than the depth-rule layer), the override is cleared
+		//     and the plain depth-rule layer is returned instead.
+		//
+		int resolveTargetLayer(const NodePtr& node);
+
 		// ── relocateNodes ────────────────────────────────────────────────────────────────────────────
 		//
-		// Determines whether any of the given nodes are sitting at a layer that disagrees with their
-		// correct depth (max(parent layers) + 1, or 0 if they have no parents). Any node that needs
-		// to move is collected and handed off to applyRelocationAndPropagate.
+		// Determines whether any of the given nodes are sitting at a layer that disagrees with the
+		// layer resolveTargetLayer computes for them (the depth rule, or a valid desired_layer
+		// override — see resolveTargetLayer). Any node that needs to move is collected and handed
+		// off to applyRelocationAndPropagate.
 		//
 		// Returns true if at least one relocation was performed, false otherwise.
 		// Callers use this return value to skip redundant edge-splitting when the targets of a newly
 		// created edge have already been moved by relocation.
 		//
 		bool relocateNodes(const std::vector<NodePtr>& nodes);
+
+		// ── choosePositionForRelocatedNode ───────────────────────────────────────────────────────────
+		//
+		// Hook for subclasses that track a horizontal coordinate per node (namely
+		// GraphicalHypergraph) to control where a relocated node lands within its new layer's node
+		// list, instead of always being appended at the end. Called once per node, right before it
+		// is (re-)inserted into its new layer.
+		//
+		virtual int choosePositionForRelocatedNode(int /*new_layer*/, const NodePtr& /*node*/) const {
+			return -1;
+		}
+
+		// ── renumberLayersFrom ────────────────────────────────────────────────────────────
+		//
+		// Shifts every layer numbered from_layer or deeper up by exactly 1 (old_layer -> old_layer + 1),
+		// leaving from_layer itself empty and every layer below it untouched. This is a pure
+		// renumbering: it moves LayerData entries to their new keys and keeps every node's and
+		// hyperedge's own layer_ field in sync, but does not create, destroy, or reconnect anything.
+		//
+		void renumberLayersFrom(int from_layer);
 
 		// ── applyRelocationAndPropagate ───────────────────────────────────────────────────────────────
 		//
@@ -655,10 +712,13 @@ namespace hypergraph_logic {
 		//     (dissolving any old segments); if it is still long it is re-split.
 		//
 		//   Phase 2 – Propagate depth changes to descendants:
-		//     All descendants of the relocated nodes are collected. For each descendant whose correct
-		//     depth (max parent layer + 1) no longer matches its current layer, the node is moved to
-		//     the correct layer. Nodes are processed in ascending layer order so that when a node is
-		//     re-evaluated all of its parents have already been updated.
+		//     All descendants of the relocated nodes are collected. For each descendant, its target
+		//     layer is computed via resolveTargetLayer (the depth rule, or the descendant's own valid
+		//     desired_layer override — see resolveTargetLayer). Any descendant whose target layer no
+		//     longer matches its current layer is moved there; a descendant carrying its own valid
+		//     override that already satisfies invariant (1) is left in place rather than being forced
+		//     back onto the plain depth rule. Nodes are processed in ascending layer order so that
+		//     when a node is re-evaluated all of its parents have already been updated.
 		//
 		//   Phase 3 – Rebuild edges for affected descendants:
 		//     Every original edge that touches a node whose layer actually changed in Phase 2 is
@@ -667,6 +727,18 @@ namespace hypergraph_logic {
 		// A cleanUp call at the end removes any layers that have become empty.
 		//
 		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations);
+
+		// ── compactLayerNumbers ─────────────────────────────────────────────────────────
+		//
+		// Re-ranks every existing layer key to be dense and 0-based: the shallowest layer present
+		// becomes 0, the next-shallowest becomes 1, and so on, with no gaps in between; regardless
+		// of what the original numbers were or where any gaps sat.
+		//
+		// Called automatically at the end of cleanUp(), since that's the only place a layer entry is
+		// ever erased. No-op (does not even walk layers_ a second time) if the numbering is already
+		// dense from 0.
+		//
+		void compactLayerNumbers();
 
 		// ── cleanUp ──────────────────────────────────────────────────────────────────────────────────
 		//
@@ -758,5 +830,15 @@ namespace hypergraph_logic {
 		// LayerData::nodes. Returns the crossing count after the pass.
 		//
 		int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer);
+
+	private:
+		// ── relabelLayerContents ─────────────────────────────────────────────────────────
+		//
+		// Shared plumbing for renumberLayersFrom and compactLayerNumbers: retargets every node's
+		// (and, if active, its desired_layer_ override's) and every outgoing edge's stored layer
+		// number from whatever it currently is to new_layer. Does not touch layers_ itself, callers
+		// are responsible for moving the LayerData to its new key.
+		//
+		void relabelLayerContents(const LayerData& data, int new_layer);
 	};
 } // namespace hypergraph_logic

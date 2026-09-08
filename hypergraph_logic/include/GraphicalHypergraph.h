@@ -1,4 +1,5 @@
 #pragma once
+
 #include "Hypergraph.h"
 #include <nlohmann/json.hpp>
 #include <string>
@@ -212,6 +213,27 @@ namespace hypergraph_logic {
 		// y coordinate to each layer.
 		//
 		void assignYCoordinates();
+
+		// ── choosePositionForRelocatedNode (override) ─────────────────────────────
+		//
+		// Overrides Hypergraph's default (always append) hook. A relocation is purely a vertical
+		// translation — the node's x coordinate from its previous layout is otherwise about to
+		// become meaningless once it lands in a completely different layer — so we treat that old
+		// x as a hint of where it belongs horizontally among its new layer's siblings and place it
+		// there instead of always at the end.
+		//
+		// Looks up the node's x in node_layout_ as it stood *before* this relocation (i.e. from the
+		// last completed computeLayout() call). If the node has no recorded x yet (e.g. it has never
+		// been through computeLayout before — new nodes are not routed through this hook, but this
+		// guards against it defensively anyway), falls back to -1 (append), matching the base class.
+		//
+		// Position is chosen as the index of the first node already in new_layer whose recorded x is
+		// strictly greater than this node's x — i.e. nodes are kept in ascending-x order, and among
+		// nodes that end up with equal x, the relocated node is placed after all of them, preserving
+		// their relative order and making the tie-break deterministic (insertion order) rather than
+		// arbitrary.
+		//
+		int choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const override;
 
 	private:
 		// ── ID generation ─────────────────────────────────────────────────────────

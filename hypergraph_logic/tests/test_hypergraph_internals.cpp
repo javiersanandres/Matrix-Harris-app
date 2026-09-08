@@ -15,6 +15,11 @@
 //       checkCycles
 //       getAllAncestors, getAllDescendants
 //       relocateNodes
+//       resolveTargetLayer
+//       renumberLayersFrom
+//       compactLayerNumbers
+//       choosePositionForRelocatedNode
+//       cleanUp
 // =============================================================================
 
 #include <gtest/gtest.h>
@@ -48,13 +53,18 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         }
         HyperedgePtr pub_createHyperedge(const WeakHyperedgePtr& origin, const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets, int layer) {
             return createHyperedge(origin, sources, targets, layer);
-		}
-		int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
+        }
+        int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
 
         // Relocation
         void pub_applyRelocationAndPropagate(const NodePtr& n, int layer) { applyRelocationAndPropagate({ {n, layer} }); }
         void pub_applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& r) { applyRelocationAndPropagate(r); }
         bool pub_relocateNodes(const std::vector<NodePtr>& nodes) { return relocateNodes(nodes); }
+        int pub_resolveTargetLayer(const NodePtr& n) { return resolveTargetLayer(n); }
+        void pub_renumberLayersFrom(int from_layer) { renumberLayersFrom(from_layer); }
+        void pub_compactLayerNumbers() { compactLayerNumbers(); }
+        int pub_choosePositionForRelocatedNode(int new_layer, const NodePtr& n) const { return choosePositionForRelocatedNode(new_layer, n); }
+        void pub_cleanUp() { cleanUp(); }
 
         // Transitive connections
         void pub_removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children) {
@@ -785,7 +795,222 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     // =============================================================================
-    // 15. INTENSIVE — complex topology and extreme cases for protected methods
+    // 15. resolveTargetLayer
+    // =============================================================================
+
+    TEST_F(HypergraphInternalsTest, ResolveTargetLayer_NoParentsNoOverride_ReturnsZero) {
+        auto n = g.createNode("n", 0, nullptr);
+        EXPECT_EQ(g.pub_resolveTargetLayer(n), 0);
+        EXPECT_EQ(n->getDesiredLayer(), -1);
+    }
+
+    TEST_F(HypergraphInternalsTest, ResolveTargetLayer_WithParent_ReturnsParentLayerPlusOne) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        EXPECT_EQ(g.pub_resolveTargetLayer(c), 1);
+    }
+
+    TEST_F(HypergraphInternalsTest, ResolveTargetLayer_MultipleParents_UsesDeepest) {
+        auto p1 = g.createNode("p1", 0, nullptr);
+        auto p2 = g.createNode("p2", 0, nullptr);
+        auto c = g.createNode("c", 0, p1);
+        g.addConnection(p2, c);
+        // Push p2 deeper so it becomes the binding parent for c's depth rule.
+        g.relocateNodeToLayer(p2, 4);
+        EXPECT_EQ(g.pub_resolveTargetLayer(c), 3);
+    }
+
+    TEST_F(HypergraphInternalsTest, ResolveTargetLayer_ActiveOverrideDeeperThanDepthRule_Honoured) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        g.relocateNodeToLayer(c, 3);
+        ASSERT_EQ(c->getDesiredLayer(), 2);
+        EXPECT_EQ(g.pub_resolveTargetLayer(c), 2);
+        EXPECT_EQ(c->getDesiredLayer(), 2); // still valid, unchanged
+    }
+
+    TEST_F(HypergraphInternalsTest, ResolveTargetLayer_OverrideCaughtUpByDeepenedParent_ClearsOverride) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p); // depth rule 1
+        g.relocateNodeToLayer(c, 3);      // override = 3
+        // Manually deepen p to exactly the layer that makes the natural depth rule equal 3.
+        g.pub_removeNodeFromLayer(p->getLayer(), p);
+        g.pub_addNodeToLayer(2, -1, p);
+        EXPECT_EQ(g.pub_resolveTargetLayer(c), 3);
+        EXPECT_EQ(c->getDesiredLayer(), -1) << "Override should be cleared once the depth rule catches up to it";
+    }
+
+    TEST_F(HypergraphInternalsTest, ResolveTargetLayer_OverrideInvalidatedByDeeperParent_ClearsAndReturnsNewDepthRule) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p); // depth rule 1
+        g.relocateNodeToLayer(c, 3);      // override = 3
+        // Manually push p past the override, so the depth rule now exceeds it.
+        g.pub_removeNodeFromLayer(p->getLayer(), p);
+        g.pub_addNodeToLayer(5, -1, p);
+        EXPECT_EQ(g.pub_resolveTargetLayer(c), 6);
+        EXPECT_EQ(c->getDesiredLayer(), -1) << "Override should be discarded once it violates the depth rule";
+    }
+
+    // =============================================================================
+    // 16. renumberLayersFrom
+    // =============================================================================
+
+    TEST_F(HypergraphInternalsTest, RenumberLayersFrom_EmptyGraph_NoOp) {
+        EXPECT_NO_THROW(g.pub_renumberLayersFrom(0));
+        EXPECT_EQ(g.getLayerCount(), 0);
+    }
+
+    TEST_F(HypergraphInternalsTest, RenumberLayersFrom_ShiftsLayersAtOrAfterUpByOne) {
+        auto a = g.createNode("a", 0, nullptr); // layer 0
+        auto b = g.createNode("b", 0, a);       // layer 1
+        g.pub_renumberLayersFrom(0);
+        EXPECT_EQ(a->getLayer(), 1);
+        EXPECT_EQ(b->getLayer(), 2);
+        EXPECT_TRUE(layerContainsNode(g, 1, a));
+        EXPECT_TRUE(layerContainsNode(g, 2, b));
+        EXPECT_TRUE(g.getNodesAt(0).empty());
+    }
+
+    TEST_F(HypergraphInternalsTest, RenumberLayersFrom_LeavesLayersBelowFromLayerUntouched) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, a);
+        auto c = g.createNode("c", 0, b);
+        g.pub_renumberLayersFrom(1); // shift everything >= 1
+        EXPECT_EQ(a->getLayer(), 0); // untouched
+        EXPECT_EQ(b->getLayer(), 2);
+        EXPECT_EQ(c->getLayer(), 3);
+    }
+
+    TEST_F(HypergraphInternalsTest, RenumberLayersFrom_DoesNotAutoCreateFromLayerEntry) {
+        // Documents the current contract: renumberLayersFrom shifts existing content out of
+        // the way but does not, by itself, guarantee from_layer exists afterward if nothing
+        // was already at or below it to leave behind.
+        auto a = g.createNode("a", 0, nullptr);
+        g.pub_renumberLayersFrom(0);
+        EXPECT_EQ(g.getLayerCount(), 1); // only the shifted layer (1) exists
+        EXPECT_TRUE(g.getNodesAt(0).empty());
+    }
+
+    TEST_F(HypergraphInternalsTest, RenumberLayersFrom_UpdatesOutgoingEdgeLayer) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, a);
+        auto edge = findOriginalEdgeWithSource(g, a);
+        ASSERT_NE(edge, nullptr);
+        ASSERT_EQ(edge->getLayer(), 0);
+        g.pub_renumberLayersFrom(0);
+        EXPECT_EQ(edge->getLayer(), 1);
+    }
+
+    TEST_F(HypergraphInternalsTest, RenumberLayersFrom_PreservesActiveOverrideValue) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        g.relocateNodeToLayer(c, 3);
+        g.relocateNodeToLayer(c, 3);
+        ASSERT_EQ(c->getDesiredLayer(), 3);
+        g.pub_renumberLayersFrom(2); // c (at 3) is >= 2, so it shifts to 4
+        EXPECT_EQ(c->getLayer(), 4);
+        EXPECT_EQ(c->getDesiredLayer(), 4) << "An active override must track the node's new layer";
+    }
+
+    // =============================================================================
+    // 17. compactLayerNumbers
+    // =============================================================================
+
+    TEST_F(HypergraphInternalsTest, CompactLayerNumbers_EmptyGraph_NoOp) {
+        EXPECT_NO_THROW(g.pub_compactLayerNumbers());
+        EXPECT_EQ(g.getLayerCount(), 0);
+    }
+
+    TEST_F(HypergraphInternalsTest, CompactLayerNumbers_AlreadyDense_NoOp) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, a);
+        g.pub_compactLayerNumbers();
+        EXPECT_EQ(a->getLayer(), 0);
+        EXPECT_EQ(b->getLayer(), 1);
+    }
+
+    TEST_F(HypergraphInternalsTest, CompactLayerNumbers_ClosesGap_RelabelsToZeroBasedRank) {
+        auto a = g.createNode("a", 0, nullptr);
+        g.pub_removeNodeFromLayer(0, a);
+        g.pub_addNodeToLayer(5, -1, a); // a now sits alone at layer 5, a gap from 0
+        ASSERT_EQ(g.getLayerCount(), 2);
+        g.pub_compactLayerNumbers();
+        EXPECT_EQ(a->getLayer(), 1);
+        ASSERT_EQ(g.getLayerCount(), 2);
+        EXPECT_TRUE(layerContainsNode(g, 1, a));
+    }
+
+    TEST_F(HypergraphInternalsTest, CompactLayerNumbers_MultipleGaps_PreservesRelativeOrder) {
+        auto a = g.createNode("a", 0, nullptr);
+        g.pub_removeNodeFromLayer(0, a);
+        g.pub_addNodeToLayer(3, -1, a);
+        auto b = std::make_shared<Node>("b");
+        g.rawNodes().push_back(b);
+        g.pub_addNodeToLayer(7, -1, b);
+        g.pub_compactLayerNumbers();
+        EXPECT_EQ(a->getLayer(), 1);
+        EXPECT_EQ(b->getLayer(), 2);
+    }
+
+    TEST_F(HypergraphInternalsTest, CompactLayerNumbers_LeavesAlreadyDensePrefixUntouched) {
+        auto p = g.createNode("p", 0, nullptr);
+        auto c = g.createNode("c", 0, p);
+        g.relocateNodeToLayer(c, 3); // dense range {0,1,2,3} after the dummy-chain split
+        g.relocateNodeToLayer(c, 3); // dense range {0,1,2,3} after the dummy-chain split
+        ASSERT_EQ(c->getLayer(), 3);
+        ASSERT_EQ(c->getDesiredLayer(), 3);
+
+        // Open a gap strictly beyond the already-dense prefix.
+        auto iso = std::make_shared<Node>("iso");
+        g.rawNodes().push_back(iso);
+        g.pub_addNodeToLayer(10, -1, iso);
+
+        g.pub_compactLayerNumbers();
+
+        EXPECT_EQ(c->getLayer(), 3) << "Already-dense prefix must be left alone";
+        EXPECT_EQ(c->getDesiredLayer(), 3);
+        EXPECT_EQ(iso->getLayer(), 4) << "Only the out-of-sequence node should be re-ranked";
+    }
+
+    // =============================================================================
+    // 18. choosePositionForRelocatedNode
+    // =============================================================================
+
+    TEST_F(HypergraphInternalsTest, ChoosePositionForRelocatedNode_BaseClassDefault_AlwaysAppends) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, nullptr);
+        EXPECT_EQ(g.pub_choosePositionForRelocatedNode(0, a), -1);
+        EXPECT_EQ(g.pub_choosePositionForRelocatedNode(7, b), -1);
+    }
+
+    // =============================================================================
+    // 19. cleanUp
+    // =============================================================================
+
+    TEST_F(HypergraphInternalsTest, CleanUp_EmptyGraph_NoOp) {
+        EXPECT_NO_THROW(g.pub_cleanUp());
+    }
+
+    TEST_F(HypergraphInternalsTest, CleanUp_ErasesEmptyLayerAndRecompacts) {
+        auto a = g.createNode("a", 0, nullptr);
+        g.pub_removeNodeFromLayer(0, a);
+        g.pub_addNodeToLayer(5, -1, a); // layer 0 now empty of nodes and edges; gap to 5
+        g.pub_cleanUp();
+        EXPECT_EQ(g.getLayerCount(), 1);
+        EXPECT_EQ(a->getLayer(), 0);
+    }
+
+    TEST_F(HypergraphInternalsTest, CleanUp_DoesNotEraseNonEmptyLayer) {
+        auto a = g.createNode("a", 0, nullptr);
+        auto b = g.createNode("b", 0, a);
+        g.pub_cleanUp();
+        EXPECT_EQ(g.getLayerCount(), 2);
+        EXPECT_TRUE(layerContainsNode(g, 0, a));
+        EXPECT_TRUE(layerContainsNode(g, 1, b));
+    }
+
+    // =============================================================================
+    // 20. INTENSIVE — complex topology and extreme cases for protected methods
     // =============================================================================
 
     static bool eachNodeInExactlyOneLayer(const TestableHypergraph& g) {
@@ -1188,6 +1413,31 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         EXPECT_TRUE(allSegmentEdgesAreShort(g));
         EXPECT_TRUE(eachNodeInExactlyOneLayer(g));
         EXPECT_TRUE(layerOrderIsConsistent(g));
+    }
+
+    TEST_F(HypergraphInternalsTest, Stress_DesiredLayerOverride_SurvivesOrphaningWithoutLeavingGaps) {
+        auto root = g.createNode("root", 0, nullptr);
+        auto child = g.createNode("child", 0, root);
+        g.relocateNodeToLayer(child, 4); // valid override; creates a dummy chain through 1-3
+        g.relocateNodeToLayer(child, 4); // valid override; creates a dummy chain through 1-3
+        g.relocateNodeToLayer(child, 4); // valid override; creates a dummy chain through 1-3
+        ASSERT_EQ(child->getLayer(), 4);
+        ASSERT_EQ(child->getDesiredLayer(), 4);
+
+        // Orphaning child (removing its only parent connection) leaves it parentless; its
+        // override (4 > depth rule 0) should still be honoured, and no layer should be
+        // left empty or non-dense as a result of the edge/dummy-chain teardown.
+        g.removeConnection(root, child);
+
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+        for (const auto& [layer, data] : g.getLayers()) {
+            EXPECT_FALSE(data.nodes.empty() && data.outgoing_edges.empty())
+                << "Layer " << layer << " should have been erased by cleanUp if left empty";
+        }
+        int expected = 0;
+        for (const auto& [layer, data] : g.getLayers()) {
+            EXPECT_EQ(layer, expected++) << "Layer numbering must remain dense from 0";
+        }
     }
 
 } // namespace hypergraph_logic::hypergraph_tests::internals
