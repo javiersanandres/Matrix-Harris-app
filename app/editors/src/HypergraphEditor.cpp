@@ -49,10 +49,10 @@ namespace app_logic {
 		try {
 			NodePtr result;
 			if (edge->isSegment()) {
-				result = graph_.createNode(label, edge->getOrigin().lock());
+				result = graph_.createNodeInEdge(label, edge->getOrigin().lock());
 			}
 			else {
-				result = graph_.createNode(label, edge);
+				result = graph_.createNodeInEdge(label, edge);
 			}
 			graph_.computeLayout();
 			commitSnapshot(std::move(saved));
