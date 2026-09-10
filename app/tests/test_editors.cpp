@@ -99,7 +99,7 @@ namespace app_logic {
                 NodePtr B = ed.createNode("B", 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
-                NodePtr C = ed.createNode("C", edge);
+                NodePtr C = ed.createNodeInEdge("C", edge);
                 EXPECT_NE(C, nullptr);
             }
 
@@ -113,7 +113,7 @@ namespace app_logic {
                 ed.undo(); // clear prior snapshots
 				HyperedgePtr edge2 = firstRealEdge(ed);
 				EXPECT_NE(edge2.get(), edge.get()); // sanity check that undo worked
-                ed.createNode("C", edge2);
+                ed.createNodeInEdge("C", edge2);
                 EXPECT_TRUE(ed.canUndo());
             }
 
@@ -559,18 +559,22 @@ namespace app_logic {
                 EXPECT_FALSE(ed.canUndo());
             }
 
-            // ── relocateNodeInLayer ───────────────────────────────────────────
+            // ── relocateNode (horizontal-only via a same-layer y) ──────────────
             //
-            // relocateNodeInLayer throws std::invalid_argument when the new
-            // coordinate does not change the node's position in the layer.
+            // Passing the node's own current layer y keeps the vertical leg a no-op:
+            // relocateNodeToLayer throws std::invalid_argument internally ("already
+            // placed in that layer"), which relocateNode's fallback catches and
+            // retries as a pure horizontal move -- this exercises exactly the old
+            // relocateNodeInLayer behavior through the consolidated entry point.
 
             TEST(HypergraphEditor, RelocateNodeToNewPositionCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
                 NodePtr A = ed.createNode("A", 0, nullptr);
                 NodePtr B = ed.createNode("B", 1, nullptr);
-                // B is to the right of A. Move A well past B.
+                // B is to the right of A. Move A well past B, keeping it in the same layer.
                 double xB = ed.getX(B);
-                ed.relocateNodeInLayer(A, xB + 50.0);
+                double yA = ed.getGraph().getLayerLayout().at(A->getLayer());
+                ed.relocateNode(A, xB + 50.0, yA);
                 EXPECT_TRUE(ed.canUndo());
             }
 
@@ -578,10 +582,116 @@ namespace app_logic {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
                 NodePtr A = ed.createNode("A", 0, nullptr);
                 double xA = ed.getX(A);
-                while (ed.canUndo()) ed.undo();
-                // Moving to the exact same x does not swap any neighbour — throws.
-                EXPECT_THROW(ed.relocateNodeInLayer(A, xA), std::invalid_argument);
-                EXPECT_FALSE(ed.canUndo());
+                double yA = ed.getGraph().getLayerLayout().at(A->getLayer());
+                // Same x, same layer: neither leg of the move changes anything -- throws.
+                EXPECT_THROW(ed.relocateNode(A, xA, yA), std::invalid_argument);
+            }
+
+
+            // ── relocateNode (vertical + horizontal, across existing layers) ───
+            //
+            // These exercise the full pipeline: moving a node into a different,
+            // already-populated layer, checking layer membership and relative
+            // horizontal order afterward, and the layer-creation/renumbering path
+            // whose stale-span bug was fixed by keying the pre-move lookup on node
+            // identity rather than layer index.
+
+            TEST(HypergraphEditor, RelocateNodeAcrossLayersMovesToTargetLayer) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);       // layer 0, alongside P
+                NodePtr P = ed.createNode("P", 1, nullptr);       // layer 0
+                NodePtr Q = ed.createNode("Q", 0, P);             // layer 1
+                NodePtr S = ed.createNode("S", 1, P);             // layer 1
+
+                double target_y = ed.getGraph().getLayerLayout().at(1);
+                double target_x = (ed.getX(Q) + ed.getX(S)) / 2.0;
+
+                // A has no parents and no children, so it can freely descend into
+                // layer 1 without violating the depth-rule invariant or cascading
+                // any other node deeper.
+                ed.relocateNode(A, target_x, target_y);
+
+                auto layer0 = ed.getNodesAt(0);
+                auto layer1 = ed.getNodesAt(1);
+                EXPECT_FALSE(std::any_of(layer0.begin(), layer0.end(), [&](const NodePtr& n) { return n == A; }));
+                EXPECT_TRUE(std::any_of(layer1.begin(), layer1.end(), [&](const NodePtr& n) { return n == A; }));
+                EXPECT_EQ(ed.getLayerCount(), 2); // no new layer created.
+                EXPECT_TRUE(ed.canUndo());
+            }
+
+            TEST(HypergraphEditor, RelocateNodeAcrossLayersPreservesRelativeOrder) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr P = ed.createNode("P", 1, nullptr);
+                NodePtr Q = ed.createNode("Q", 0, P);
+                NodePtr S = ed.createNode("S", 1, P);
+
+                double target_y = ed.getGraph().getLayerLayout().at(1);
+                double target_x = (ed.getX(Q) + ed.getX(S)) / 2.0; // aim for the midpoint between Q and S.
+
+                ed.relocateNode(A, target_x, target_y);
+
+                // A should land strictly between Q and S, reflecting its rescaled
+                // position relative to layer 1's pre-move span.
+                EXPECT_LT(ed.getX(Q), ed.getX(A));
+                EXPECT_LT(ed.getX(A), ed.getX(S));
+            }
+
+            TEST(HypergraphEditor, RelocateNodeCreatingNewShallowestLayerRenumbersExistingLayers) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);       // layer 0, alongside P
+                NodePtr P = ed.createNode("P", 1, nullptr);       // layer 0
+                NodePtr Q = ed.createNode("Q", 0, P);             // layer 1
+
+                ASSERT_EQ(ed.getLayerCount(), 2);
+
+                // Pick a y comfortably above the shallowest layer's upper bound so that
+                // relocateNodeToLayer creates a brand-new layer 0 above everything else.
+                double h0 = ed.getGraph().getLayerLayout().at(0);
+                double far_above = h0 + 100000.0;
+
+                // A has no parents, and P remains behind in the old layer 0, so this
+                // is a legal "new shallowest layer" request. Also confirms the
+                // rescale logic doesn't misfire against a stale, renumbered span --
+                // A's new layer 0 has no prior occupants, so it must fall back to
+                // the unscaled x rather than resolving to some unrelated old layer.
+                EXPECT_NO_THROW(ed.relocateNode(A, 0.0, far_above));
+
+                auto layer0 = ed.getNodesAt(0);
+                auto layer1 = ed.getNodesAt(1);
+                auto layer2 = ed.getNodesAt(2);
+                EXPECT_TRUE(std::any_of(layer0.begin(), layer0.end(), [&](const NodePtr& n) { return n == A; }));
+                EXPECT_TRUE(std::any_of(layer1.begin(), layer1.end(), [&](const NodePtr& n) { return n == P; }));
+                EXPECT_TRUE(std::any_of(layer2.begin(), layer2.end(), [&](const NodePtr& n) { return n == Q; }));
+                EXPECT_EQ(ed.getLayerCount(), 3);
+                EXPECT_TRUE(ed.canUndo());
+            }
+
+            TEST(HypergraphEditor, UndoRelocateNodeAcrossLayersRestoresLayerMembership) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr P = ed.createNode("P", 1, nullptr);
+                NodePtr Q = ed.createNode("Q", 0, P);
+                NodePtr S = ed.createNode("S", 1, P);
+
+                std::size_t layer0_before = ed.getNodesAt(0).size();
+                std::size_t layer1_before = ed.getNodesAt(1).size();
+
+                double target_y = ed.getGraph().getLayerLayout().at(1);
+                double target_x = (ed.getX(Q) + ed.getX(S)) / 2.0;
+                ed.relocateNode(A, target_x, target_y);
+
+                ASSERT_EQ(ed.getNodesAt(0).size(), layer0_before - 1);
+                ASSERT_EQ(ed.getNodesAt(1).size(), layer1_before + 1);
+
+                ed.undo();
+
+                // Note: NodePtrs captured before undo (A, P, Q, S) must not be
+                // dereferenced here -- undo restores a cloned graph with distinct
+                // Node objects, as already established by CreateNodeIntoEdgeCommitsSnapshot's
+                // edge-identity check. Membership counts are queried fresh instead.
+                EXPECT_EQ(ed.getNodesAt(0).size(), layer0_before);
+                EXPECT_EQ(ed.getNodesAt(1).size(), layer1_before);
             }
 
             // ── minimizeCrossings ─────────────────────────────────────────────

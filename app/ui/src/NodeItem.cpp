@@ -48,6 +48,8 @@ namespace ui {
             press_pos_ = event->scenePos();
             drag_start_x_ = event->scenePos().x();
             drag_current_x_ = drag_start_x_;
+            drag_start_y_ = event->scenePos().y();       
+            drag_current_y_ = drag_start_y_;             
             dragging_ = false;
         }
         // Do NOT call base — we handle selection ourselves.
@@ -60,21 +62,22 @@ namespace ui {
         double dy = std::abs(event->scenePos().y() - press_pos_.y());
 
         if (!dragging_ && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
-            // Only start a drag if horizontal movement dominates.
-            if (dx >= dy) {
-                dragging_ = true;
-                setBrush(QBrush(QColor(180, 180, 180, 160))); // grey out
-            }
+            // Any movement past the threshold, in either direction, starts a drag.
+            dragging_ = true;
+            setBrush(QBrush(QColor(180, 180, 180, 160))); // grey out
         }
 
         if (dragging_) {
-            // Constrain to horizontal: only update x, keep y fixed.
+            // Follow the cursor freely in 2D.
             drag_current_x_ = event->scenePos().x();
+            drag_current_y_ = event->scenePos().y();
             double delta_x = drag_current_x_ - drag_start_x_;
-            setRect(rect().translated(delta_x, 0.0));
+            double delta_y = drag_current_y_ - drag_start_y_;
+            setRect(rect().translated(delta_x, delta_y));
             // Move the label with the rect so the text follows the box visually.
-            label_->setPos(label_->pos() + QPointF(delta_x, 0.0));
+            label_->setPos(label_->pos() + QPointF(delta_x, delta_y));
             drag_start_x_ = drag_current_x_;
+            drag_start_y_ = drag_current_y_;
         }
     }
 
@@ -83,17 +86,18 @@ namespace ui {
             dragging_ = false;
             setBrush(QBrush(QColor(255, 255, 200)));  // light yellow
 
-            // Notify the scene — it will call relocateNodeInLayer.
+            // Notify the scene — it will call relocateNode.
             DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
             if (ds) {
-                // Pass the scene-space centre x of the item's current rect.
+                // Pass the scene-space centre of the item's current rect.
                 double new_x = rect().center().x();
+                double new_y = rect().center().y();
                 // The scene will handle calling the editor and then rebuild().
-                QMetaObject::invokeMethod(ds, [ds, node = node_, new_x]() {
+                QMetaObject::invokeMethod(ds, [ds, node = node_, new_x, new_y]() {
                     // Find the NodeItem again after potential rebuild — but since
                     // we have the raw Node* we emit a signal instead.
                     // DiagramScene listens via a connection set up in its ctor.
-                    emit ds->nodeRelocated(node, new_x);
+                    emit ds->nodeRelocated(node, new_x, new_y);
                     }, Qt::QueuedConnection);
             }
             return;

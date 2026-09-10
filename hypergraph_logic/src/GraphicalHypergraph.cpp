@@ -162,6 +162,19 @@ namespace hypergraph_logic {
 		}
 	}
 
+	void GraphicalHypergraph::computeLayout(const std::set<int>& mip_layers) {
+		node_layout_.clear();
+		edge_layout_.clear();
+		layer_layout_.clear();
+
+		assignXCoordinates();
+		for (const auto& layer : mip_layers) {
+			orderHyperedges(layer);
+		}
+		assignPorts();
+		assignYCoordinates();
+	}
+
 	void GraphicalHypergraph::computeLayout() {
 		node_layout_.clear();
 		edge_layout_.clear();
@@ -175,7 +188,7 @@ namespace hypergraph_logic {
 		assignYCoordinates();
 	}
 
-	void GraphicalHypergraph::relocateNodeInLayer(const NodePtr& node, double new_x_coordinate) {
+	void GraphicalHypergraph::relocateNodeInLayer(const NodePtr& node, double new_x_coordinate, std::set<int>* out_altered_layers) {
 		LayerData& layer_data = layers_[node->getLayer()];
 		bool minimize_crossings = false;
 		bool pos_changed = false;
@@ -225,16 +238,101 @@ namespace hypergraph_logic {
 			}
 		}
 
-		if (minimize_crossings) {
-			// Avoid being too aggressive with crossing minimisation, since the user
-			// is making a manual adjustment and may not want the layout to change too much.
-			Hypergraph::minimizeCrossings(3, node->getLayer() + 1);
+		if (pos_changed) {
+			if (minimize_crossings) {
+				// Avoid being too aggressive with crossing minimisation, since the user
+				// is making a manual adjustment and may not want the layout to change too much.
+				Hypergraph::minimizeCrossings(3, node->getLayer() + 1);
+				if (out_altered_layers) {
+					// We need to add those layers where the span of hyperedges could have changed.
+					// Since the node moved and many others all the way down, we need to collect all
+					// layers starting from the previous to the node's.
+					for (const auto& [layer_idx, _] : layers_) {
+						if (layer_idx >= node->getLayer() - 1) {
+							out_altered_layers->insert(layer_idx);
+						}
+					}
+				}
+			}
+			else if (out_altered_layers) {
+				// No need to minimmize crossings means that either current node or those it
+				// swapped with did not have any children, which means no hyperedges colliding
+				// in the node's layer and therefore no MIP should be solved. The previous layer
+				// could have suffered some changes and a MIP in that one should be solved.
+				if (node->getLayer() > 0) out_altered_layers->insert(node->getLayer()-1);
+			}
+		}
+		else {
+			throw std::invalid_argument("New x coordinate does not change the node's position in the layer.");
+		}
+	}
+
+	void GraphicalHypergraph::relocateNodeToLayer(const NodePtr& node, double new_y_coordinate, std::set<int>* out_altered_layers) {
+		if (layer_layout_.empty()) {
+			throw std::runtime_error(
+				"relocateNodeToLayer(node, y) requires a computed layout; call computeLayout() first.");
 		}
 
-		if (pos_changed)
-			computeLayout();
-		else 
-			throw std::invalid_argument("New x coordinate does not change the node's position in the layer.");
+		// Collect layer indices in ascending order. Layer 0 is shallowest (y = 0);
+		// higher indices are deeper (more negative y).
+		std::vector<int> layer_indices;
+		layer_indices.reserve(layer_layout_.size());
+		for (const auto& [idx, _] : layer_layout_) layer_indices.push_back(idx);
+		std::sort(layer_indices.begin(), layer_indices.end());
+
+		const int shallowest = layer_indices.front();
+		const int deepest = layer_indices.back();
+
+		int desired_layer = -2; // sentinel
+		bool found = false;
+
+		for (size_t i = 0; i < layer_indices.size(); ++i) {
+			const int L = layer_indices[i];
+			const double hL = layer_layout_.at(L);
+
+			// Lower bound involves the *next* (deeper) layer.
+			double lower_bound;
+			if (i + 1 < layer_indices.size()) {
+				const double h_next = layer_layout_.at(layer_indices[i + 1]);
+				lower_bound = (h_next + hL) / 2.0;
+			}
+			else {
+				lower_bound = hL - (NODE_HEIGHT + LAYER_GAP) / 2.0;
+			}
+
+			// Upper bound involves the *previous* (shallower) layer.
+			double upper_bound;
+			if (i > 0) {
+				const double h_prev = layer_layout_.at(layer_indices[i - 1]);
+				upper_bound = (h_prev + hL) / 2.0;
+			}
+			else {
+				upper_bound = hL + (NODE_HEIGHT + LAYER_GAP) / 2.0;
+			}
+
+			if (new_y_coordinate >= lower_bound && new_y_coordinate <= upper_bound) {
+				desired_layer = L;
+				found = true;
+				break;
+			}
+		}
+
+		if (!found) {
+			// Coordinate lies outside every existing layer's span: either above the
+			// shallowest layer (new shallowest layer) or below the deepest layer
+			// (new deepest layer).
+			const double h_shallowest = layer_layout_.at(shallowest);
+			const double shallowest_upper = h_shallowest + NODE_HEIGHT / 2.0 + LAYER_GAP;
+
+			if (new_y_coordinate > shallowest_upper) {
+				desired_layer = -1;          // brand-new shallowest layer
+			}
+			else {
+				desired_layer = deepest + 1; // brand-new deepest layer
+			}
+		}
+
+		Hypergraph::relocateNodeToLayer(node, desired_layer, out_altered_layers);
 	}
 
 	int GraphicalHypergraph::choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const {

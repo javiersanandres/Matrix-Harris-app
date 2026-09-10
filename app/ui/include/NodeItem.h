@@ -53,6 +53,8 @@ private:
     bool    dragging_       = false;
     double  drag_start_x_   = 0.0;   // scene x at press
     double  drag_current_x_ = 0.0;   // current scene x during drag
+    double drag_start_y_ = 0.0;
+    double drag_current_y_ = 0.0;
     QPointF press_pos_;               // scene position at press
 
     static constexpr double DRAG_THRESHOLD = 5.0; // pixels before drag activates

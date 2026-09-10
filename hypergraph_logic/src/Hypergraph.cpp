@@ -403,6 +403,32 @@ namespace hypergraph_logic {
 		return node;
 	}
 
+	NodePtr Hypergraph::createNodeNextTo(const std::string& label, const NodePtr& node, bool left) {
+		if (!node) return nullptr;
+		NodePtr new_node = std::make_shared<Node>(label);
+		all_nodes_.push_back(new_node);
+
+		int layer = node->getLayer();
+		const auto& layer_nodes = layers_.at(layer).nodes;
+
+		int position = -1;
+		for (size_t i = 0; i < layer_nodes.size(); i++) {
+			if (layer_nodes[i] == node) {
+				position = left ? static_cast<int>(i) : static_cast<int>(i) + 1;
+				break;
+			}
+		}
+		if (position < 0) {
+			throw std::logic_error("Node is not registered in its own layer.");
+		}
+
+		addNodeToLayer(layer, position, new_node);
+
+		if (layer != 0) new_node->setDesiredLayer(layer);
+
+		return new_node;
+	}
+
 	NodePtr Hypergraph::createSource(const std::string& label, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
 		if (!edge) return nullptr;
 		if (edge->getSources().empty() || edge->getTargets().empty()) {
@@ -1601,7 +1627,9 @@ namespace hypergraph_logic {
 
 			node->setDesiredLayer(desired_layer == depth_rule_layer ? -1 : desired_layer);
 
-			if (desired_layer == node->getLayer()) return;
+			if (desired_layer == node->getLayer()) {
+				throw std::invalid_argument("Node is already placed in that layer.");
+			}
 
 			int min_start_layer = std::min(node->getLayer(), desired_layer);
 			applyRelocationAndPropagate({ {node, desired_layer} }, &min_start_layer, out_altered_layers);
@@ -2133,7 +2161,7 @@ namespace hypergraph_logic {
 		return false;
 	}
 
-	bool Hypergraph::parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent) {
+	bool Hypergraph::parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent) const {
 		if (!parent || children.empty()) return false;
 		int target_layer = parent->getLayer();
 		std::unordered_set<Node*> visited;
@@ -2145,7 +2173,7 @@ namespace hypergraph_logic {
 		return false;
 	}
 
-	bool Hypergraph::childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child) {
+	bool Hypergraph::childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child) const {
 		if (!child || parents.empty()) return false;
 		int target_layer = child->getLayer();
 		std::unordered_set<Node*> visited;

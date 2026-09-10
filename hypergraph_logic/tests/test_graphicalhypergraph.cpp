@@ -649,8 +649,11 @@ namespace hypergraph_logic {
 
                 // Three sequential relocations.
                 ASSERT_NO_THROW(g.relocateNodeInLayer(A, g.getX(B) + 10.0));
+                g.assignXCoordinates();
                 ASSERT_THROW(g.relocateNodeInLayer(B, g.getX(A) - 10.0), std::invalid_argument);
+                g.assignXCoordinates();
                 ASSERT_THROW(g.relocateNodeInLayer(A, g.getX(B) + 5.0), std::invalid_argument);
+                g.assignXCoordinates();
 
                 // After all relocations the layout must still be complete.
                 for (int i = 0; i < 2; ++i)

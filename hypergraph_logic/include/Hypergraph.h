@@ -149,7 +149,7 @@ namespace hypergraph_logic {
 		//
 		NodePtr createParent(const std::string& label, const NodePtr& child, std::set<int>* out_altered_layers = nullptr);
 
-		// ── createNode (into edge) ────────────────────────────────────────────────────────────────────
+		// ── createNodeInEdge ────────────────────────────────────────────────────────────────────────
 		//
 		// Creates a new real node and inserts it as an intermediate node on an existing hyperedge.
 		// The original edge is effectively split into two: one from the edge's sources to the new node,
@@ -162,6 +162,13 @@ namespace hypergraph_logic {
 		// existing layout while still placing the new node and any new dummy nodes reasonably well.
 		//
 		NodePtr createNodeInEdge(const std::string& label, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
+
+		// ── createNodeNextTo ─────────────────────────────────────────────────────────────────────────
+		//
+		// Creates a new, unconnected real node and inserts it into the same layer as node, immediately
+		// to its left or right without creating any hyperedge.
+		//
+		NodePtr createNodeNextTo(const std::string& label, const NodePtr& node, bool left);
 
 		// ── createSource ─────────────────────────────────────────────────────────────────────────────
 		//
@@ -808,7 +815,7 @@ namespace hypergraph_logic {
 		// Used to detect redundant connections before they are added (if the parent is already an
 		// ancestor, the connection adds no new structural information).
 		//
-		bool parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent);
+		bool parentIsInAncestors(const std::vector<NodePtr>& children, const NodePtr& parent) const;
 
 		// ── childIsInDescendants ──────────────────────────────────────────────────────────────────────
 		//
@@ -816,7 +823,7 @@ namespace hypergraph_logic {
 		// reached by traversing downward (towards deeper layers) from any of the given parent nodes.
 		// Branches deeper than the child's layer are pruned for efficiency.
 		//
-		bool childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child);
+		bool childIsInDescendants(const std::vector<NodePtr>& parents, const NodePtr& child) const;
 
 		// ── getAllAncestors ───────────────────────────────────────────────────────────────────────────
 		//

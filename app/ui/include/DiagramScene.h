@@ -84,7 +84,7 @@ namespace ui {
 
         // Emitted by NodeItem after a horizontal drag is released.
         // DiagramScene connects this to call relocateNodeInLayer on the editor.
-        void nodeRelocated(hypergraph_logic::Node* node, double new_scene_x);
+        void nodeRelocated(hypergraph_logic::Node* node, double new_scene_x, double new_scene_y);
 
         // Emitted when the user clicks the background of the joint diagram.
         // MainWindow handles this because it has access to the full diagram list.
@@ -140,6 +140,8 @@ namespace ui {
         // Node operations
 		void onCreateNodeAbove(hypergraph_logic::Node* parent);
         void onCreateNodeBelow(hypergraph_logic::Node* child);
+        void onCreateNodeLeft(Node* node);
+        void onCreateNodeRight(Node* node);
         void onCreateNodeIntoEdge(hypergraph_logic::Hyperedge* edge);
         void onCreateSource(hypergraph_logic::Hyperedge* edge);
         void onCreateTarget(hypergraph_logic::Hyperedge* edge);

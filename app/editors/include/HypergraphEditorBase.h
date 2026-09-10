@@ -175,8 +175,9 @@ namespace app_logic {
 		HyperedgePtr addConnection(const NodePtr& parent, const NodePtr& child) {
 			auto saved = derived().takeSnapshot();
 			try {
-				HyperedgePtr result = derived().graph().addConnection(parent, child);
-				derived().graph().computeLayout();
+				std::set<int> mip_layers;
+				HyperedgePtr result = derived().graph().addConnection(parent, child, &mip_layers);
+				derived().graph().computeLayout(mip_layers);
 				derived().commitSnapshot(std::move(saved));
 				return result;
 			}
@@ -192,14 +193,15 @@ namespace app_logic {
 		void addSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) {
 			auto saved = derived().takeSnapshot();
 			try {
+				std::set<int> mip_layers;
 				if (edge->isSegment()) {
 					HyperedgePtr origin = edge->getOrigin().lock();
-					derived().graph().addSourceToEdge(origin, source);
+					derived().graph().addSourceToEdge(origin, source, &mip_layers);
 				}
 				else {
-					derived().graph().addSourceToEdge(edge, source);
+					derived().graph().addSourceToEdge(edge, source, &mip_layers);
 				}
-				derived().graph().computeLayout();
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -214,14 +216,15 @@ namespace app_logic {
 		void addTargetToEdge(const HyperedgePtr& edge, const NodePtr& target) {
 			auto saved = derived().takeSnapshot();
 			try {
+				std::set<int> mip_layers;
 				if (edge->isSegment()) {
 					HyperedgePtr origin = edge->getOrigin().lock();
-					derived().graph().addTargetToEdge(origin, target);
+					derived().graph().addTargetToEdge(origin, target, &mip_layers);
 				}
 				else {
-					derived().graph().addTargetToEdge(edge, target);
+					derived().graph().addTargetToEdge(edge, target, &mip_layers);
 				}
-				derived().graph().computeLayout();
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -236,8 +239,9 @@ namespace app_logic {
 		void removeNode(const NodePtr& node) {
 			auto saved = derived().takeSnapshot();
 			try {
-				derived().graph().removeNode(node);
-				derived().graph().computeLayout();
+				std::set<int> mip_layers;
+				derived().graph().removeNode(node, &mip_layers);
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -252,8 +256,9 @@ namespace app_logic {
 		void removeConnection(const NodePtr& parent, const NodePtr& child) {
 			auto saved = derived().takeSnapshot();
 			try {
-				derived().graph().removeConnection(parent, child);
-				derived().graph().computeLayout();
+				std::set<int> mip_layers;
+				derived().graph().removeConnection(parent, child, &mip_layers);
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -268,14 +273,15 @@ namespace app_logic {
 		void removeSourceFromHyperedge(const HyperedgePtr& edge, const NodePtr& source) {
 			auto saved = derived().takeSnapshot();
 			try {
+				std::set<int> mip_layers;
 				if (edge->isSegment()) {
 					HyperedgePtr origin = edge->getOrigin().lock();
-					derived().graph().removeSourcesFromHyperedge(origin, {source.get()}, true);
+					derived().graph().removeSourcesFromHyperedge(origin, {source.get()}, true, &mip_layers);
 				}
 				else {
-					derived().graph().removeSourcesFromHyperedge(edge, {source.get()}, true);
+					derived().graph().removeSourcesFromHyperedge(edge, {source.get()}, true, &mip_layers);
 				}
-				derived().graph().computeLayout();
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -290,14 +296,15 @@ namespace app_logic {
 		void removeTargetFromHyperedge(const HyperedgePtr& edge, const NodePtr& target) {
 			auto saved = derived().takeSnapshot();
 			try {
+				std::set<int> mip_layers;
 				if (edge->isSegment()) {
 					HyperedgePtr origin = edge->getOrigin().lock();
-					derived().graph().removeTargetsFromHyperedge(origin, {target.get()}, true);
+					derived().graph().removeTargetsFromHyperedge(origin, {target.get()}, true, &mip_layers);
 				}
 				else {
-					derived().graph().removeTargetsFromHyperedge(edge, {target.get()}, true);
+					derived().graph().removeTargetsFromHyperedge(edge, {target.get()}, true, &mip_layers);
 				}
-				derived().graph().computeLayout();
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -318,8 +325,9 @@ namespace app_logic {
 				std::unordered_set<Node*> targets_set;
 				for (const auto& t : targets)
 					targets_set.insert(t.get());
-				derived().graph().removeTargetsFromHyperedge(origin, targets_set, true);
-				derived().graph().computeLayout();
+				std::set<int> mip_layers;
+				derived().graph().removeTargetsFromHyperedge(origin, targets_set, true, &mip_layers);
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -336,8 +344,9 @@ namespace app_logic {
 		{
 			auto saved = derived().takeSnapshot();
 			try {
-				derived().graph().fuseNodes(node1, node2, new_label);
-				derived().graph().computeLayout();
+				std::set<int> mip_layers;
+				derived().graph().fuseNodes(node1, node2, new_label, &mip_layers);
+				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {
 				throw;
@@ -362,23 +371,141 @@ namespace app_logic {
 			catch (...) {
 				throw;
 			}
+		}	
+
+		// ── computeBracketedX ─────────────────────────────────────────────────────
+		//
+		// Translates the user's raw target x (chosen against the destination layer
+		// as it looked BEFORE the vertical move) into an x that reproduces their
+		// actual intent: "place node between these two neighbors." Brackets against
+		// old_nodes (the pre-move, x-sorted roster of whichever old layer node's
+		// destination corresponds to), using new_layer_nodes/new_layout (the live,
+		// post-move roster and coordinates) to compute the final target.
+		double computeBracketedX(const std::vector<NodePtr>& old_nodes,
+			const std::unordered_map<Node*, NodeLayout>& old_layout,
+			const std::vector<NodePtr>& new_layer_nodes,
+			const std::unordered_map<Node*, NodeLayout>& new_layout,
+			const NodePtr& node,
+			double new_x_coordinate) const {
+			std::unordered_set<Node*> new_layer_members;
+			for (const auto& n : new_layer_nodes) new_layer_members.insert(n.get());
+
+			std::vector<NodePtr> candidates;
+			candidates.reserve(old_nodes.size());
+			for (const auto& n : old_nodes) {
+				if (n.get() == node.get()) continue;
+				if (new_layer_members.count(n.get())) candidates.push_back(n);
+			}
+
+			NodePtr left, right;
+			for (const auto& n : candidates) {
+				if (old_layout.at(n.get()).x <= new_x_coordinate) left = n;
+				else { right = n; break; }
+			}
+
+			auto index_excluding_node = [&](const NodePtr& target) -> int {
+				int idx = 0;
+				for (const auto& n : new_layer_nodes) {
+					if (n.get() == node.get()) continue;
+					if (n.get() == target.get()) return idx;
+					++idx;
+				}
+				return -1;
+				};
+			auto min_max_excluding_node = [&]() {
+				double mn = std::numeric_limits<double>::max();
+				double mx = std::numeric_limits<double>::lowest();
+				for (const auto& n : new_layer_nodes) {
+					if (n.get() == node.get()) continue;
+					double x = new_layout.at(n.get()).x;
+					mn = std::min(mn, x);
+					mx = std::max(mx, x);
+				}
+				return std::make_pair(mn, mx);
+				};
+
+			if (!left && right) {
+				return min_max_excluding_node().first - 1.0;
+			}
+			if (left && !right) {
+				return min_max_excluding_node().second + 1.0;
+			}
+			if (left && right) {
+				int li = index_excluding_node(left);
+				int ri = index_excluding_node(right);
+				if (li >= 0 && ri >= 0) {
+					return (new_layout.at(left.get()).x + new_layout.at(right.get()).x) / 2.0;
+				}
+				double old_min = old_layout.at(old_nodes.front().get()).x;
+				double old_max = old_layout.at(old_nodes.back().get()).x;
+				double old_width = old_max - old_min;
+				if (old_width > 0.0) {
+					auto [new_min, new_max] = min_max_excluding_node();
+					double new_width = new_max - new_min;
+					double relative = (new_x_coordinate - old_min) / old_width;
+					return new_min + relative * new_width;
+				}
+			}
+			return new_x_coordinate;
 		}
 
-		// ── relocateNodeInLayer ───────────────────────────────────────────────────
+		// ── relocateNode ───────────────────────────────────────────────────────────────
 		//
-		// Clones the graph, attempts relocateNodeInLayer (which calls computeLayout()
-		// internally), and commits the snapshot only on success.
-		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate) {
+		// Clones the graph, attempts to relocate both vertically and horizontally at the
+		// same time, and commits the snapshot only on success.
+		void relocateNode(const NodePtr& node, double new_x_coordinate, double new_y_coordinate) {
 			auto saved = derived().takeSnapshot();
+			std::set<int> mip_layers;
 			try {
-				derived().graph().relocateNodeInLayer(node, new_x_coordinate);
+				auto& graph = derived().graph();
+
+				std::map<int, std::vector<NodePtr>> old_layers_nodes;
+				std::unordered_map<Node*, int> old_layer_of_node;
+				for (const auto& [layer_idx, layer_data] : graph.getLayers()) {
+					old_layers_nodes[layer_idx] = layer_data.nodes;
+					for (const auto& n : layer_data.nodes) old_layer_of_node[n.get()] = layer_idx;
+				}
+				const auto old_layout = graph.getNodeLayout();
+
+				graph.relocateNodeToLayer(node, new_y_coordinate, &mip_layers);
+				graph.assignXCoordinates();
+
+				double transformed_x = new_x_coordinate;
+				const auto& new_layer_nodes = graph.getLayerData(node->getLayer()).nodes;
+
+				auto old_layer_lookup = old_layer_of_node.end();
+				for (const auto& n : new_layer_nodes) {
+					if (n.get() == node.get()) continue;
+					auto it = old_layer_of_node.find(n.get());
+					if (it != old_layer_of_node.end()) { old_layer_lookup = it; break; }
+				}
+
+				if (old_layer_lookup != old_layer_of_node.end()) {
+					transformed_x = computeBracketedX(
+						old_layers_nodes.at(old_layer_lookup->second), old_layout,
+						new_layer_nodes, graph.getNodeLayout(),
+						node, new_x_coordinate);
+				}
+
+				try {
+					graph.relocateNodeInLayer(node, transformed_x, &mip_layers);
+					graph.computeLayout(mip_layers);
+				}
+				catch (...) {
+					graph.computeLayout(mip_layers);
+				}
 			}
-			catch (...) {
-				throw;
+			catch (const std::invalid_argument&) {
+				try {
+					derived().graph().relocateNodeInLayer(node, new_x_coordinate, &mip_layers);
+					derived().graph().computeLayout(mip_layers);
+				}
+				catch (...) { throw; }
 			}
+			catch (...) { throw; }
+
 			derived().commitSnapshot(std::move(saved));
 		}
-
 
 		// -─ onMutated callback ───────────────────────────────────────────────────────
 		//

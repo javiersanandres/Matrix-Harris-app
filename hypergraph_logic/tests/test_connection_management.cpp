@@ -1152,7 +1152,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
     TEST_F(ConnectionManagementTest, RelocateNodeToLayer_ExactlyAtCurrentLayer_NoOp) {
         auto p = g.createNode("p", 0, nullptr, nullptr);
         auto c = g.createNode("c", 0, p);
-        EXPECT_NO_THROW(g.relocateNodeToLayer(c, 1));
+        EXPECT_THROW(g.relocateNodeToLayer(c, 1), std::invalid_argument);
         EXPECT_EQ(c->getLayer(), 1);
         EXPECT_EQ(c->getDesiredLayer(), -1);
     }

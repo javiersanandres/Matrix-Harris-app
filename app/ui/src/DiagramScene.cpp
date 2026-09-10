@@ -27,11 +27,11 @@ namespace ui {
         , is_joint_(false)
     {
         connect(this, &DiagramScene::nodeRelocated,
-            this, [this](Node* node, double new_x) {
+            this, [this](Node* node, double new_x, double new_y) {
                 try {
-                    regular_editor_->relocateNodeInLayer(node->shared_from_this(), new_x);
+                    regular_editor_->relocateNode(node->shared_from_this(), new_x, -new_y);
                 }
-                catch (const std::exception&) { 
+                catch (const std::exception&) {
                     rebuild(); 
                     return;                
                 }
@@ -47,9 +47,9 @@ namespace ui {
         , is_joint_(true)
     {
         connect(this, &DiagramScene::nodeRelocated,
-            this, [this](Node* node, double new_x) {
+            this, [this](Node* node, double new_x, double new_y) {
                 try {
-                    joint_editor_->relocateNodeInLayer(node->shared_from_this(), new_x);
+                    joint_editor_->relocateNode(node->shared_from_this(), new_x, -new_y);
                 }
                 catch (const std::exception& e) { showError(e); }
                 rebuild();
@@ -155,6 +155,8 @@ namespace ui {
         QMenu menu;
 		menu.addAction("Crear nodo arriba", [this, node] { onCreateNodeAbove(node); });
         menu.addAction("Crear nodo debajo", [this, node] { onCreateNodeBelow(node); });
+        menu.addAction("Crear nodo a la izquierda", [this, node] { onCreateNodeLeft(node); });
+        menu.addAction("Crear nodo a la derecha", [this, node] { onCreateNodeRight(node); });
         menu.addSeparator();
         menu.addAction("Añadir conexión arriba", [this, node] { onBeginAddConnectionParent(node); });
         menu.addAction("Añadir conexión abajo", [this, node] { onBeginAddConnectionChild(node); });
@@ -304,10 +306,36 @@ namespace ui {
         catch (const std::exception& e) { showError(e); }
     }
 
+    void DiagramScene::onCreateNodeLeft(Node* node) {
+        NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
+        try {
+            NodePtr new_node = regular_editor_->createNodeNextTo("Nuevo nodo", neighbour_ptr, true);
+            rebuild();
+            emit graphChanged();
+            // Start inline rename immediately.
+            auto it = node_items_.find(new_node.get());
+            if (it != node_items_.end()) startInlineRename(it->second);
+        }
+        catch (const std::exception& e) { showError(e); }
+    }
+
+    void DiagramScene::onCreateNodeRight(Node* node) {
+        NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
+        try {
+            NodePtr new_node = regular_editor_->createNodeNextTo("Nuevo nodo", neighbour_ptr, false);
+            rebuild();
+            emit graphChanged();
+            // Start inline rename immediately.
+            auto it = node_items_.find(new_node.get());
+            if (it != node_items_.end()) startInlineRename(it->second);
+        }
+        catch (const std::exception& e) { showError(e); }
+    }
+
     void DiagramScene::onCreateNodeIntoEdge(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
         try {
-            NodePtr new_node = regular_editor_->createNode("Nuevo nodo", edge_ptr);
+            NodePtr new_node = regular_editor_->createNodeInEdge("Nuevo nodo", edge_ptr);
             rebuild();
             emit graphChanged();
             auto it = node_items_.find(new_node.get());

@@ -17,8 +17,9 @@ namespace app_logic {
 	{
 		auto saved = takeSnapshot();
 		try {
-			NodePtr result = graph_.createNode(label, layer_position, parent);
-			graph_.computeLayout();
+			std::set<int> mip_layers;
+			NodePtr result = graph_.createNode(label, layer_position, parent, &mip_layers);
+			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;
 		}
@@ -32,8 +33,9 @@ namespace app_logic {
 	{
 		auto saved = takeSnapshot();
 		try {
-			NodePtr result = graph_.createParent(label, child);
-			graph_.computeLayout();
+			std::set<int> mip_layers;
+			NodePtr result = graph_.createParent(label, child, &mip_layers);
+			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;
 		}
@@ -42,19 +44,36 @@ namespace app_logic {
 		}
 	}
 
-	NodePtr HypergraphEditor::createNode(
+	NodePtr HypergraphEditor::createNodeInEdge(
 		const std::string& label, const HyperedgePtr& edge)
 	{
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
+			std::set<int> mip_layers;
 			if (edge->isSegment()) {
-				result = graph_.createNodeInEdge(label, edge->getOrigin().lock());
+				result = graph_.createNodeInEdge(label, edge->getOrigin().lock(), &mip_layers);
 			}
 			else {
-				result = graph_.createNodeInEdge(label, edge);
+				result = graph_.createNodeInEdge(label, edge, &mip_layers);
 			}
-			graph_.computeLayout();
+			graph_.computeLayout(mip_layers);
+			commitSnapshot(std::move(saved));
+			return result;
+		}
+		catch (...) {
+			throw;
+		}
+	}
+
+	NodePtr HypergraphEditor::createNodeNextTo(
+		const std::string& label, const NodePtr& node, bool left)
+	{
+		auto saved = takeSnapshot();
+		try {
+			NodePtr result;
+			result = graph_.createNodeNextTo(label, node, left);
+			graph_.computeLayout({});
 			commitSnapshot(std::move(saved));
 			return result;
 		}
@@ -69,13 +88,14 @@ namespace app_logic {
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
+			std::set<int> mip_layers;
 			if (edge->isSegment()) {
-				result = graph_.createSource(label, layer_position, edge->getOrigin().lock());
+				result = graph_.createSource(label, layer_position, edge->getOrigin().lock(), &mip_layers);
 			}
 			else {
-				result = graph_.createSource(label, layer_position, edge);
+				result = graph_.createSource(label, layer_position, edge, &mip_layers);
 			}
-			graph_.computeLayout();
+			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;
 		}
@@ -90,13 +110,14 @@ namespace app_logic {
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
+			std::set<int> mip_layers;
 			if (edge->isSegment()) {
-				result = graph_.createTarget(label, layer_position, edge->getOrigin().lock());
+				result = graph_.createTarget(label, layer_position, edge->getOrigin().lock(), &mip_layers);
 			}
 			else {
-				result = graph_.createTarget(label, layer_position, edge);
+				result = graph_.createTarget(label, layer_position, edge, &mip_layers);
 			}
-			graph_.computeLayout();
+			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;
 		}

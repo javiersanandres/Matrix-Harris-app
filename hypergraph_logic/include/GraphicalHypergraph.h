@@ -74,12 +74,19 @@ namespace hypergraph_logic {
 			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
 		}
 
+		// ── Stage 2: node x-coordinates ───────────────────────────────────────────
+		//
+		// Assigns an x-coordinate to every node using the Brandes-Köpf algorithm.
+		//
+		void assignXCoordinates();
+
 		// ── computeLayout ─────────────────────────────────────────────────────────
 		//
 		// Run the complete layout pipeline, executing stages 2-5 in order.
 		// After this call, all layout data is known and the hypergraph can
 		// be represented graphically.
 		//
+		void computeLayout(const std::set<int>& mip_layers);
 		void computeLayout();
 
 		// ── relocateNodeInLayer ───────────────────────────────────────────────────
@@ -89,7 +96,21 @@ namespace hypergraph_logic {
 		// only as an ordering signal — actual coordinates are reassigned by
 		// computeLayout() which is called internally at the end.
 		//
-		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate);
+		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate,
+								std::set<int>* out_altered_layers = nullptr);
+
+		// ── relocateNodeToLayer ───────────────────────────────────────────────────
+		//
+		// Allows the user to move current node to the layer which span corresponds 
+		// to new_y_coordinate. The span of a layer is calculated as follows:
+		//	[ ( h(next(layer)) + h(layer) ) / 2, ( h(prev(layer)) + h(layer) ) / 2 ]
+		// If there were no deepest layers the lower bound will be computed as:
+		//				h(layer) - NODE_HEIGHT / 2 - LAYER_GAP
+		// If there were no shallowest layers the upper bound will be computed as:
+		//				h(layer) + NODE_HEIGHT / 2 + LAYER_GAP
+		//
+		void relocateNodeToLayer(const NodePtr& node, double new_y_coordinate, 
+									std::set<int>* out_altered_layers = nullptr);
 
 		// ── getX ──────────────────────────────────────────────────────────────────
 		//
@@ -186,12 +207,6 @@ namespace hypergraph_logic {
 		//   left = false — incoming nodes and outgoing edges are appended.
 		//
 		void mergeFrom(GraphicalHypergraph&& other, bool left);
-
-		// ── Stage 2: node x-coordinates ───────────────────────────────────────────
-		//
-		// Assigns an x-coordinate to every node using the Brandes-Köpf algorithm.
-		//
-		void assignXCoordinates();
 
 		// ── Stage 3: horizontal order of hyperedge bars ───────────────────────────
 		//

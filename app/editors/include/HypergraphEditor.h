@@ -38,11 +38,18 @@ namespace app_logic {
 		// snapshot to past_ only if both succeed.
 		NodePtr createParent(const std::string& label, const NodePtr& child);
 
-		// ── createNode (into edge) ────────────────────────────────────────────────
+		// ── createNodeInEdge  ─────────────────────────────────────────────────────
 		//
-		// Clones the graph, attempts createNode + computeLayout(), and commits the
-		// snapshot to past_ only if both succeed.
-		NodePtr createNode(const std::string& label, const HyperedgePtr& edge);
+		// Clones the graph, attempts createNodeInEdge + computeLayout(), and commits 
+		// the snapshot to past_ only if both succeed.
+		NodePtr createNodeInEdge(const std::string& label, const HyperedgePtr& edge);
+
+		// ── createNodeNextTo ──────────────────────────────────────────────────────
+		//
+		// Clones the graph, attempts createNodeNextTo + computeLayout(), and commits 
+		// the snapshot to past_ only if both succeed.
+		NodePtr createNodeNextTo(const std::string& label, const NodePtr& node, 
+			bool left);
 
 		// ── createSource ─────────────────────────────────────────────────────────
 		//
