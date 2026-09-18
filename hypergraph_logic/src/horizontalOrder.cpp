@@ -1,10 +1,16 @@
 #include "HorizontalOrder.h"
+#include "Highs.h"
+#include "HorizontalOrderBackendTestHook.h"
 
+#ifdef GUROBI_AVAILABLE
 #include <gurobi_c++.h>
+#endif
 
 #include <algorithm>
+#include <map>
 #include <stdexcept>
 #include <string>
+#include <vector>
 
 
 // ==============================================================================================
@@ -19,10 +25,183 @@
 //
 // The outgoing_edges vector of the layer is re-sorted in-place after the solve
 // so that index 0 = topmost (highest y) bar on the canvas.
+//
+// Solver backend: the model itself (columns + sparse rows, below) is built
+// once, independent of which solver ends up running iT. HiGHS is
+// always available and is the default/fallback backend. When this
+// translation unit was compiled with Gurobi (GUROBI_AVAILABLE, set by CMake
+// when find_package(Gurobi) succeeds) AND a working Gurobi license is
+// actually present on the machine at runtime, Gurobi is used instead, since
+// it's substantially faster on this kind of MIP.
 // ==============================================================================================
 namespace horizontal_overlapping_internal {
 
     using namespace hypergraph_logic;
+
+    namespace {
+
+        constexpr double kInf = 1.0e30; // HiGHS' convention for "infinite" bound.
+
+        // Incrementally-built row-wise sparse constraint, plus the finished bounds.
+        // One instance == one constraint "lo <= sum(idx[i]*val[i]) <= hi".
+        struct SparseRow {
+            std::vector<int> idx;
+            std::vector<double> val;
+            double lo;
+            double hi;
+        };
+
+        struct MipModel {
+            std::vector<double> col_lower, col_upper, col_cost, col_guess;
+            std::vector<HighsVarType> col_integrality;
+            std::vector<SparseRow> rows;
+        };
+
+        // What a backend hands back: whether it found something usable, and if so
+        // the column values.
+        struct MipSolveResult {
+            bool success = false;
+            std::vector<double> col_value;
+        };
+
+        // ── HiGHS backend ──────────────────────────────────────────────────────
+        MipSolveResult solveWithHighs(const MipModel& m) {
+            MipSolveResult result;
+
+            HighsModel model;
+            HighsLp& lp = model.lp_;
+            lp.num_col_ = static_cast<int>(m.col_lower.size());
+            lp.num_row_ = static_cast<int>(m.rows.size());
+            lp.col_cost_ = m.col_cost;
+            lp.col_lower_ = m.col_lower;
+            lp.col_upper_ = m.col_upper;
+            lp.integrality_ = m.col_integrality;
+            lp.sense_ = ObjSense::kMinimize;
+            lp.offset_ = 0.0;
+
+            lp.row_lower_.reserve(m.rows.size());
+            lp.row_upper_.reserve(m.rows.size());
+            lp.a_matrix_.format_ = MatrixFormat::kRowwise;
+            lp.a_matrix_.start_.reserve(m.rows.size() + 1);
+            for (const auto& row : m.rows) {
+                lp.row_lower_.push_back(row.lo);
+                lp.row_upper_.push_back(row.hi);
+                lp.a_matrix_.index_.insert(lp.a_matrix_.index_.end(), row.idx.begin(), row.idx.end());
+                lp.a_matrix_.value_.insert(lp.a_matrix_.value_.end(), row.val.begin(), row.val.end());
+                lp.a_matrix_.start_.push_back(static_cast<int>(lp.a_matrix_.index_.size()));
+            }
+            lp.a_matrix_.num_col_ = lp.num_col_;
+            lp.a_matrix_.num_row_ = lp.num_row_;
+
+            Highs highs;
+            highs.setOptionValue("output_flag", false);
+            if (highs.passModel(model) != HighsStatus::kOk) return result;
+
+            // Warm start from the layer's existing hyperedge order (see
+            // col_guess in solve()). Purely advisory: if HiGHS can't use it for
+            // any reason, it just falls back to solving from scratch.
+            HighsSolution guess;
+            guess.col_value = m.col_guess;
+            guess.value_valid = true;
+            highs.setSolution(guess);
+            if (highs.run() != HighsStatus::kOk) return result;
+
+            HighsModelStatus status = highs.getModelStatus();
+            bool have_feasible_solution =
+                (status == HighsModelStatus::kOptimal) ||
+                (highs.getInfo().primal_solution_status == kSolutionStatusFeasible);
+            if (!have_feasible_solution) return result;
+
+            result.success = true;
+            result.col_value = highs.getSolution().col_value;
+            return result;
+        }
+
+#ifdef GUROBI_AVAILABLE
+        // ── Gurobi backend ─────────────────────────────────────────────────────
+
+        bool gurobiUsable() {
+            static const bool usable = [] {
+                try {
+                    GRBEnv env(true); // empty/default env; construction is the license check
+                    env.set(GRB_IntParam_OutputFlag, 0);
+                    env.start();
+                    return true;
+                }
+                catch (GRBException&) {
+                    return false;
+                }
+                }();
+            return usable;
+        }
+
+        MipSolveResult solveWithGurobi(const MipModel& m) {
+            MipSolveResult result;
+            try {
+                GRBEnv env(true);
+                env.set(GRB_IntParam_OutputFlag, 0);
+                env.start();
+                GRBModel model(env);
+
+                int n = static_cast<int>(m.col_lower.size());
+                std::vector<GRBVar> vars(n);
+                for (int i = 0; i < n; i++) {
+                    char type = (m.col_integrality[i] == HighsVarType::kInteger) ? GRB_BINARY : GRB_CONTINUOUS;
+                    double lb = (m.col_lower[i] <= -kInf) ? -GRB_INFINITY : m.col_lower[i];
+                    double ub = (m.col_upper[i] >= kInf) ? GRB_INFINITY : m.col_upper[i];
+                    vars[i] = model.addVar(lb, ub, m.col_cost[i], type);
+                }
+                model.update(); // vars must exist before addRange() can reference them below
+
+                for (const auto& row : m.rows) {
+                    GRBLinExpr expr = 0.0;
+                    for (size_t k = 0; k < row.idx.size(); k++)
+                        expr += row.val[k] * vars[row.idx[k]];
+                    double lo = (row.lo <= -kInf) ? -GRB_INFINITY : row.lo;
+                    double hi = (row.hi >= kInf) ? GRB_INFINITY : row.hi;
+                    model.addRange(expr, lo, hi);
+                }
+
+                model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
+
+                // Warm start from the layer's existing hyperedge order.
+                for (int i = 0; i < n; i++) vars[i].set(GRB_DoubleAttr_Start, m.col_guess[i]);
+
+                model.optimize();
+
+                int status = model.get(GRB_IntAttr_Status);
+                bool have_feasible_solution =
+                    (status == GRB_OPTIMAL) || (status == GRB_SUBOPTIMAL) ||
+                    (model.get(GRB_IntAttr_SolCount) > 0);
+                if (!have_feasible_solution) return result;
+
+                result.success = true;
+                result.col_value.resize(n);
+                for (int i = 0; i < n; i++) result.col_value[i] = vars[i].get(GRB_DoubleAttr_X);
+            }
+            catch (GRBException&) {
+                result = MipSolveResult(); // discard any partial state; report failure
+            }
+            return result;
+        }
+#endif
+
+    } // namespace
+
+    // ── backend-override test hook (see HorizontalOrderBackendTestHook.h) ──────
+    ILPBackendOverride g_backend_override = ILPBackendOverride::kAuto;
+
+    void setHorizontalOrderBackendOverrideForTesting(ILPBackendOverride mode) {
+        g_backend_override = mode;
+    }
+
+    bool isGurobiUsableForHorizontalOrderTesting() {
+#ifdef GUROBI_AVAILABLE
+        return gurobiUsable();
+#else
+        return false;
+#endif
+    }
 
     HorizontalOrderSolver::HorizontalOrderSolver(
         int layer,
@@ -85,7 +264,7 @@ namespace horizontal_overlapping_internal {
     //
     // Builds and solves the MIP (26)–(30).
     //
-    // Gurobi needs the variables to be indexed, so we have done the following:
+    // Both backends need the variables indexed, so we do the following:
     // Edges are indexed 0...n-1 in the order they appear in outgoing_edges.
     // For each ordered pair (i, j) with i < j we create:
     //   HO[i][j]  in {0,1}    (HO_{e_i, e_j} in the paper)
@@ -96,7 +275,7 @@ namespace horizontal_overlapping_internal {
     // Constraint (29): 0 <= HO[i][j] - HO[i][k] + HO[j][k] <= 1  for all i<j<k
     // Constraint (30): CT[i][j] >= 0, HO[i][j] in {0,1}  (variable bounds)
     //
-	// In the paper, they specify M to be "a sufficiently large constant". 
+    // In the paper, they specify M to be "a sufficiently large constant". 
     // We need to choose a specific value for M to implement the constraints. 
     // A rather tight big-M value is max possible acs+act value = |S(e2)| + |T(e2)|.
     // We use the total node count as a safe global upper bound.
@@ -117,115 +296,160 @@ namespace horizontal_overlapping_internal {
             total_nodes += static_cast<int>(e->getSources().size()) + static_cast<int>(e->getTargets().size());
         double M = static_cast<double>(total_nodes);
 
-        try {
-            GRBEnv env(true);
-            env.set(GRB_IntParam_OutputFlag, 0); // suppress solver output
-            env.start();
-            GRBModel model(env);
+        // ── Assemble the backend-neutral model ──────────────────────────────────
+        //
+        // HO[i][j] and CT[i][j] for all i < j, flattened into columns and looked
+        // up via these index tables.
+        std::vector<std::vector<int>> HO_idx(n, std::vector<int>(n, -1));
+        std::vector<std::vector<int>> CT_idx(n, std::vector<int>(n, -1));
 
-            // ── Variables ─────────────────────────────────────────────────────────
-            //
-            // HO[i][j] and CT[i][j] for all i < j.
-            // We store them in flat upper-triangular maps keyed by (i,j).
-            std::vector<std::vector<GRBVar>> HO(n, std::vector<GRBVar>(n));
-            std::vector<std::vector<GRBVar>> CT(n, std::vector<GRBVar>(n));
+        MipModel model;
 
-            for (int i = 0; i < n; ++i) {
-                for (int j = i + 1; j < n; ++j) {
-                    std::string sij = std::to_string(i) + "_" + std::to_string(j);
-                    HO[i][j] = model.addVar(0.0, 1.0, 0.0, GRB_BINARY, "HO_" + sij);
-                    CT[i][j] = model.addVar(0.0, GRB_INFINITY, 1.0, GRB_CONTINUOUS, "CT_" + sij);
-                }
+        // Warm start from the layer's CURRENT hyperedge order, i.e. exactly
+        // what's already in outgoing_edges before this call reorders it.
+        // Interactive use means a good order will typically already exist
+        // (either from a previous solve, or from the user's own edits), so
+        // treating it as a seed rather than solving from scratch every time
+        // both speeds up the solve and biases towards NOT reshuffling edges
+        // the user didn't ask to move. Edges are indexed 0..n-1 by their
+        // CURRENT position, so "e_i before e_j" for every i<j pair is true
+        // BY CONSTRUCTION here -- the guess is simply HO[i][j]=1 for all
+        // i<j, with CT[i][j] guessed to match (the smallest value that
+        // satisfies (27) when HO=1; (28) is never binding there since M is
+        // large). That makes this a genuinely feasible integral starting
+        // solution (the current order, unchanged), not just a rough hint.
+        auto addColumn = [&](double lower, double upper, double cost, bool integer, double guess) -> int {
+            int idx = static_cast<int>(model.col_lower.size());
+            model.col_lower.push_back(lower);
+            model.col_upper.push_back(upper);
+            model.col_cost.push_back(cost);
+            model.col_integrality.push_back(integer ? HighsVarType::kInteger : HighsVarType::kContinuous);
+            model.col_guess.push_back(guess);
+            return idx;
+            };
+
+        auto addConstraint = [&](std::vector<std::pair<int, double>> terms, double lo, double hi) {
+            std::map<int, double> merged; // merge duplicate columns, if any
+            for (auto& [idx, coeff] : terms) merged[idx] += coeff;
+            SparseRow row;
+            for (auto& [idx, coeff] : merged) {
+                if (coeff == 0.0) continue;
+                row.idx.push_back(idx);
+                row.val.push_back(coeff);
             }
+            row.lo = (lo <= -kInf) ? -kInf : lo;
+            row.hi = (hi >= kInf) ? kInf : hi;
+            model.rows.push_back(std::move(row));
+            };
 
-            model.update();
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                double a_ij = static_cast<double>(acs(edges[i], edges[j]));
+                double b_ij = static_cast<double>(act(edges[i], edges[j]));
+                double a_ji = static_cast<double>(acs(edges[j], edges[i]));
+                double b_ji = static_cast<double>(act(edges[j], edges[i]));
 
-            // ── Objective (26): minimise sum CT_{e1,e2} ────────────────────────────
-            //
-            // Coefficients of 1.0 are already set in addVar above.
-            model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
+                // Guess: keep the current order, i.e. HO[i][j] = 1 (e_i, at
+                // the smaller CURRENT index, stays above e_j). With HO fixed
+                // to 1, (27) needs CT >= a_ij + b_ji; (28) needs CT >= a_ji +
+                // b_ij - M, which is not binding since M is large. So the
+                // smallest feasible CT under this guess is max(0, a_ij+b_ji).
+                HO_idx[i][j] = addColumn(0.0, 1.0, 0.0, /*integer=*/true, /*guess=*/1.0);
+                CT_idx[i][j] = addColumn(0.0, kInf, 1.0, /*integer=*/false, /*guess=*/std::max(0.0, a_ij + b_ji));
 
-            // ── Constraints (27) and (28) ─────────────────────────────────────────
-            for (int i = 0; i < n; ++i) {
-                for (int j = i + 1; j < n; ++j) {
-                    double a_ij = static_cast<double>(acs(edges[i], edges[j]));
-                    double b_ij = static_cast<double>(act(edges[i], edges[j]));
-                    double a_ji = static_cast<double>(acs(edges[j], edges[i]));
-                    double b_ji = static_cast<double>(act(edges[j], edges[i]));
+                int ho = HO_idx[i][j];
+                int ct = CT_idx[i][j];
 
-                    std::string sij = std::to_string(i) + "_" + std::to_string(j);
+                // (27): CT[i][j] - M*HO[i][j] >= acs(e_i,e_j) + act(e_j,e_i) - M
+                addConstraint({ {ct, 1.0}, {ho, -M} }, a_ij + b_ji - M, kInf);
 
-                    // (27): CT[i][j] >= acs(e_i,e_j) + act(e_j,e_i) - M*(1 - HO[i][j])
-                    //     <-> CT[i][j] - M * HO[i][j] >= acs(e_i, e_j) + act(e_j, e_i) - M
-                    model.addConstr(CT[i][j] - M * HO[i][j] >= a_ij + b_ji - M , "c27_" + sij);
-
-                    // (28): CT[i][j] >= acs(e_j,e_i) + act(e_i,e_j) - M*HO[i][j]
-                    //    <-> CT[i][j] + M*HO[i][j] >= a_ji + b_ij
-                    model.addConstr(CT[i][j] + M * HO[i][j] >= a_ji + b_ij, "c28_" + sij);
-                }
+                // (28): CT[i][j] + M*HO[i][j] >= acs(e_j,e_i) + act(e_i,e_j)
+                addConstraint({ {ct, 1.0}, {ho, M} }, a_ji + b_ij, kInf);
             }
-
-            // ── Constraint (29): transitivity ─────────────────────────────────────
-            //
-            // For all i < j < k:  0 <= HO[i][j] - HO[i][k] + HO[j][k] <= 1
-            //
-            // This enforces a consistent total order on the HO variables:
-            // if e_i > e_j and e_j > e_k then e_i > e_k.
-            for (int i = 0; i < n; ++i) {
-                for (int j = i + 1; j < n; ++j) {
-                    for (int k = j + 1; k < n; ++k) {
-                        std::string sijk = std::to_string(i) + "_"
-                            + std::to_string(j) + "_"
-                            + std::to_string(k);
-                        GRBLinExpr expr = HO[i][j] - HO[i][k] + HO[j][k];
-                        model.addConstr(expr >= 0.0, "c29_lo_" + sijk);
-                        model.addConstr(expr <= 1.0, "c29_hi_" + sijk);
-                    }
-                }
-            }
-
-            // ── Solve ─────────────────────────────────────────────────────────────
-            model.optimize();
-
-            int status = model.get(GRB_IntAttr_Status);
-            if (status != GRB_OPTIMAL && status != GRB_SUBOPTIMAL) {
-                throw std::runtime_error(
-                    "HorizontalOrderSolver: Gurobi did not find a feasible solution "
-                    "(status = " + std::to_string(status) + ")");
-            }
-
-            // ── Extract order and re-sort outgoing_edges ──────────────────────────
-            std::vector<double> score(n, 0.0);
-            for (int i = 0; i < n; ++i) {
-                for (int j = i + 1; j < n; ++j) {
-                    double ho = HO[i][j].get(GRB_DoubleAttr_X);
-                    if (ho > 0.5) {
-                        score[i] += 1.0; // e_i is above e_j
-                    }
-                    else {
-                        score[j] += 1.0; // e_j is above e_i
-                    }
-                }
-            }
-
-            // Sort indices by descending score: highest score = topmost bar.
-            std::vector<int> order(n);
-			for (int i = 0; i < n; i++) order[i] = i;
-            std::sort(order.begin(), order.end(), [&](int a, int b) {
-                return score[a] > score[b];
-                });
-
-            // Apply the sort to outgoing_edges.
-            std::vector<HyperedgePtr> sorted_edges(n);
-            for (int rank = 0; rank < n; ++rank)
-                sorted_edges[rank] = edges[order[rank]];
-            edges = std::move(sorted_edges);
-
         }
-        catch (const GRBException& ex) {
+
+        // ── Constraint (29): transitivity ─────────────────────────────────────
+        //
+        // For all i < j < k:  0 <= HO[i][j] - HO[i][k] + HO[j][k] <= 1
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                for (int k = j + 1; k < n; ++k) {
+                    addConstraint(
+                        { {HO_idx[i][j], 1.0}, {HO_idx[i][k], -1.0}, {HO_idx[j][k], 1.0} },
+                        0.0, 1.0);
+                }
+            }
+        }
+
+        // ── Solve: Gurobi if usable (or forced), else HiGHS ─────────────────────
+        //
+        // Normally (kAuto) Gurobi is tried first when this build has it and a
+        // valid license is actually present on this machine right now; any solve
+        // failure falls back to HiGHS rather than giving up. A forced backend
+        // (see HorizontalOrderBackendTestHook.h) skips that auto-detect entirely,
+        // for benchmarking one solver in isolation; it is read once here and
+        // reset immediately so it can never apply to a later call.
+        ILPBackendOverride backend = g_backend_override;
+        g_backend_override = ILPBackendOverride::kAuto;
+
+        MipSolveResult result;
+        switch (backend) {
+        case ILPBackendOverride::kForceHighs:
+            result = solveWithHighs(model);
+            break;
+        case ILPBackendOverride::kForceGurobi:
+#ifdef GUROBI_AVAILABLE
+            result = solveWithGurobi(model);
+#endif
+            // No fallback here on purpose: a caller that explicitly forced
+            // Gurobi wants to know Gurobi failed, not get a HiGHS number back
+            // mislabeled as Gurobi's.
+            break;
+        case ILPBackendOverride::kAuto:
+        default:
+#ifdef GUROBI_AVAILABLE
+            if (gurobiUsable()) {
+                result = solveWithGurobi(model);
+            }
+#endif
+            if (!result.success) {
+                result = solveWithHighs(model);
+            }
+            break;
+        }
+
+        if (!result.success) {
             throw std::runtime_error(
-                std::string("HorizontalOrderSolver: Gurobi exception: ") + ex.getMessage());
+                "HorizontalOrderSolver: neither the requested nor the fallback "
+                "solver found a feasible solution for the horizontal-order MIP");
         }
+
+        // ── Extract order and re-sort outgoing_edges ──────────────────────────
+        std::vector<double> score(n, 0.0);
+        for (int i = 0; i < n; ++i) {
+            for (int j = i + 1; j < n; ++j) {
+                double ho = result.col_value[HO_idx[i][j]];
+                if (ho > 0.5) {
+                    score[i] += 1.0; // e_i is above e_j
+                }
+                else {
+                    score[j] += 1.0; // e_j is above e_i
+                }
+            }
+        }
+
+        // Sort indices by descending score: highest score = topmost bar.
+        std::vector<int> order(n);
+        for (int i = 0; i < n; i++) order[i] = i;
+        std::sort(order.begin(), order.end(), [&](int a, int b) {
+            return score[a] > score[b];
+            });
+
+        // Apply the sort to outgoing_edges.
+        std::vector<HyperedgePtr> sorted_edges(n);
+        for (int rank = 0; rank < n; ++rank)
+            sorted_edges[rank] = edges[order[rank]];
+        edges = std::move(sorted_edges);
     }
 } // namespace horizontal_overlapping_internal
 
@@ -239,7 +463,7 @@ namespace horizontal_overlapping_internal {
 // being already established.
 // ============================================================================
 namespace hypergraph_logic {
-	using namespace horizontal_overlapping_internal;
+    using namespace horizontal_overlapping_internal;
 
     void GraphicalHypergraph::orderHyperedges(int layer) {
         if (layers_.find(layer) == layers_.end()) return;

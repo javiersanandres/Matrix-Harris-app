@@ -8,26 +8,38 @@
 // on the single layer boundary of a two-layer graph, since the MIP is solved
 // independently per layer pair.
 //
+// Both solver backends are measured side by side wherever the MIP runs, via
+// HorizontalOrderBackendTestHook.h forcing HorizontalOrderSolver::solve()
+// onto one backend at a time (HiGHS is always available; Gurobi only if this
+// build has it AND a valid license is usable on this machine right now --
+// checked once up front, and the Gurobi columns are reported as N/A if not).
+//
 // ── Part 1: Stress test (MIP only) ──────────────────────────────────────────
 //
 //   For each configuration (n, e) where n = upper_nodes = lower_nodes and e
 //   grows linearly:
 //     • Generate one random two-layer hypergraph with RNG_SEED.
-//     • Run assignXCoordinates() + orderHyperedges(0).
-//     • Record: crossings after MIP, elapsed time.
+//     • Run assignXCoordinates() + orderHyperedges(0), once per backend (on
+//       a fresh copy of the same seeded graph each time, so both backends
+//       see an identical instance).
+//     • Record: crossings after MIP, elapsed time -- per backend.
 //   Results → results_stress.csv
 //
 // ── Part 2: MIP vs brute-force comparison ───────────────────────────────────
 //
 //   For a smaller range of (n, e) where brute-force over all n! orderings is
 //   still tractable:
-//     • Run MIP and brute-force on the same hypergraph.
-//     • Record: MIP crossings, MIP time, BF crossings, BF time, optimal flag.
+//     • Run brute-force once (it doesn't depend on which MIP backend is
+//       later compared against it).
+//     • Run MIP with each backend on a fresh copy of the same hypergraph.
+//     • Record: per-backend MIP crossings, MIP time, optimal flag; BF
+//       crossings, BF time.
 //   Results → results_comparison.csv
 // ============================================================================
 
 #include "HorizontalOrder.h"
 #include "GraphicalHypergraph.h"
+#include "HorizontalOrderBackendTestHook.h"
 
 #include <algorithm>
 #include <chrono>
@@ -45,6 +57,7 @@
 
 namespace fs = std::filesystem;
 using namespace hypergraph_logic;
+using namespace horizontal_overlapping_internal;
 
 static constexpr unsigned int RNG_SEED = 42;
 static const fs::path SOURCE_DIR = fs::path(__FILE__).parent_path();
@@ -59,8 +72,8 @@ public:
     const std::unordered_map<Node*, NodeLayout>& nodeLayout() const {
         return node_layout_;
     }
-	void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
-	void orderHyperedges(int layer) { GraphicalHypergraph::orderHyperedges(layer); }
+    void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
+    void orderHyperedges(int layer) { GraphicalHypergraph::orderHyperedges(layer); }
 };
 
 // ============================================================================
@@ -290,17 +303,24 @@ static std::vector<CompConfig> buildCompConfigs() {
 
 struct StressResult {
     std::string name;
-    int         crossings_after;
-    double      time_ms;
+    int         highs_crossings;
+    double      highs_time_ms;
+    bool        gurobi_available;
+    int         gurobi_crossings; // meaningless if !gurobi_available
+    double      gurobi_time_ms;   // meaningless if !gurobi_available
 };
 
 struct CompResult {
     std::string name;
-    int         mip_crossings;
-    double      mip_time_ms;
+    int         highs_crossings;
+    double      highs_time_ms;
+    bool        highs_optimal;
+    bool        gurobi_available;
+    int         gurobi_crossings; // meaningless if !gurobi_available
+    double      gurobi_time_ms;   // meaningless if !gurobi_available
+    bool        gurobi_optimal;   // meaningless if !gurobi_available
     int         bf_crossings;
     double      bf_time_ms;
-    bool        optimal;
 };
 
 // ============================================================================
@@ -311,20 +331,44 @@ static StressResult runStress(const StressConfig& cfg) {
     // Allow up to half the layer as sources/targets so multi-endpoint edges
     // are common and the generator can place many distinct edges.
     int max_src = std::max(1, std::min(cfg.n / 2, 4));
+    std::string name = "hypergraph_(" + std::to_string(cfg.n) + "," + std::to_string(cfg.e) + ")";
 
-    ResultsGraph g = generateTwoLayer(
+    // HiGHS run: always performed.
+    ResultsGraph g_highs = generateTwoLayer(
         cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
-    g.assignXCoordinates();
-
+    g_highs.assignXCoordinates();
+    setHorizontalOrderBackendOverrideForTesting(ILPBackendOverride::kForceHighs);
     auto t0 = std::chrono::high_resolution_clock::now();
-    g.orderHyperedges(0);
+    g_highs.orderHyperedges(0);
     auto t1 = std::chrono::high_resolution_clock::now();
 
-    return {
-        "hypergraph_(" + std::to_string(cfg.n) + "," + std::to_string(cfg.e) + ")",
-        totalCrossings(g.getLayers().at(0).outgoing_edges, g.nodeLayout()),
-        std::chrono::duration<double, std::milli>(t1 - t0).count()
-    };
+    StressResult r;
+    r.name = name;
+    r.highs_crossings = totalCrossings(g_highs.getLayers().at(0).outgoing_edges, g_highs.nodeLayout());
+    r.highs_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+
+    // Gurobi run: only if actually usable here, on a fresh copy of the same
+    // seeded graph (identical instance, since the seed is unchanged).
+    if (isGurobiUsableForHorizontalOrderTesting()) {
+        ResultsGraph g_gurobi = generateTwoLayer(
+            cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
+        g_gurobi.assignXCoordinates();
+        setHorizontalOrderBackendOverrideForTesting(ILPBackendOverride::kForceGurobi);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        g_gurobi.orderHyperedges(0);
+        auto t3 = std::chrono::high_resolution_clock::now();
+
+        r.gurobi_available = true;
+        r.gurobi_crossings = totalCrossings(g_gurobi.getLayers().at(0).outgoing_edges, g_gurobi.nodeLayout());
+        r.gurobi_time_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
+    }
+    else {
+        r.gurobi_available = false;
+        r.gurobi_crossings = 0;
+        r.gurobi_time_ms = 0.0;
+    }
+
+    return r;
 }
 
 // ============================================================================
@@ -333,27 +377,55 @@ static StressResult runStress(const StressConfig& cfg) {
 
 static CompResult runComparison(const CompConfig& cfg) {
     int max_src = std::max(1, std::min(cfg.n / 2, 4));
+    std::string name = "hypergraph_(" + std::to_string(cfg.n) + "," + std::to_string(cfg.e) + ")";
 
-    ResultsGraph g = generateTwoLayer(
+    // Brute force: computed once from a fresh, un-reordered graph (its result
+    // doesn't depend on which MIP backend it's later compared against, since
+    // the seed makes every generated graph below identical in topology).
+    ResultsGraph g_bf = generateTwoLayer(
         cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
-    g.assignXCoordinates();
+    g_bf.assignXCoordinates();
+    auto [bf_ct, bf_ms] = bruteForce(g_bf.getLayers().at(0).outgoing_edges, g_bf.nodeLayout());
 
-    // Snapshot edges before MIP reorders them.
-    std::vector<HyperedgePtr> snapshot = g.getLayers().at(0).outgoing_edges;
-    const auto& nl = g.nodeLayout();
+    CompResult r;
+    r.name = name;
+    r.bf_crossings = bf_ct;
+    r.bf_time_ms = bf_ms;
 
+    // HiGHS run: always performed.
+    ResultsGraph g_highs = generateTwoLayer(
+        cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
+    g_highs.assignXCoordinates();
+    setHorizontalOrderBackendOverrideForTesting(ILPBackendOverride::kForceHighs);
     auto t0 = std::chrono::high_resolution_clock::now();
-    g.orderHyperedges(0);
+    g_highs.orderHyperedges(0);
     auto t1 = std::chrono::high_resolution_clock::now();
-    double mip_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    int    mip_ct = totalCrossings(g.getLayers().at(0).outgoing_edges, nl);
+    r.highs_time_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    r.highs_crossings = totalCrossings(g_highs.getLayers().at(0).outgoing_edges, g_highs.nodeLayout());
+    r.highs_optimal = (r.highs_crossings == bf_ct);
 
-    auto [bf_ct, bf_ms] = bruteForce(snapshot, nl);
+    // Gurobi run: only if actually usable here.
+    if (isGurobiUsableForHorizontalOrderTesting()) {
+        ResultsGraph g_gurobi = generateTwoLayer(
+            cfg.n, cfg.n, cfg.e, 1, max_src, 1, max_src, RNG_SEED);
+        g_gurobi.assignXCoordinates();
+        setHorizontalOrderBackendOverrideForTesting(ILPBackendOverride::kForceGurobi);
+        auto t2 = std::chrono::high_resolution_clock::now();
+        g_gurobi.orderHyperedges(0);
+        auto t3 = std::chrono::high_resolution_clock::now();
+        r.gurobi_time_ms = std::chrono::duration<double, std::milli>(t3 - t2).count();
+        r.gurobi_crossings = totalCrossings(g_gurobi.getLayers().at(0).outgoing_edges, g_gurobi.nodeLayout());
+        r.gurobi_available = true;
+        r.gurobi_optimal = (r.gurobi_crossings == bf_ct);
+    }
+    else {
+        r.gurobi_available = false;
+        r.gurobi_crossings = 0;
+        r.gurobi_time_ms = 0.0;
+        r.gurobi_optimal = false;
+    }
 
-    return {
-        "hypergraph_(" + std::to_string(cfg.n) + "," + std::to_string(cfg.e) + ")",
-        mip_ct, mip_ms, bf_ct, bf_ms, (mip_ct == bf_ct)
-    };
+    return r;
 }
 
 // ============================================================================
@@ -363,21 +435,35 @@ static CompResult runComparison(const CompConfig& cfg) {
 static void writeStressCsv(const std::vector<StressResult>& results) {
     fs::path out = SOURCE_DIR / "results_stress.csv";
     std::ofstream f(out);
-    f << "instance;crossings_after_mip;time_ms\n";
-    for (const auto& r : results)
-        f << r.name << ";" << r.crossings_after << ";" << fmtDouble(r.time_ms) << "\n";
+    f << "instance;highs_crossings;highs_time_ms;gurobi_crossings;gurobi_time_ms\n";
+    for (const auto& r : results) {
+        f << r.name << ";" << r.highs_crossings << ";" << fmtDouble(r.highs_time_ms) << ";";
+        if (r.gurobi_available)
+            f << r.gurobi_crossings << ";" << fmtDouble(r.gurobi_time_ms) << "\n";
+        else
+            f << "N/A;N/A\n";
+    }
     std::cout << "Stress results      -> " << fs::absolute(out) << "\n";
 }
 
 static void writeComparisonCsv(const std::vector<CompResult>& results) {
     fs::path out = SOURCE_DIR / "results_comparison.csv";
     std::ofstream f(out);
-    f << "instance;mip_crossings;mip_time_ms;bf_crossings;bf_time_ms;optimal\n";
-    for (const auto& r : results)
+    f << "instance;highs_crossings;highs_time_ms;highs_optimal;"
+        "gurobi_crossings;gurobi_time_ms;gurobi_optimal;bf_crossings;bf_time_ms\n";
+    for (const auto& r : results) {
         f << r.name << ";"
-        << r.mip_crossings << ";" << fmtDouble(r.mip_time_ms) << ";"
-        << r.bf_crossings << ";" << fmtDouble(r.bf_time_ms) << ";"
-        << (r.optimal ? "yes" : "no") << "\n";
+            << r.highs_crossings << ";" << fmtDouble(r.highs_time_ms) << ";"
+            << (r.highs_optimal ? "yes" : "no") << ";";
+        if (r.gurobi_available) {
+            f << r.gurobi_crossings << ";" << fmtDouble(r.gurobi_time_ms) << ";"
+                << (r.gurobi_optimal ? "yes" : "no") << ";";
+        }
+        else {
+            f << "N/A;N/A;N/A;";
+        }
+        f << r.bf_crossings << ";" << fmtDouble(r.bf_time_ms) << "\n";
+    }
     std::cout << "Comparison results  -> " << fs::absolute(out) << "\n";
 }
 
@@ -386,44 +472,94 @@ static void writeComparisonCsv(const std::vector<CompResult>& results) {
 // ============================================================================
 
 static void printStressSummary(const std::vector<StressResult>& results) {
-    double total_ms = 0, max_ms = 0;
-    int max_ct = 0;
+    double highs_total_ms = 0, highs_max_ms = 0;
+    int highs_max_ct = 0;
+    double gurobi_total_ms = 0, gurobi_max_ms = 0;
+    int gurobi_max_ct = 0;
+    int gurobi_available_count = 0;
+
     for (const auto& r : results) {
-        total_ms += r.time_ms;
-        max_ms = std::max(max_ms, r.time_ms);
-        max_ct = std::max(max_ct, r.crossings_after);
+        highs_total_ms += r.highs_time_ms;
+        highs_max_ms = std::max(highs_max_ms, r.highs_time_ms);
+        highs_max_ct = std::max(highs_max_ct, r.highs_crossings);
+        if (r.gurobi_available) {
+            ++gurobi_available_count;
+            gurobi_total_ms += r.gurobi_time_ms;
+            gurobi_max_ms = std::max(gurobi_max_ms, r.gurobi_time_ms);
+            gurobi_max_ct = std::max(gurobi_max_ct, r.gurobi_crossings);
+        }
     }
+
     std::cout << "\n" << std::string(52, '=') << "\n";
     std::cout << "STRESS SUMMARY\n" << std::string(52, '-') << "\n";
     std::cout << std::left << std::setw(30) << "Configurations run"
         << std::right << std::setw(10) << results.size() << "\n";
-    std::cout << std::left << std::setw(30) << "Total MIP time (ms)"
-        << std::right << std::setw(10) << std::fixed << std::setprecision(2) << total_ms << "\n";
-    std::cout << std::left << std::setw(30) << "Max crossings"
-        << std::right << std::setw(10) << max_ct << "\n";
-    std::cout << std::left << std::setw(30) << "Slowest instance (ms)"
-        << std::right << std::setw(10) << std::fixed << std::setprecision(2) << max_ms << "\n";
+    std::cout << std::left << std::setw(30) << "[HiGHS] Total MIP time (ms)"
+        << std::right << std::setw(10) << std::fixed << std::setprecision(2) << highs_total_ms << "\n";
+    std::cout << std::left << std::setw(30) << "[HiGHS] Max crossings"
+        << std::right << std::setw(10) << highs_max_ct << "\n";
+    std::cout << std::left << std::setw(30) << "[HiGHS] Slowest instance (ms)"
+        << std::right << std::setw(10) << std::fixed << std::setprecision(2) << highs_max_ms << "\n";
+    std::cout << std::string(52, '-') << "\n";
+    if (gurobi_available_count > 0) {
+        std::cout << std::left << std::setw(30) << "[Gurobi] Total MIP time (ms)"
+            << std::right << std::setw(10) << std::fixed << std::setprecision(2) << gurobi_total_ms << "\n";
+        std::cout << std::left << std::setw(30) << "[Gurobi] Max crossings"
+            << std::right << std::setw(10) << gurobi_max_ct << "\n";
+        std::cout << std::left << std::setw(30) << "[Gurobi] Slowest instance (ms)"
+            << std::right << std::setw(10) << std::fixed << std::setprecision(2) << gurobi_max_ms << "\n";
+        if (gurobi_available_count < static_cast<int>(results.size())) {
+            std::cout << "  (Gurobi totals over " << gurobi_available_count
+                << "/" << results.size() << " instances)\n";
+        }
+    }
+    else {
+        std::cout << std::left << std::setw(30) << "[Gurobi]"
+            << std::right << std::setw(22) << "N/A (unavailable)" << "\n";
+    }
     std::cout << std::string(52, '=') << "\n";
 }
 
 static void printComparisonSummary(const std::vector<CompResult>& results) {
-    int    optimal_count = 0;
-    double mip_ms = 0, bf_ms = 0;
+    int    highs_optimal_count = 0;
+    double highs_ms = 0, bf_ms = 0;
+    int    gurobi_optimal_count = 0, gurobi_available_count = 0;
+    double gurobi_ms = 0;
+
     for (const auto& r : results) {
-        if (r.optimal) ++optimal_count;
-        mip_ms += r.mip_time_ms;
+        if (r.highs_optimal) ++highs_optimal_count;
+        highs_ms += r.highs_time_ms;
         bf_ms += r.bf_time_ms;
+        if (r.gurobi_available) {
+            ++gurobi_available_count;
+            if (r.gurobi_optimal) ++gurobi_optimal_count;
+            gurobi_ms += r.gurobi_time_ms;
+        }
     }
     int n = static_cast<int>(results.size());
+
     std::cout << "\n" << std::string(52, '=') << "\n";
     std::cout << "COMPARISON SUMMARY\n" << std::string(52, '-') << "\n";
     std::cout << std::left << std::setw(30) << "Configurations run"
         << std::right << std::setw(10) << n << "\n";
-    std::cout << std::left << std::setw(30) << "MIP optimal"
-        << std::right << std::setw(9) << optimal_count << " / " << n << "\n";
-    std::cout << std::left << std::setw(30) << "Avg MIP time (ms)"
+    std::cout << std::left << std::setw(30) << "[HiGHS] optimal"
+        << std::right << std::setw(9) << highs_optimal_count << " / " << n << "\n";
+    std::cout << std::left << std::setw(30) << "[HiGHS] Avg MIP time (ms)"
         << std::right << std::setw(10) << std::fixed << std::setprecision(2)
-        << (n ? mip_ms / n : 0.0) << "\n";
+        << (n ? highs_ms / n : 0.0) << "\n";
+    std::cout << std::string(52, '-') << "\n";
+    if (gurobi_available_count > 0) {
+        std::cout << std::left << std::setw(30) << "[Gurobi] optimal"
+            << std::right << std::setw(9) << gurobi_optimal_count << " / " << gurobi_available_count << "\n";
+        std::cout << std::left << std::setw(30) << "[Gurobi] Avg MIP time (ms)"
+            << std::right << std::setw(10) << std::fixed << std::setprecision(2)
+            << (gurobi_available_count ? gurobi_ms / gurobi_available_count : 0.0) << "\n";
+    }
+    else {
+        std::cout << std::left << std::setw(30) << "[Gurobi]"
+            << std::right << std::setw(22) << "N/A (unavailable)" << "\n";
+    }
+    std::cout << std::string(52, '-') << "\n";
     std::cout << std::left << std::setw(30) << "Avg BF  time (ms)"
         << std::right << std::setw(10) << std::fixed << std::setprecision(2)
         << (n ? bf_ms / n : 0.0) << "\n";
@@ -436,7 +572,10 @@ static void printComparisonSummary(const std::vector<CompResult>& results) {
 
 int main() {
     std::cout << "Horizontal Order MIP — Efficiency Measurements\n";
-    std::cout << "RNG seed: " << RNG_SEED << "\n\n";
+    std::cout << "RNG seed: " << RNG_SEED << "\n";
+    std::cout << "Gurobi  : " << (isGurobiUsableForHorizontalOrderTesting()
+        ? "available (valid license detected) -- Gurobi columns will run"
+        : "unavailable -- Gurobi columns will be reported as N/A") << "\n\n";
 
     // ── Part 1: stress ────────────────────────────────────────────────────────
     std::cout << "----- Part 1: Stress test (MIP only, nodes 3..25) --------------------- \n";
@@ -446,8 +585,13 @@ int main() {
             StressResult r = runStress(cfg);
             stress_results.push_back(r);
             std::cout << "  " << std::left << std::setw(28) << r.name
-                << "  ct=" << std::setw(5) << r.crossings_after
-                << "  " << std::fixed << std::setprecision(2) << r.time_ms << " ms\n";
+                << "  HiGHS ct=" << std::setw(5) << r.highs_crossings
+                << " " << std::fixed << std::setprecision(2) << r.highs_time_ms << "ms";
+            if (r.gurobi_available)
+                std::cout << "  |  Gurobi ct=" << std::setw(5) << r.gurobi_crossings
+                << " " << std::fixed << std::setprecision(2) << r.gurobi_time_ms << "ms\n";
+            else
+                std::cout << "  |  Gurobi N/A\n";
         }
         catch (const std::exception& ex) {
             std::cerr << "  [SKIP] n=" << cfg.n << " e=" << cfg.e
@@ -465,11 +609,19 @@ int main() {
             CompResult r = runComparison(cfg);
             comp_results.push_back(r);
             std::cout << "  " << std::left << std::setw(24) << r.name
-                << "  MIP=" << std::setw(4) << r.mip_crossings
-                << " (" << std::fixed << std::setprecision(1) << r.mip_time_ms << "ms)"
-                << "  BF=" << std::setw(4) << r.bf_crossings
-                << " (" << std::fixed << std::setprecision(1) << r.bf_time_ms << "ms)"
-                << (r.optimal ? "  OK" : "  SUBOPTIMAL") << "\n";
+                << "  HiGHS=" << std::setw(4) << r.highs_crossings
+                << " (" << std::fixed << std::setprecision(1) << r.highs_time_ms << "ms)"
+                << (r.highs_optimal ? " OK" : " SUBOPT");
+            if (r.gurobi_available) {
+                std::cout << "  |  Gurobi=" << std::setw(4) << r.gurobi_crossings
+                    << " (" << std::fixed << std::setprecision(1) << r.gurobi_time_ms << "ms)"
+                    << (r.gurobi_optimal ? " OK" : " SUBOPT");
+            }
+            else {
+                std::cout << "  |  Gurobi N/A";
+            }
+            std::cout << "  |  BF=" << std::setw(4) << r.bf_crossings
+                << " (" << std::fixed << std::setprecision(1) << r.bf_time_ms << "ms)\n";
         }
         catch (const std::exception& ex) {
             std::cerr << "  [SKIP] n=" << cfg.n << " e=" << cfg.e

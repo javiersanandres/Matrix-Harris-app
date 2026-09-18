@@ -18,9 +18,12 @@ if(NOT Gurobi_FOUND)
         set(Gurobi_FOUND TRUE)
         message(STATUS "Gurobi found at: ${GUROBI_HOME}")
     else()
-        message(FATAL_ERROR
-            "Gurobi not found at ${GUROBI_HOME}. "
-            "Set -DGUROBI_HOME=<path> to point to your Gurobi installation.")
+        # No longer fatal: horizontalOrder.cpp falls back to HiGHS when Gurobi
+        # isn't available, so this executable (and its ILP-Gurobi benchmark
+        # column) just skips Gurobi rather than failing to configure.
+        message(STATUS
+            "Gurobi not found at ${GUROBI_HOME} -- horizontalOrderResults will "
+            "use HiGHS only (set -DGUROBI_HOME=<path> to enable the Gurobi column).")
     endif()
 else()
     message(STATUS "Gurobi found via find_package")
@@ -53,16 +56,30 @@ add_executable(horizontalOrderResults
 target_include_directories(horizontalOrderResults
     PRIVATE
         ${CMAKE_SOURCE_DIR}/hypergraph_logic/include
-        ${Gurobi_INCLUDE_DIRS}
-
 )
 
+# HiGHS -- the highs::highs target already exists at this point in the build
+# (fetched once, near the top level, by the same FetchContent block the
+# "hypergraph" and "graphical_hypergraph" libraries link against), so this is
+# just linking to it, not fetching it again. Always linked: it's the always-
+# available fallback backend for horizontalOrder.cpp's MIP, and the
+# ILP-HiGHS benchmark column below always exercises it.
 target_link_libraries(horizontalOrderResults
     PUBLIC
         nlohmann_json::nlohmann_json
     PRIVATE
-        ${Gurobi_LIBRARIES}
+        highs::highs
 )
+
+# Gurobi, so horizontalOrder.cpp's Gurobi backend (and this program's
+# ILP-Gurobi benchmark column, via HorizontalOrderBackendTestHook.h) can
+# actually be compiled and exercised here. Optional: if Gurobi isn't found,
+# horizontalOrderResults still builds and runs, just without that column.
+if(Gurobi_FOUND)
+    target_compile_definitions(horizontalOrderResults PRIVATE GUROBI_AVAILABLE)
+    target_include_directories(horizontalOrderResults PRIVATE ${Gurobi_INCLUDE_DIRS})
+    target_link_libraries(horizontalOrderResults PRIVATE ${Gurobi_LIBRARIES})
+endif()
 
 
 if(MSVC)

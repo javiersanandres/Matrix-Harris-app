@@ -76,7 +76,6 @@ endif()
 
 target_compile_definitions(fullPipelineResults
     PRIVATE
-        GUROBI_AVAILABLE
         BENCHMARK_DIR="${BENCHMARK_DIR}"
 )
 

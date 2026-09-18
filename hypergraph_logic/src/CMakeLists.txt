@@ -93,7 +93,9 @@ target_link_libraries(hypergraph
 
 
 # ============================================================================
-# Gurobi configuration (optional, required for horizontalOrder.cpp)
+# Gurobi configuration (optional -- speeds up minimizeCrossingsILP.cpp and
+# horizontalOrder.cpp when a valid license is available; both fall back to
+# HiGHS otherwise, so neither requires Gurobi to build or run).
 # ============================================================================
 
 # Try to find Gurobi
@@ -125,12 +127,11 @@ if(NOT Gurobi_FOUND)
         message(STATUS "  Release C++ lib: ${Gurobi_CPP_LIB_RELEASE}")
         message(STATUS "  C lib: ${Gurobi_C_LIB}")
     else()
-        message(WARNING "Gurobi not found at ${GUROBI_HOME}. horizontalOrder.cpp will not be compiled.")
-        set(COMPILE_HORIZONTAL_ORDER FALSE)
+        message(STATUS "Gurobi not found at ${GUROBI_HOME} -- minimizeCrossingsILP.cpp "
+                        "and horizontalOrder.cpp will both use HiGHS only.")
     endif()
 else()
     message(STATUS "Gurobi found via find_package")
-    set(COMPILE_HORIZONTAL_ORDER TRUE)
 endif()
 
 # Let minimizeCrossingsILP.cpp prefer Gurobi over HiGHS when it's available.
@@ -168,7 +169,7 @@ target_sources(graphical_hypergraph
         GraphicalHypergraph.cpp
         GraphicalHypergraphPersistence.cpp
         JointGraphicalHypergraph.cpp
-        $<IF:$<BOOL:${Gurobi_FOUND}>,horizontalOrder.cpp,>
+        horizontalOrder.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -180,7 +181,6 @@ target_include_directories(graphical_hypergraph
         $<INSTALL_INTERFACE:include>
     PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_INCLUDE_DIRS},>
 )
 
 target_link_libraries(graphical_hypergraph
@@ -188,8 +188,20 @@ target_link_libraries(graphical_hypergraph
         hypergraph
         nlohmann_json::nlohmann_json
     PRIVATE
-        $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_LIBRARIES},>
+        highs::highs
 )
+
+# horizontalOrder.cpp (compiled directly into this library, see target_sources
+# above) prefers Gurobi over HiGHS when it's available -- same runtime-checked
+# arrangement as minimizeCrossingsILP.cpp in the hypergraph library, and the
+# same caveat: GUROBI_AVAILABLE only means the SDK was found at configure
+# time, not that a license is actually usable on the machine that runs the
+# binary (that's checked at runtime, in horizontalOrder.cpp itself).
+if(Gurobi_FOUND)
+    target_compile_definitions(graphical_hypergraph PRIVATE GUROBI_AVAILABLE)
+    target_include_directories(graphical_hypergraph PRIVATE ${Gurobi_INCLUDE_DIRS})
+    target_link_libraries(graphical_hypergraph PRIVATE ${Gurobi_LIBRARIES})
+endif()
 
 # Enable BK_TEST when building tests
 if(BUILD_TESTING)
