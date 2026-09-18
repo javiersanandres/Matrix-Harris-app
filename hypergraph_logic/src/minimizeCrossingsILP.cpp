@@ -1,5 +1,10 @@
 #include "GlobalSifting.h"
 #include "Highs.h"
+#include "ILPBackendTestHook.h"
+
+#ifdef GUROBI_AVAILABLE
+#include "gurobi_c++.h"
+#endif
 
 #include <algorithm>
 #include <cmath>
@@ -33,6 +38,15 @@
 // inner segments, instead of the usual crossing variable and linking
 // inequalities, a hard equality is imposed forbidding them from crossing at all:
 // x^i_vy = x^{i-1}_uw when v < y, or x^i_yv + x^{i-1}_uw = 1 when y < v.
+//
+// Solver backend: the model itself (columns + sparse rows, below) is built
+// once, independent of which solver ends up running it. HiGHS is always
+// available and is the default/fallback backend. When this translation unit
+// was compiled with Gurobi (GUROBI_AVAILABLE, set by CMake when
+// find_package(Gurobi) succeeds) *and* a working Gurobi license is actually
+// present on the machine at runtime, Gurobi is used instead, since it's
+// substantially faster on this kind of MIP.
+// 
 // ==================================================================================
 
 
@@ -52,7 +66,7 @@ namespace sifting_internal {
 		constexpr long long kMaxTransitivityConstraints = 300000;
 		constexpr long long kMaxColumns = 200000;
 
-		constexpr double kILPTimeBudgetSeconds = 300.0;
+		constexpr double kILPTimeBudgetSeconds = 15.0;
 		constexpr int kFallbackSiftingRounds = 10;
 
 		// Incrementally-built row-wise sparse constraint, plus the finished bounds.
@@ -64,7 +78,185 @@ namespace sifting_internal {
 			double hi;
 		};
 
+		// The fully-assembled ILP, in a form neither solver backend needs to know
+		// was built by this file. Every column is binary (0/1); col_integrality is
+		// only consulted by the HiGHS backend (HiGHS wants it spelled out per
+		// column), Gurobi columns are simply declared GRB_BINARY.
+		struct ILPModel {
+			std::vector<double> col_lower, col_upper, col_cost, col_guess;
+			std::vector<HighsVarType> col_integrality;
+			std::vector<SparseRow> rows;
+		};
+
+		// What a backend hands back: whether it found something usable, and if so
+		// the column values and objective. "Usable" deliberately includes a
+		// feasible-but-not-proved-optimal solution (e.g. the time budget ran out) --
+		// runCrossingILP() only ever commits a result if it's no worse than the
+		// heuristic fallback, so a good-enough incumbent is fine to hand back.
+		struct ILPSolveResult {
+			bool success = false;
+			std::vector<double> col_value;
+			double objective = 0.0;
+		};
+
+		// ── HiGHS backend ──────────────────────────────────────────────────────
+		// Always available; this is the code that used to live directly in
+		// runCrossingILP() before there were two backends to choose between.
+		ILPSolveResult solveWithHighs(const ILPModel& m, double time_budget_seconds) {
+			ILPSolveResult result;
+
+			HighsModel model;
+			HighsLp& lp = model.lp_;
+			lp.num_col_ = static_cast<int>(m.col_lower.size());
+			lp.num_row_ = static_cast<int>(m.rows.size());
+			lp.col_cost_ = m.col_cost;
+			lp.col_lower_ = m.col_lower;
+			lp.col_upper_ = m.col_upper;
+			lp.integrality_ = m.col_integrality;
+			lp.sense_ = ObjSense::kMinimize;
+			lp.offset_ = 0.0;
+
+			lp.row_lower_.reserve(m.rows.size());
+			lp.row_upper_.reserve(m.rows.size());
+			lp.a_matrix_.format_ = MatrixFormat::kRowwise;
+			lp.a_matrix_.start_.reserve(m.rows.size() + 1);
+			for (const auto& row : m.rows) {
+				lp.row_lower_.push_back(row.lo);
+				lp.row_upper_.push_back(row.hi);
+				lp.a_matrix_.index_.insert(lp.a_matrix_.index_.end(), row.idx.begin(), row.idx.end());
+				lp.a_matrix_.value_.insert(lp.a_matrix_.value_.end(), row.val.begin(), row.val.end());
+				lp.a_matrix_.start_.push_back(static_cast<int>(lp.a_matrix_.index_.size()));
+			}
+			lp.a_matrix_.num_col_ = lp.num_col_;
+			lp.a_matrix_.num_row_ = lp.num_row_;
+
+			Highs highs;
+			highs.setOptionValue("output_flag", false);
+			highs.setOptionValue("time_limit", time_budget_seconds);
+			if (highs.passModel(model) != HighsStatus::kOk) return result;
+
+			// Warm start from the heuristic's already-computed block order.
+			HighsSolution guess;
+			guess.col_value = m.col_guess;
+			guess.value_valid = true;
+			highs.setSolution(guess);
+			if (highs.run() != HighsStatus::kOk) return result;
+
+			HighsModelStatus status = highs.getModelStatus();
+			bool have_feasible_solution =
+				(status == HighsModelStatus::kOptimal) ||
+				(highs.getInfo().primal_solution_status == kSolutionStatusFeasible);
+			if (!have_feasible_solution) return result;
+
+			result.success = true;
+			result.col_value = highs.getSolution().col_value;
+			result.objective = highs.getInfo().objective_function_value;
+			return result;
+		}
+
+#ifdef GUROBI_AVAILABLE
+		// ── Gurobi backend ─────────────────────────────────────────────────────
+		//
+		// Only ever compiled in when CMake's find_package(Gurobi) succeeded --
+		// but that only proves the SDK is installed, not that this machine has a
+		// currently-valid license (a floating/token license server can be
+		// unreachable, a named-user license can have expired, etc.), and there's
+		// no reliable way to check that ahead of time other than asking Gurobi.
+		// So both functions below are written to fail safely: constructing
+		// GRBEnv *is* the license check, everything is wrapped in
+		// try/catch(GRBException&), and any failure -- license or otherwise --
+		// comes back as an unsuccessful ILPSolveResult rather than propagating,
+		// so the caller (runCrossingILP) falls back to HiGHS transparently.
+
+		// Whether Gurobi is actually usable here, checked once and cached for the
+		// life of the process. Verifying a license can mean a round trip to a
+		// license server, and once we know the answer there's no reason to pay
+		// that cost again on every subsequent ILP solve.
+		bool gurobiUsable() {
+			static const bool usable = [] {
+				try {
+					GRBEnv env(true); // empty/default env; construction is the license check
+					env.set(GRB_IntParam_OutputFlag, 0);
+					env.start();
+					return true;
+				}
+				catch (GRBException&) {
+					return false;
+				}
+				}();
+			return usable;
+		}
+
+		ILPSolveResult solveWithGurobi(const ILPModel& m, double time_budget_seconds) {
+			ILPSolveResult result;
+			try {
+				GRBEnv env(true);
+				env.set(GRB_IntParam_OutputFlag, 0);
+				env.start();
+				GRBModel model(env);
+				model.set(GRB_DoubleParam_TimeLimit, time_budget_seconds);
+
+				int n = static_cast<int>(m.col_lower.size());
+				std::vector<GRBVar> vars(n);
+				for (int i = 0; i < n; i++) {
+					vars[i] = model.addVar(m.col_lower[i], m.col_upper[i], m.col_cost[i], GRB_BINARY);
+				}
+				model.update(); // vars must exist before addRange() can reference them below
+
+				for (const auto& row : m.rows) {
+					GRBLinExpr expr = 0.0;
+					for (size_t k = 0; k < row.idx.size(); k++)
+						expr += row.val[k] * vars[row.idx[k]];
+					double lo = (row.lo <= -kInf) ? -GRB_INFINITY : row.lo;
+					double hi = (row.hi >= kInf) ? GRB_INFINITY : row.hi;
+					model.addRange(expr, lo, hi);
+				}
+
+				model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
+
+				// Warm start from the heuristic's already-computed block order.
+				for (int i = 0; i < n; i++) vars[i].set(GRB_DoubleAttr_Start, m.col_guess[i]);
+
+				model.optimize();
+
+				int status = model.get(GRB_IntAttr_Status);
+				bool have_feasible_solution =
+					(status == GRB_OPTIMAL) || (model.get(GRB_IntAttr_SolCount) > 0);
+				if (!have_feasible_solution) return result;
+
+				result.success = true;
+				result.col_value.resize(n);
+				for (int i = 0; i < n; i++) result.col_value[i] = vars[i].get(GRB_DoubleAttr_X);
+				result.objective = model.get(GRB_DoubleAttr_ObjVal);
+			}
+			catch (GRBException&) {
+				result = ILPSolveResult(); // discard any partial state; report failure
+			}
+			return result;
+		}
+#endif
+
 	} // namespace
+
+	// ── backend-override test hook (see ILPBackendTestHook.h) ──────────────────
+	//
+	// Deliberately a plain (non-atomic) variable: the hook is documented as
+	// single-threaded-only, and runCrossingILP() below always resets it to
+	// kAuto right after reading it, so it can never leak past the one call it
+	// was set for.
+	ILPBackendOverride g_ilp_backend_override = ILPBackendOverride::kAuto;
+
+	void setILPBackendOverrideForTesting(ILPBackendOverride mode) {
+		g_ilp_backend_override = mode;
+	}
+
+	bool isGurobiUsableForTesting() {
+#ifdef GUROBI_AVAILABLE
+		return gurobiUsable();
+#else
+		return false;
+#endif
+	}
 
 	// ── runCrossingILP ────────────────────────────────────────────────────────────
 
@@ -80,9 +272,7 @@ namespace sifting_internal {
 		// S_.g1_layers already has them in (the heuristic's finished order, since
 		// Hypergraph::minimizeCrossingsILP() always calls runSifting() first on
 		// this same sifter). u < w in every constraint below means exactly this:
-		// u's CURRENT position in the row precedes w's. Rows are never re-sorted
-		// by raw node id -- that would be an arbitrary relabeling unrelated to the
-		// actual current layout the equations are stated in terms of.
+		// u's CURRENT position in the row precedes w's.
 		std::vector<std::vector<int>> row_nodes(row_keys.size());
 		for (size_t r = 0; r < row_keys.size(); r++)
 			row_nodes[r] = S_.g1_layers.at(row_keys[r]); // copy, order preserved
@@ -223,7 +413,7 @@ namespace sifting_internal {
 					if (u == w || v == y) continue; // shared endpoint: can never cross.
 
 					int Xuw = pair_var.at({ u, w });
-					bool inner_pair = false;//isInnerSegment(u, v) && isInnerSegment(w, y);
+					bool inner_pair = isInnerSegment(u, v) && isInnerSegment(w, y);
 
 					if (pos_in_row[v] < pos_in_row[y]) {
 						int Xvy = pair_var.at({ v, y });
@@ -255,55 +445,54 @@ namespace sifting_internal {
 
 		if (col_lower.empty()) return 0; // nothing was ever decidable: already optimal.
 
-		// Assemble and solve the model.
-		HighsModel model;
-		HighsLp& lp = model.lp_;
-		lp.num_col_ = static_cast<int>(col_lower.size());
-		lp.num_row_ = static_cast<int>(rows.size());
-		lp.col_cost_ = col_cost;
-		lp.col_lower_ = col_lower;
-		lp.col_upper_ = col_upper;
-		lp.integrality_ = col_integrality;
-		lp.sense_ = ObjSense::kMinimize;
-		lp.offset_ = 0.0;
+		// Assemble the backend-neutral model, then solve it. Normally (kAuto)
+		// Gurobi is tried first when this build has it and a valid license is
+		// actually present on this machine right now; any solve failure --
+		// including a Gurobi run that throws partway through -- falls back to
+		// HiGHS rather than giving up. A forced backend (see
+		// ILPBackendTestHook.h) skips that auto-detect entirely, for
+		// benchmarking one solver in isolation; it is read once here and reset
+		// immediately so it can never apply to a later call.
+		ILPModel ilp_model;
+		ilp_model.col_lower = std::move(col_lower);
+		ilp_model.col_upper = std::move(col_upper);
+		ilp_model.col_cost = std::move(col_cost);
+		ilp_model.col_guess = std::move(col_guess);
+		ilp_model.col_integrality = std::move(col_integrality);
+		ilp_model.rows = std::move(rows);
 
-		lp.row_lower_.reserve(rows.size());
-		lp.row_upper_.reserve(rows.size());
-		lp.a_matrix_.format_ = MatrixFormat::kRowwise;
-		lp.a_matrix_.start_.reserve(rows.size() + 1);
-		for (const auto& row : rows) {
-			lp.row_lower_.push_back(row.lo);
-			lp.row_upper_.push_back(row.hi);
-			lp.a_matrix_.index_.insert(lp.a_matrix_.index_.end(), row.idx.begin(), row.idx.end());
-			lp.a_matrix_.value_.insert(lp.a_matrix_.value_.end(), row.val.begin(), row.val.end());
-			lp.a_matrix_.start_.push_back(static_cast<int>(lp.a_matrix_.index_.size()));
+		ILPBackendOverride backend = g_ilp_backend_override;
+		g_ilp_backend_override = ILPBackendOverride::kAuto;
+
+		ILPSolveResult result;
+		switch (backend) {
+		case ILPBackendOverride::kForceHighs:
+			result = solveWithHighs(ilp_model, time_budget_seconds);
+			break;
+		case ILPBackendOverride::kForceGurobi:
+#ifdef GUROBI_AVAILABLE
+			result = solveWithGurobi(ilp_model, time_budget_seconds);
+#endif
+			// No fallback here on purpose: a caller that explicitly forced
+			// Gurobi wants to know Gurobi failed, not get a HiGHS number back
+			// mislabeled as Gurobi's.
+			break;
+		case ILPBackendOverride::kAuto:
+		default:
+#ifdef GUROBI_AVAILABLE
+			if (gurobiUsable()) {
+				result = solveWithGurobi(ilp_model, time_budget_seconds);
+			}
+#endif
+			if (!result.success) {
+				result = solveWithHighs(ilp_model, time_budget_seconds);
+			}
+			break;
 		}
-		lp.a_matrix_.num_col_ = lp.num_col_;
-		lp.a_matrix_.num_row_ = lp.num_row_;
+		if (!result.success) return -1; // neither backend found anything usable in time.
 
-		Highs highs;
-		highs.setOptionValue("output_flag", false);
-		highs.setOptionValue("time_limit", time_budget_seconds);
-		if (highs.passModel(model) != HighsStatus::kOk) return -1;
-
-		// Warm start from the heuristic's already-computed block order (see
-		// col_guess above). Purely advisory: if HiGHS can't use it for any
-		// reason, it just falls back to solving from scratch.
-		HighsSolution guess;
-		guess.col_value = col_guess;
-		guess.value_valid = true;
-		highs.setSolution(guess);
-		if (highs.run() != HighsStatus::kOk) return -1;
-
-		HighsModelStatus status = highs.getModelStatus();
-		std::cout << highs.modelStatusToString(status);
-		bool have_feasible_solution =
-			(status == HighsModelStatus::kOptimal) ||
-			(highs.getInfo().primal_solution_status == kSolutionStatusFeasible);
-		if (!have_feasible_solution) return -1; // ran out of time before finding anything usable.
-
-		const std::vector<double>& sol = highs.getSolution().col_value;
-		int achieved_crossings = static_cast<int>(std::lround(highs.getInfo().objective_function_value));
+		const std::vector<double>& sol = result.col_value;
+		int achieved_crossings = static_cast<int>(std::lround(result.objective));
 
 		// Reorder each row of S_.g1_layers to match the solution. Every row is
 		// independent here (a node belongs to exactly one row), so this is a

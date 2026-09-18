@@ -44,8 +44,62 @@
 // Usage:
 //   ./minimizeCrossingsResults [path/to/AllInstances]
 // ============================================================================
+// minimizeCrossingsResults.cpp
+//
+// Efficiency measurements for the Global Sifting heuristic and the exact
+// ILP-based technique (GlobalSifter::runCrossingILP).
+//
+// For each .asp instance, five techniques are measured:
+//
+//   (a) Natural — 50 distinct random permutations of the block list.
+//       Each permutation is sifted for 10 rounds. Reported per instance:
+//       avg_crossings (final, averaged over all 50 runs), avg_time_ms.
+//
+//   (b) Propagation — one run starting from orderBlocksByLayerPropagation.
+//       The reported time includes both the ordering and the sifting phases.
+//
+//   (c) Barycenter — same orderBlocksByLayerPropagation seed as (b), refined
+//       by GlobalSifter::runEfficientBarycenter before sifting. Since it
+//       shares its seed and sifting rounds with (b), the delta between (b)
+//       and (c) isolates exactly what the barycenter pass buys (or costs)
+//       on top of an already-good seed.
+//
+//   (d) ILP-HiGHS / (e) ILP-Gurobi — same orderBlocksByLayerPropagation +
+//       runEfficientBarycenter seed as (c), then mirror
+//       Hypergraph::minimizeCrossingsILP() end to end: (c)'s full sifting
+//       result is kept as the fallback baseline, GlobalSifter::runCrossingILP
+//       is attempted under ILP_TIME_BUDGET_SECONDS, and whichever crossing
+//       count is smaller is reported. Time is the full round-trip (ordering +
+//       barycenter + fallback sifting + ILP attempt) -- exactly what a caller
+//       of minimizeCrossingsILP() pays, win or lose. The two rows differ only
+//       in which solver runCrossingILP() is pinned to for its ILP attempt
+//       (via the ILPBackendTestHook.h test-only override) -- everything else,
+//       including the seed and the time budget, is identical, so the two
+//       rows are a fair head-to-head. ILP-Gurobi is reported as N/A if this
+//       build wasn't compiled with Gurobi, or no valid Gurobi license is
+//       usable on this machine right now.
+//
+// We only ever care about the FINAL crossing count and the time it took to
+// get there -- no "before" counts, no ratios.
+//
+// Output (written next to this source file):
+//   results.csv  -- one row per (instance, method): instance;method;crossings;time_ms
+//   (semicolon-separated, comma as decimal separator — Spanish Excel format)
+//   An unavailable row (ILP-Gurobi with no usable Gurobi) is written as
+//   instance;ILP-Gurobi;N/A;N/A
+//
+// Prints to stdout: progress + summary averages only.
+//
+// .asp format:
+//   in_layer(<layer>, <node_name>)  ->  G1 node at g1_layer = layer
+//   edge(<src>, <tgt>)              ->  direct g1_out[src] -> tgt  (no hubs)
+//
+// Usage:
+//   ./minimizeCrossingsResults [path/to/AllInstances]
+// ============================================================================
 
 #include "GlobalSifting.h"
+#include "ILPBackendTestHook.h"
 
 #include <algorithm>
 #include <chrono>
@@ -305,6 +359,7 @@ static BlockList orderBlocksByLayerPropagation(SiftState& S) {
 struct SingleRunResult {
     int    crossings;
     double elapsed_ms;
+    bool   available = true; // false only for e.g. ILP-Gurobi when Gurobi isn't usable here
 };
 
 struct NaturalAggResult {
@@ -391,17 +446,30 @@ static SingleRunResult runBarycenter(SiftState S_base) {
 }
 
 // ============================================================================
-// (d) ILP — same orderBlocksByLayerPropagation + runEfficientBarycenter seed
-// as Barycenter. From there this mirrors Hypergraph::minimizeCrossingsILP()
-// end to end: full sifting on the seed is the fallback baseline, then
-// GlobalSifter::runCrossingILP is attempted under ILP_TIME_BUDGET_SECONDS,
-// and whichever crossing count is smaller wins. Reported elapsed_ms is the
-// FULL round trip (ordering + barycenter + fallback sifting + ILP attempt),
-// since that is exactly what a caller of minimizeCrossingsILP() pays
-// regardless of which side ends up winning.
+// (d)/(e) ILP-HiGHS / ILP-Gurobi — same orderBlocksByLayerPropagation +
+// runEfficientBarycenter seed as Barycenter. From there this mirrors
+// Hypergraph::minimizeCrossingsILP() end to end: full sifting on the seed is
+// the fallback baseline, then GlobalSifter::runCrossingILP is attempted under
+// ILP_TIME_BUDGET_SECONDS -- pinned to `backend` via the ILPBackendTestHook.h
+// test-only override so the two rows exercise one solver each instead of
+// whatever auto-detect would have picked -- and whichever crossing count is
+// smaller wins. Reported elapsed_ms is the FULL round trip (ordering +
+// barycenter + fallback sifting + ILP attempt), since that is exactly what a
+// caller of minimizeCrossingsILP() pays regardless of which side ends up
+// winning.
+//
+// Returns available=false (crossings/elapsed_ms left at 0) without running
+// anything when `backend` is kForceGurobi and Gurobi isn't compiled in or
+// isn't currently licensed on this machine -- checked up front via
+// isGurobiUsableForTesting() so we never mistake "Gurobi unavailable" for
+// "Gurobi found 0 improvement".
 // ============================================================================
 
-static SingleRunResult runILP(SiftState S_base) {
+static SingleRunResult runILP(SiftState S_base, ILPBackendOverride backend) {
+    if (backend == ILPBackendOverride::kForceGurobi && !isGurobiUsableForTesting()) {
+        return { 0, 0.0, false };
+    }
+
     auto t0 = std::chrono::high_resolution_clock::now();
 
     BlockList B = orderBlocksByLayerPropagation(S_base);
@@ -414,10 +482,11 @@ static SingleRunResult runILP(SiftState S_base) {
     BlockList B_fallback = B;
     SingleRunResult fallback = runSifting(S_fallback, B_fallback);
 
-    // Exact solve attempt, on a fresh copy of the same seed.
+    // Exact solve attempt, on a fresh copy of the same seed, pinned to `backend`.
     SiftState S_ilp = S_base;
     BlockList B_ilp = B;
     sortAdjacencies(S_ilp, B_ilp);
+    setILPBackendOverrideForTesting(backend);
     int ilp_crossings = runCrossingILP(S_ilp, B_ilp, ILP_TIME_BUDGET_SECONDS);
 
     auto t1 = std::chrono::high_resolution_clock::now();
@@ -426,6 +495,7 @@ static SingleRunResult runILP(SiftState S_base) {
     r.crossings = (ilp_crossings >= 0 && ilp_crossings <= fallback.crossings)
         ? ilp_crossings : fallback.crossings;
     r.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    r.available = true;
     return r;
 }
 
@@ -433,6 +503,7 @@ static SingleRunResult runILP(SiftState S_base) {
 // Combined CSV writer
 // One row per (instance, method): instance;method;crossings;time_ms
 // Semicolon-separated, comma as decimal separator (Spanish Excel format).
+// An unavailable row (available == false) is written as method;N/A;N/A.
 // Written next to this source file.
 // ============================================================================
 
@@ -441,7 +512,8 @@ static void writeCombinedCsv(
     const std::vector<NaturalAggResult>& nat,
     const std::vector<SingleRunResult>& prop,
     const std::vector<SingleRunResult>& bary,
-    const std::vector<SingleRunResult>& ilp)
+    const std::vector<SingleRunResult>& ilp_highs,
+    const std::vector<SingleRunResult>& ilp_gurobi)
 {
     fs::path out = SOURCE_DIR / "results.csv";
     std::ofstream f(out);
@@ -456,9 +528,17 @@ static void writeCombinedCsv(
         f << names[i] << ";Barycenter;"
             << bary[i].crossings << ";"
             << fmtDouble(bary[i].elapsed_ms) << "\n";
-        f << names[i] << ";ILP;"
-            << ilp[i].crossings << ";"
-            << fmtDouble(ilp[i].elapsed_ms) << "\n";
+        f << names[i] << ";ILP-HiGHS;"
+            << ilp_highs[i].crossings << ";"
+            << fmtDouble(ilp_highs[i].elapsed_ms) << "\n";
+        if (ilp_gurobi[i].available) {
+            f << names[i] << ";ILP-Gurobi;"
+                << ilp_gurobi[i].crossings << ";"
+                << fmtDouble(ilp_gurobi[i].elapsed_ms) << "\n";
+        }
+        else {
+            f << names[i] << ";ILP-Gurobi;N/A;N/A\n";
+        }
     }
     std::cout << "Results -> " << fs::absolute(out) << "\n";
 }
@@ -471,7 +551,8 @@ static void printSummary(
     const std::vector<NaturalAggResult>& nat,
     const std::vector<SingleRunResult>& prop,
     const std::vector<SingleRunResult>& bary,
-    const std::vector<SingleRunResult>& ilp)
+    const std::vector<SingleRunResult>& ilp_highs,
+    const std::vector<SingleRunResult>& ilp_gurobi)
 {
     auto avg = [](const auto& v, auto fn) {
         if (v.empty()) return 0.0;
@@ -480,14 +561,28 @@ static void printSummary(
         return s / static_cast<double>(v.size());
         };
 
+    // Only averages over rows actually marked available -- so ILP-Gurobi's
+    // average isn't dragged toward zero by instances where it was skipped.
+    auto avgAvailable = [](const std::vector<SingleRunResult>& v, auto fn) {
+        double s = 0; int n = 0;
+        for (const auto& r : v) if (r.available) { s += fn(r); ++n; }
+        return n > 0 ? s / n : 0.0;
+        };
+
     double nat_crossings = avg(nat, [](const NaturalAggResult& r) { return r.avg_crossings; });
     double nat_time = avg(nat, [](const NaturalAggResult& r) { return r.avg_time_ms; });
     double prop_crossings = avg(prop, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
     double prop_time = avg(prop, [](const SingleRunResult& r) { return r.elapsed_ms; });
     double bary_crossings = avg(bary, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
     double bary_time = avg(bary, [](const SingleRunResult& r) { return r.elapsed_ms; });
-    double ilp_crossings = avg(ilp, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
-    double ilp_time = avg(ilp, [](const SingleRunResult& r) { return r.elapsed_ms; });
+    double ilp_highs_crossings = avg(ilp_highs, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
+    double ilp_highs_time = avg(ilp_highs, [](const SingleRunResult& r) { return r.elapsed_ms; });
+
+    int gurobi_available_count = 0;
+    for (const auto& r : ilp_gurobi) if (r.available) ++gurobi_available_count;
+    bool gurobi_any_available = gurobi_available_count > 0;
+    double ilp_gurobi_crossings = avgAvailable(ilp_gurobi, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
+    double ilp_gurobi_time = avgAvailable(ilp_gurobi, [](const SingleRunResult& r) { return r.elapsed_ms; });
 
     std::cout << "\n";
     std::cout << std::string(48, '=') << "\n";
@@ -510,7 +605,18 @@ static void printSummary(
     row("Natural", nat_crossings, nat_time);
     row("Propagation", prop_crossings, prop_time);
     row("Barycenter", bary_crossings, bary_time);
-    row("ILP", ilp_crossings, ilp_time);
+    row("ILP-HiGHS", ilp_highs_crossings, ilp_highs_time);
+    if (gurobi_any_available) {
+        row("ILP-Gurobi", ilp_gurobi_crossings, ilp_gurobi_time);
+        if (gurobi_available_count < static_cast<int>(ilp_gurobi.size())) {
+            std::cout << "  (ILP-Gurobi averaged over " << gurobi_available_count
+                << "/" << ilp_gurobi.size() << " instances; rest were N/A)\n";
+        }
+    }
+    else {
+        std::cout << std::left << std::setw(16) << "ILP-Gurobi"
+            << std::right << std::setw(28) << "N/A (Gurobi unavailable)" << "\n";
+    }
     std::cout << std::string(48, '=') << "\n";
 }
 
@@ -541,7 +647,10 @@ int main(int argc, char* argv[]) {
     std::cout << "Instances    : " << fs::absolute(dir) << "\n";
     std::cout << "Rounds       : " << SIFTING_ROUNDS << "\n";
     std::cout << "Random runs  : " << RANDOM_RUNS << "  (seed " << RNG_SEED << ")\n";
-    std::cout << "ILP budget   : " << ILP_TIME_BUDGET_SECONDS << "s per instance\n\n";
+    std::cout << "ILP budget   : " << ILP_TIME_BUDGET_SECONDS << "s per instance (per backend)\n";
+    std::cout << "Gurobi       : " << (isGurobiUsableForTesting()
+        ? "available (valid license detected) -- ILP-Gurobi will run"
+        : "unavailable -- ILP-Gurobi will be reported as N/A") << "\n\n";
 
     std::mt19937 rng(RNG_SEED);
 
@@ -549,7 +658,8 @@ int main(int argc, char* argv[]) {
     std::vector<NaturalAggResult>  nat_results;
     std::vector<SingleRunResult>   prop_results;
     std::vector<SingleRunResult>   bary_results;
-    std::vector<SingleRunResult>   ilp_results;
+    std::vector<SingleRunResult>   ilp_highs_results;
+    std::vector<SingleRunResult>   ilp_gurobi_results;
     int skipped = 0;
 
     for (const auto& path : files) {
@@ -588,17 +698,19 @@ int main(int argc, char* argv[]) {
         // (c) Barycenter: same seed as (b), refined by runEfficientBarycenter
         bary_results.push_back(runBarycenter(S_base));
 
-        // (d) ILP: same seed as (c), exact solve attempted on top
-        ilp_results.push_back(runILP(S_base));
+        // (d)/(e) ILP: same seed as (c), each backend run on a fresh copy of it
+        ilp_highs_results.push_back(runILP(S_base, ILPBackendOverride::kForceHighs));
+        ilp_gurobi_results.push_back(runILP(S_base, ILPBackendOverride::kForceGurobi));
 
         instance_names.push_back(name);
         std::cout << "  processed: " << name << "\n";
     }
 
-    printSummary(nat_results, prop_results, bary_results, ilp_results);
+    printSummary(nat_results, prop_results, bary_results, ilp_highs_results, ilp_gurobi_results);
 
     std::cout << "\n";
-    writeCombinedCsv(instance_names, nat_results, prop_results, bary_results, ilp_results);
+    writeCombinedCsv(instance_names, nat_results, prop_results, bary_results,
+        ilp_highs_results, ilp_gurobi_results);
 
     if (skipped > 0)
         std::cout << "\n(" << skipped << " instance(s) skipped)\n";

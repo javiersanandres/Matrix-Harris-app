@@ -26,3 +26,21 @@ target_compile_definitions(minimizeCrossingsResults
 target_link_libraries(minimizeCrossingsResults
     PRIVATE highs::highs
 )
+
+# Gurobi, so minimizeCrossingsILP.cpp's Gurobi backend (and this program's
+# ILP-Gurobi benchmark column, via ILPBackendTestHook.h) can actually be
+# compiled and exercised here, not just in the main "hypergraph" library.
+# Gurobi_FOUND / Gurobi_INCLUDE_DIRS / Gurobi_LIBRARIES are inherited from the
+# parent hypergraph_logic/src/CMakeLists.txt scope (this directory is reached
+# via its add_subdirectory(), which runs after that file's Gurobi detection),
+# so nothing needs to be re-detected here. Same runtime caveat as there:
+# GUROBI_AVAILABLE only means the SDK was found at configure time -- whether a
+# license is actually usable is still checked at runtime, in
+# minimizeCrossingsILP.cpp.
+if(Gurobi_FOUND)
+    target_compile_definitions(minimizeCrossingsResults PRIVATE GUROBI_AVAILABLE)
+    target_include_directories(minimizeCrossingsResults PRIVATE ${Gurobi_INCLUDE_DIRS})
+    target_link_libraries(minimizeCrossingsResults PRIVATE ${Gurobi_LIBRARIES})
+else()
+    message(STATUS "minimizeCrossingsResults: Gurobi not found -- ILP-Gurobi column will report N/A")
+endif()

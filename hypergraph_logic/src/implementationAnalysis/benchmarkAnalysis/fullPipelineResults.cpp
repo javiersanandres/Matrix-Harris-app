@@ -1,7 +1,6 @@
 #include "GraphicalHypergraph.h"
 #include "LayoutTypes.h"
-#include "HypergraphRenderer.h"   // app/ui/include — adjust the relative path
-// to wherever your build makes this visible.
+#include "HypergraphRenderer.h"   
 
 #include <QApplication>
 #include <QComboBox>

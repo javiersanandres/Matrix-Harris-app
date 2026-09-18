@@ -133,6 +133,19 @@ else()
     set(COMPILE_HORIZONTAL_ORDER TRUE)
 endif()
 
+# Let minimizeCrossingsILP.cpp prefer Gurobi over HiGHS when it's available.
+# GUROBI_AVAILABLE only means the SDK was found at configure time -- it says
+# nothing about whether a valid license is present on the machine that
+# eventually runs the binary. That's a runtime question (a license server can
+# be unreachable, a token/named-user license can expire, etc.), so the .cpp
+# checks for a working license itself at runtime and falls back to HiGHS
+# whenever that check fails, even though this flag is set.
+if(Gurobi_FOUND)
+    target_compile_definitions(hypergraph PRIVATE GUROBI_AVAILABLE)
+    target_include_directories(hypergraph PRIVATE ${Gurobi_INCLUDE_DIRS})
+    target_link_libraries(hypergraph PRIVATE ${Gurobi_LIBRARIES})
+endif()
+
 
 # ============================================================================
 # JSON (nlohmann) - header-only, fetched from official release tarball
