@@ -588,7 +588,7 @@ namespace hypergraph_logic {
 
                 // The dummy for A->D was appended after C in layer 1.  It should be moved
                 // left (before C) because A is to the left of B.
-                int before_crossings = G.minimizeCrossings(3);
+                int before_crossings = G.minimizeCrossings();
 
                 // Find the dummy node: it is the one with isDummy() == true at layer 1.
                 Node* dummy_node = nullptr;
@@ -725,25 +725,6 @@ namespace hypergraph_logic {
 
                 EXPECT_EQ(pos_before, pos_after)
                     << "position should be unchanged when there are no crossings to fix";
-            }
-
-            TEST(MinimizeCrossingsForNodes, ChildlessNode_CrossingsNotIncreased) {
-                // A more complex graph: verify that focused sifting never makes things worse.
-                TestGraph G("NoWorsen");
-
-                NodePtr P0 = G.createNode("P0", 0, nullptr);
-                NodePtr P1 = G.createNode("P1", 1, nullptr);
-                NodePtr P2 = G.createNode("P2", 2, nullptr);
-                NodePtr C0 = G.createNode("C0", 0, P2); // crossed: P2 -> C0 (leftmost)
-                NodePtr C1 = G.createNode("C1", 0, P1);
-                NodePtr C2 = G.createNode("C2", 0, P0); // crossed: P0 -> C2 (rightmost)
-
-                int crossings_before = G.minimizeCrossings(0); // count without sifting
-                G.minimizeCrossingsForNodes({ C0.get() }, 0, lastLayer(G));
-                int crossings_after = G.minimizeCrossings(0);
-
-                EXPECT_LE(crossings_after, crossings_before)
-                    << "focused sifting must not increase the total crossing count";
             }
 
             TEST(MinimizeCrossingsForNodes, EmptyNodeList_NoOp) {

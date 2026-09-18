@@ -873,6 +873,16 @@ namespace hypergraph_logic {
 		//
 		int minimizeCrossings(int sifting_rounds, int start_layer);
 
+		// ── minimizeCrossingsILP ────────────────────────────────────────────────
+		//
+		// Always runs the existing heuristic pipeline first as a safety net and
+		// then spends up to kILPTimeBudgetSeconds attempting the exact solve.
+		// The exact result is only kept if it is at least as good;
+		// otherwise the heuristic ordering already written into the layers
+		// stands untouched. Returns the resulting (possibly still heuristic)
+		// crossing count.
+		int minimizeCrossingsILP();
+
 		// ── minimizeCrossingsForNodes ─────────────────────────────────────────────────────────────────
 		//
 		// Runs a targeted crossing minimization pass that only moves the blocks associated with the

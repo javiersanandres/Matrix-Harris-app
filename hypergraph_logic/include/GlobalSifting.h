@@ -94,7 +94,11 @@ namespace sifting_internal {
 	// Encapsulates all state and algorithms required to run a full global-sifting
 	// crossing-reduction pass over a range of layers [start_layer, end_layer].
 	struct GlobalSifter {
-		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order=true);
+		// sifting_rounds is only used to decide whether to run the Efficient
+		// Barycenter seeding pass below (when order && sifting_rounds > 10); it has
+		// no other effect here and is not stored. The actual sifting rounds are
+		// still driven by the sifting_rounds argument passed to runSifting().
+		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order = true, int sifting_rounds = 0);
 
 #ifdef GS_TEST
 		// No-op constructor for unit tests. Skips the full pipeline so tests can
@@ -139,12 +143,28 @@ namespace sifting_internal {
 		// before the subgraph of the second node. This is the intended behaviour.
 		void buildBlockOrder(bool no_restriction = true);
 
+		// ── runEfficientBarycenter ─────────────────────────────────────────────────────────────────────────
+		//
+		// Runs Efficient Barycenter Algorithm as described in Dynamic Hierarchical
+		// Graph Drawing by A. A. K. Ismaeel. This way, the block order produced by
+		// buildBlockOrder() is re-seeded and improved, which could potentially result
+		// in a better performance of Global Sifting.
+		void runEfficientBarycenter(int max_iterations = 100);
+
 		// Run up to sifting_rounds rounds of the global sifting sweep.
 		void runSifting(int sifting_rounds);
+
+		// Solve an ILP to minimize crossings.
+		int runCrossingILP(double time_budget_seconds);
 
 		// Commit the block ordering back to LayerData::nodes for every layer
 		// in [start_layer_, end_layer_].
 		void writeBack();
+
+		// Counterpart to writeBack() for the ILP path in runCrossingILP():
+		// commits the node order left in S_.g1_layers back to LayerData::nodes
+		// for every real (even-keyed) row.
+		void writeBackFromG1Order();
 
 		// Count and return the total number of crossings in the current ordering.
 		int countCrossings();

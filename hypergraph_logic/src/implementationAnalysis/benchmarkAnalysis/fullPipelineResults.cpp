@@ -1,5 +1,24 @@
 #include "GraphicalHypergraph.h"
 #include "LayoutTypes.h"
+#include "HypergraphRenderer.h"   // app/ui/include — adjust the relative path
+// to wherever your build makes this visible.
+
+#include <QApplication>
+#include <QComboBox>
+#include <QGraphicsPathItem>
+#include <QGraphicsRectItem>
+#include <QGraphicsScene>
+#include <QGraphicsView>
+#include <QHBoxLayout>
+#include <QLabel>
+#include <QMainWindow>
+#include <QPushButton>
+#include <QShowEvent>
+#include <QSplitter>
+#include <QTransform>
+#include <QVBoxLayout>
+#include <QWheelEvent>
+#include <QWidget>
 
 #include <algorithm>
 #include <chrono>
@@ -18,6 +37,7 @@
 
 namespace fs = std::filesystem;
 using namespace hypergraph_logic;
+using namespace ui;   // HypergraphRenderer lives in namespace ui
 
 // SOURCE_DIR resolves to the directory of this .cpp at compile time.
 // The CSV is written there so it always lands next to the source file,
@@ -180,19 +200,32 @@ static GraphicalHypergraph buildHypergraph(
 // ============================================================================
 // Post-layout crossing counter
 //
-// Mirrors coreSweep from HypergraphRenderer without drawing anything.
-// A crossing is any point where a horizontal bar would need a hop arc over
-// a vertical wire — i.e. where bar_y falls inside the booked y-interval of
-// a wire at some x strictly between the bar's x_min and x_max.
+// Mirrors coreSweep/drawVerticalSegments from HypergraphRenderer without
+// drawing anything. Two distinct things create a visible line crossing:
+//
+//   (a) A horizontal bar hopping over a vertical wire — bar_y falls inside
+//       the booked y-interval of a wire at some x strictly between the
+//       bar's x_min and x_max.
+//   (b) A dummy relay node's port-alignment "jog": when a dummy node's
+//       incoming port (from the gap above) and outgoing port (into the
+//       current gap) sit at different x, the renderer bridges them with a
+//       short horizontal segment at the dummy's own layer height
+//       (layer_y_prev). That segment can itself run straight through a
+//       different edge's vertical wire — a real crossing that has no bar
+//       and so is easy to miss if you only look for (a).
 //
 // Sweep per layer gap (layer_idx-1 → layer_idx):
 //
-//   Step 1 — Book vertical occupancy using port x-coordinates.
+//   Step 1 — Book vertical occupancy using port x-coordinates, and record
+//     any dummy-source port-alignment jogs seen along the way.
 //     trivial (1-src/1-tgt, zero-width) edges: one full-gap wire.
 //     non-trivial edges: source wires [layer_y_prev→bar_y], target wires [bar_y→layer_y].
 //
 //   Step 2 — For each non-trivial bar, count how many booked verticals
 //     it crosses (x strictly inside [x_min,x_max] and bar_y inside the interval).
+//
+//   Step 3 — For each recorded jog, count how many booked verticals it
+//     crosses the same way, using layer_y_prev in place of bar_y.
 // ============================================================================
 
 static double findPortX(const std::vector<Port>& ports, const Hyperedge* edge_ptr)
@@ -231,95 +264,96 @@ static int countLayoutCrossings(const GraphicalHypergraph& g)
 
         double layer_y = layer_layout.at(layer_idx);
         double layer_y_prev = layer_layout.at(layer_idx - 1);
-        // trivial_y: bar y for an edge whose span collapses to a single vertical
-        const double trivial_y = layer_y_prev - NODE_HEIGHT / 2.0;
 
-        // Mirror the renderer's stable_partition (trivials to the front).
-        std::stable_partition(incoming_edges.begin(), incoming_edges.end(),
-            [&](const HyperedgePtr& e) {
-                auto it = edge_layout.find(e.get());
-                return it != edge_layout.end() &&
-                    std::abs(it->second - trivial_y) < 1e-9;
-            });
-
-        // ── Step 1: book vertical occupancy ───────────────────────────────────
+        // ── Step 1: book vertical occupancy ─────────────────────────────────
         std::map<double, std::vector<VerticalOccupancy>> vertical_occupancy;
 
-        for (const auto& edge : incoming_edges) {
-            auto it_bar = edge_layout.find(edge.get());
-            double bar_y = (it_bar != edge_layout.end()) ? it_bar->second : trivial_y;
-            bool is_trivial = std::abs(bar_y - trivial_y) < 1e-9;
+        // Always construct a VerticalOccupancy from raw endpoints with this
+        // helper instead of aggregate-initialising {a, b} directly — which
+        // endpoint is numerically smaller depends on the layout's y-axis
+        // convention and on which of (bar_y, node boundary) happens to be
+        // "the bottom" for a given wire, and getting that backwards produces
+        // an inverted interval that the y_lo < bar_y < y_hi straddle test
+        // can never satisfy, silently dropping every crossing through it.
+        auto makeRange = [](double a, double b) -> VerticalOccupancy {
+            return { std::min(a, b), std::max(a, b) };
+            };
 
-            // Gather port x-values for sources and targets of this segment.
-            std::vector<double> src_xs, tgt_xs;
+        struct PortXY { double x; bool is_dummy; };
+
+        // Per-segment data, computed once and reused in Step 2 below.
+        // is_trivial means what it draws as: exactly one source, one
+        // target, and they sit at the same x — i.e. the wire really is a
+        // single straight vertical line with no horizontal offset to bridge.
+        struct SegmentInfo {
+            std::vector<PortXY> src_ports, tgt_ports;
+            bool   is_trivial = false;
+            double bar_y = 0.0;
+        };
+        std::vector<SegmentInfo> segments;
+        segments.reserve(incoming_edges.size());
+
+        for (const auto& edge : incoming_edges) {
+            SegmentInfo info;
+
             for (const auto& src_node : edge->getSources()) {
                 auto nl_it = node_layout.find(src_node.get());
                 if (nl_it == node_layout.end()) continue;
                 double px = findPortX(nl_it->second.source_ports, edge.get());
-                if (!std::isnan(px)) src_xs.push_back(px);
+                if (!std::isnan(px)) info.src_ports.push_back({ px, src_node->isDummy() });
             }
             for (const auto& tgt_node : edge->getTargets()) {
                 auto nl_it = node_layout.find(tgt_node.get());
                 if (nl_it == node_layout.end()) continue;
                 double px = findPortX(nl_it->second.target_ports, edge.get());
-                if (!std::isnan(px)) tgt_xs.push_back(px);
+                if (!std::isnan(px)) info.tgt_ports.push_back({ px, tgt_node->isDummy() });
             }
 
-            if (is_trivial) {
+            info.is_trivial = (info.src_ports.size() == 1 && info.tgt_ports.size() == 1 &&
+                std::abs(info.src_ports.front().x - info.tgt_ports.front().x) < 1e-9);
+
+            auto it_bar = edge_layout.find(edge.get());
+            info.bar_y = (it_bar != edge_layout.end())
+                ? it_bar->second
+                : (layer_y_prev - NODE_HEIGHT / 2.0);
+
+            if (info.is_trivial) {
                 // Single straight wire occupying the whole gap at one x.
-                if (!src_xs.empty()) {
-                    double x = src_xs.front();
-                    double y_top = edge->getSources().front()->isDummy()
-                        ? layer_y_prev
-                        : layer_y_prev - NODE_HEIGHT / 2.0;
-                    double y_bot = !tgt_xs.empty() && edge->getTargets().front()->isDummy()
-                        ? layer_y
-                        : layer_y + NODE_HEIGHT / 2.0;
-                    vertical_occupancy[x].push_back({ y_bot, y_top });
-                }
+                double x = info.src_ports.front().x;
+                double y_top = info.src_ports.front().is_dummy
+                    ? layer_y_prev
+                    : layer_y_prev - NODE_HEIGHT / 2.0;
+                double y_bot = info.tgt_ports.front().is_dummy
+                    ? layer_y
+                    : layer_y + NODE_HEIGHT / 2.0;
+                vertical_occupancy[x].push_back(makeRange(y_bot, y_top));
             }
             else {
-                // Source wires: upper-node-bottom → bar_y.
-                for (double x : src_xs) {
-                    bool dummy_src = edge->getSources().size() == 1 &&
-                        edge->getSources().front()->isDummy();
-                    double y_top = dummy_src ? layer_y_prev
+                // Source wires: upper-node-bottom ↔ bar_y.
+                for (const auto& pi : info.src_ports) {
+                    double y_top = pi.is_dummy ? layer_y_prev
                         : layer_y_prev - NODE_HEIGHT / 2.0;
-                    vertical_occupancy[x].push_back({ bar_y, y_top });
+                    vertical_occupancy[pi.x].push_back(makeRange(info.bar_y, y_top));
                 }
-                // Target wires: bar_y → lower-node-top.
-                for (double x : tgt_xs) {
-                    bool dummy_tgt = edge->getTargets().size() == 1 &&
-                        edge->getTargets().front()->isDummy();
-                    double y_bot = dummy_tgt ? layer_y
+                // Target wires: bar_y ↔ lower-node-top.
+                for (const auto& pi : info.tgt_ports) {
+                    double y_bot = pi.is_dummy ? layer_y
                         : layer_y + NODE_HEIGHT / 2.0;
-                    vertical_occupancy[x].push_back({ bar_y, y_bot });
+                    vertical_occupancy[pi.x].push_back(makeRange(info.bar_y, y_bot));
                 }
             }
+
+            segments.push_back(std::move(info));
         }
 
         // ── Step 2: count hops on non-trivial horizontal bars ─────────────────
-        for (const auto& edge : incoming_edges) {
-            auto it_bar = edge_layout.find(edge.get());
-            if (it_bar == edge_layout.end()) continue;
-            double bar_y = it_bar->second;
-            if (std::abs(bar_y - trivial_y) < 1e-9) continue;
+        for (const auto& seg : segments) {
+            if (seg.is_trivial) continue;
 
-            // Bar x-extent from port positions.
             double x_min = std::numeric_limits<double>::max();
             double x_max = -std::numeric_limits<double>::max();
-            for (const auto& src_node : edge->getSources()) {
-                auto nl_it = node_layout.find(src_node.get());
-                if (nl_it == node_layout.end()) continue;
-                double px = findPortX(nl_it->second.source_ports, edge.get());
-                if (!std::isnan(px)) { x_min = std::min(x_min, px); x_max = std::max(x_max, px); }
-            }
-            for (const auto& tgt_node : edge->getTargets()) {
-                auto nl_it = node_layout.find(tgt_node.get());
-                if (nl_it == node_layout.end()) continue;
-                double px = findPortX(nl_it->second.target_ports, edge.get());
-                if (!std::isnan(px)) { x_min = std::min(x_min, px); x_max = std::max(x_max, px); }
-            }
+            for (const auto& pi : seg.src_ports) { x_min = std::min(x_min, pi.x); x_max = std::max(x_max, pi.x); }
+            for (const auto& pi : seg.tgt_ports) { x_min = std::min(x_min, pi.x); x_max = std::max(x_max, pi.x); }
             if (x_min >= x_max) continue;
 
             // Each booked vertical at x ∈ (x_min, x_max) whose y-interval
@@ -327,9 +361,9 @@ static int countLayoutCrossings(const GraphicalHypergraph& g)
             for (const auto& [x, ranges] : vertical_occupancy) {
                 if (x <= x_min || x >= x_max) continue;
                 for (const auto& r : ranges) {
-                    if (bar_y > r.y_lo && bar_y < r.y_hi) {
+                    if (seg.bar_y > r.y_lo && seg.bar_y < r.y_hi) {
                         ++total;
-                        break; // at most one crossing per x-column per bar
+                        break;
                     }
                 }
             }
@@ -350,36 +384,48 @@ struct BenchmarkResult {
     std::string instance;
     double      mh_time_sec;
     int         mh_crossings;
-    double      mh_mip_time_sec;
-    int         mh_mip_crossings;
+    double      mh_gs_time_sec;
+    int         mh_gs_crossings;
+};
+
+// One benchmark instance's numbers PLUS both fully laid-out graphs (MH-only
+// and MH+GS), kept alive so the post-run viewer can render each with the
+// exact same GraphicalHypergraph its crossing count above was computed
+// from.
+struct BenchmarkRun {
+    BenchmarkResult      result;
+    GraphicalHypergraph  graph_mh;     // computeLayout() only, no explicit sifting
+    GraphicalHypergraph  graph_mh_gs;  // minimizeCrossings() [Global Sifting] + computeLayout()
 };
 
 // ============================================================================
 // Run one benchmark instance
 // ============================================================================
 
-static BenchmarkResult runBenchmark(const fs::path& csv_path)
+static BenchmarkRun runBenchmark(const fs::path& csv_path)
 {
     std::string stem = csv_path.stem().string();
     auto        records = parseBenchmarkCsv(csv_path);
 
-    // ── MH: global sifting only ───────────────────────────────────────────────
+    // ── MH: layout only, no explicit (global) sifting ─────────────────────────
     GraphicalHypergraph g_mh = buildHypergraph(stem, records);
     auto t0 = std::chrono::high_resolution_clock::now();
-    int  mh_cross = g_mh.minimizeCrossings();
+    g_mh.computeLayout();
     auto t1 = std::chrono::high_resolution_clock::now();
     double mh_sec = std::chrono::duration<double>(t1 - t0).count();
+    int mh_cross = countLayoutCrossings(g_mh);
 
-    // ── MH + MIP: sifting + full layout pipeline ──────────────────────────────
-    GraphicalHypergraph g_full = buildHypergraph(stem, records);
+    // ── MH + GS: Global Sifting, then the same layout pipeline ────────────────
+    GraphicalHypergraph g_mh_gs = buildHypergraph(stem, records);
     auto t2 = std::chrono::high_resolution_clock::now();
-    g_full.minimizeCrossings();
-    g_full.computeLayout();
+    g_mh_gs.minimizeCrossings();
+    g_mh_gs.computeLayout();
     auto t3 = std::chrono::high_resolution_clock::now();
-    double mh_mip_sec = std::chrono::duration<double>(t3 - t2).count();
-    int    mh_mip_cross = countLayoutCrossings(g_full);
+    double mh_gs_sec = std::chrono::duration<double>(t3 - t2).count();
+    int    mh_gs_cross = countLayoutCrossings(g_mh_gs);
 
-    return { stem, mh_sec, mh_cross, mh_mip_sec, mh_mip_cross };
+    BenchmarkResult result{ stem, mh_sec, mh_cross, mh_gs_sec, mh_gs_cross };
+    return BenchmarkRun{ std::move(result), std::move(g_mh), std::move(g_mh_gs) };
 }
 
 // ============================================================================
@@ -390,9 +436,9 @@ static void printTableHeader() {
     std::cout << "\n" << std::string(82, '=') << "\n"
         << std::left << std::setw(20) << "Instance"
         << std::right << std::setw(12) << "MH (s)"
-        << std::right << std::setw(12) << "MH+MIP (s)"
+        << std::right << std::setw(12) << "MH+GS (s)"
         << std::right << std::setw(14) << "Cross (MH)"
-        << std::right << std::setw(18) << "Cross (MH+MIP)"
+        << std::right << std::setw(18) << "Cross (MH+GS)"
         << "\n" << std::string(82, '-') << "\n";
 }
 
@@ -400,21 +446,21 @@ static void printRow(const BenchmarkResult& r) {
     std::cout
         << std::left << std::setw(20) << r.instance
         << std::right << std::setw(12) << std::fixed << std::setprecision(3) << r.mh_time_sec
-        << std::right << std::setw(12) << std::fixed << std::setprecision(3) << r.mh_mip_time_sec
+        << std::right << std::setw(12) << std::fixed << std::setprecision(3) << r.mh_gs_time_sec
         << std::right << std::setw(14) << r.mh_crossings
-        << std::right << std::setw(18) << r.mh_mip_crossings
+        << std::right << std::setw(18) << r.mh_gs_crossings
         << "\n";
 }
 
 static void printSummary(const std::vector<BenchmarkResult>& results) {
     std::cout << std::string(82, '=') << "\n";
-    double total_mh = 0, total_mhm = 0;
-    int    max_mh = 0, max_mhm = 0;
+    double total_mh = 0, total_gs = 0;
+    int    max_mh = 0, max_gs = 0;
     for (const auto& r : results) {
         total_mh += r.mh_time_sec;
-        total_mhm += r.mh_mip_time_sec;
+        total_gs += r.mh_gs_time_sec;
         max_mh = std::max(max_mh, r.mh_crossings);
-        max_mhm = std::max(max_mhm, r.mh_mip_crossings);
+        max_gs = std::max(max_gs, r.mh_gs_crossings);
     }
     int n = static_cast<int>(results.size());
     std::cout << "SUMMARY\n" << std::string(82, '-') << "\n"
@@ -422,12 +468,12 @@ static void printSummary(const std::vector<BenchmarkResult>& results) {
         << std::right << std::setw(6) << n << "\n"
         << std::left << std::setw(36) << "Total MH time (s)"
         << std::right << std::setw(6) << std::fixed << std::setprecision(3) << total_mh << "\n"
-        << std::left << std::setw(36) << "Total MH+MIP time (s)"
-        << std::right << std::setw(6) << std::fixed << std::setprecision(3) << total_mhm << "\n"
+        << std::left << std::setw(36) << "Total MH+GS time (s)"
+        << std::right << std::setw(6) << std::fixed << std::setprecision(3) << total_gs << "\n"
         << std::left << std::setw(36) << "Max crossings (MH)"
         << std::right << std::setw(6) << max_mh << "\n"
-        << std::left << std::setw(36) << "Max crossings (MH+MIP)"
-        << std::right << std::setw(6) << max_mhm << "\n"
+        << std::left << std::setw(36) << "Max crossings (MH+GS)"
+        << std::right << std::setw(6) << max_gs << "\n"
         << std::string(82, '=') << "\n";
 }
 
@@ -440,15 +486,237 @@ static void writeCsv(const std::vector<BenchmarkResult>& results) {
         std::cerr << "WARNING: could not write CSV to " << out << "\n";
         return;
     }
-    f << "instance;mh_time_sec;mh_crossings;mh_mip_time_sec;mh_mip_crossings\n";
+    f << "instance;mh_time_sec;mh_crossings;mh_gs_time_sec;mh_gs_crossings\n";
     for (const auto& r : results)
         f << r.instance << ";"
         << std::fixed << std::setprecision(6) << r.mh_time_sec << ";"
         << r.mh_crossings << ";"
-        << std::fixed << std::setprecision(6) << r.mh_mip_time_sec << ";"
-        << r.mh_mip_crossings << "\n";
+        << std::fixed << std::setprecision(6) << r.mh_gs_time_sec << ";"
+        << r.mh_gs_crossings << "\n";
     std::cout << "\nCSV written to " << fs::absolute(out) << "\n";
 }
+
+// ============================================================================
+// Post-run viewer
+//
+// Shows every hypergraph the benchmark just processed: for the selected
+// instance, BOTH the MH-only layout and the MH+GS (Global Sifting) layout
+// are rendered at once, stacked top/bottom (rather than side by side) since
+// these layered layouts tend to be wide and a horizontal split would
+// squeeze each one's width. Both panels use the SAME HypergraphRenderer
+// used by the interactive app — no drawing logic is reimplemented here.
+// ============================================================================
+
+// Ctrl+Wheel zooms; plain wheel/drag pans/scrolls as usual.
+class ZoomableGraphicsView : public QGraphicsView {
+public:
+    explicit ZoomableGraphicsView(QWidget* parent = nullptr) : QGraphicsView(parent) {
+        setRenderHint(QPainter::Antialiasing);
+        setDragMode(QGraphicsView::ScrollHandDrag);
+        setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
+    }
+
+    void zoomBy(double factor) {
+        double next = zoom_ * factor;
+        if (next < ZOOM_MIN || next > ZOOM_MAX) return;
+        zoom_ = next;
+        setTransform(QTransform::fromScale(zoom_, zoom_));
+    }
+
+    void resetZoom() {
+        zoom_ = 1.0;
+        resetTransform();
+    }
+
+protected:
+    void wheelEvent(QWheelEvent* e) override {
+        if (e->modifiers() & Qt::ControlModifier) {
+            zoomBy(e->angleDelta().y() > 0 ? ZOOM_STEP : 1.0 / ZOOM_STEP);
+            e->accept();
+        }
+        else {
+            QGraphicsView::wheelEvent(e);
+        }
+    }
+
+private:
+    static constexpr double ZOOM_STEP = 1.15;
+    static constexpr double ZOOM_MIN = 0.1;
+    static constexpr double ZOOM_MAX = 8.0;
+    double zoom_ = 1.0;
+};
+
+class HypergraphViewerWindow : public QMainWindow {
+public:
+    // Takes ownership of the runs (moves them in) so both graphs — and the
+    // Node*/Hyperedge* pointers HypergraphRenderer keys its item maps by —
+    // stay alive for as long as the window is open.
+    explicit HypergraphViewerWindow(std::vector<BenchmarkRun> runs, QWidget* parent = nullptr)
+        : QMainWindow(parent), runs_(std::move(runs))
+    {
+        setWindowTitle("Benchmark Hypergraphs — MH vs MH+GS Layout");
+        resize(1150, 900);
+        setStyleSheet("QMainWindow, QWidget { background: #f5f5f5; }");
+
+        auto* central = new QWidget(this);
+        setCentralWidget(central);
+        auto* vbox = new QVBoxLayout(central);
+        vbox->setContentsMargins(10, 10, 10, 10);
+        vbox->setSpacing(8);
+
+        // ── top bar: just the instance selector ──
+        auto* topBar = new QHBoxLayout;
+        auto* lbl = new QLabel("Instance:", central);
+        lbl->setStyleSheet("color:#333333; font-size:12px;");
+
+        combo_ = new QComboBox(central);
+        combo_->setStyleSheet(
+            "QComboBox {"
+            "  background:#ffffff; color:#111111;"
+            "  border:1px solid #aaaaaa; border-radius:4px;"
+            "  padding:4px 10px; font-size:13px; min-width:280px; }"
+            "QComboBox::drop-down { border:none; width:20px; }"
+            "QComboBox QAbstractItemView {"
+            "  background:#ffffff; color:#111111;"
+            "  selection-background-color:#d0e4ff; }");
+        for (const auto& run : runs_)
+            combo_->addItem(QString::fromStdString(run.result.instance));
+
+        topBar->addWidget(lbl);
+        topBar->addWidget(combo_, 1);
+        vbox->addLayout(topBar);
+
+        // ── two stacked panels: MH on top, MH+GS on the bottom ──
+        auto* splitter = new QSplitter(Qt::Vertical, central);
+        mh_panel_ = makePanel("MH  (layout only, no explicit sifting)", splitter);
+        gs_panel_ = makePanel("MH + GS  (Global Sifting, then layout)", splitter);
+        splitter->addWidget(mh_panel_.container);
+        splitter->addWidget(gs_panel_.container);
+        splitter->setStretchFactor(0, 1);
+        splitter->setStretchFactor(1, 1);
+        vbox->addWidget(splitter, 1);
+
+        QObject::connect(combo_, QOverload<int>::of(&QComboBox::currentIndexChanged),
+            [this](int idx) { showRun(idx); });
+
+        if (!runs_.empty()) {
+            combo_->setCurrentIndex(0);
+            showRun(0);
+        }
+    }
+
+protected:
+    // fitInView needs real widget sizes, which aren't final until the window
+    // is actually shown — refit both panels once that's happened.
+    void showEvent(QShowEvent* e) override {
+        QMainWindow::showEvent(e);
+        fit(mh_panel_);
+        fit(gs_panel_);
+    }
+
+private:
+    // One half of the split view: a title/info header, zoom controls, and
+    // its own scene + view.
+    struct Panel {
+        QWidget*                                            container = nullptr;
+        QLabel*                                              info = nullptr;
+        ZoomableGraphicsView*                                view = nullptr;
+        QGraphicsScene*                                      scene = nullptr;
+        std::unordered_map<Node*, QGraphicsRectItem*>        node_items;
+        std::unordered_map<Hyperedge*, QGraphicsPathItem*>   edge_items;
+    };
+
+    Panel makePanel(const QString& title, QWidget* parent) {
+        Panel p;
+        p.container = new QWidget(parent);
+        auto* v = new QVBoxLayout(p.container);
+        v->setContentsMargins(0, 0, 0, 0);
+        v->setSpacing(4);
+
+        auto* header = new QHBoxLayout;
+        auto* titleLbl = new QLabel(title, p.container);
+        titleLbl->setStyleSheet("color:#333333; font-size:12px; font-weight:bold;");
+
+        p.info = new QLabel(p.container);
+        p.info->setStyleSheet("color:#555555; font-size:11px;");
+
+        auto makeBtn = [&](const QString& label, const QString& tip) {
+            auto* btn = new QPushButton(label, p.container);
+            btn->setToolTip(tip);
+            btn->setFixedWidth(32);
+            btn->setStyleSheet(
+                "QPushButton { background:#fff; border:1px solid #aaa;"
+                " border-radius:3px; font-size:14px; font-weight:bold; }"
+                "QPushButton:hover { background:#e8f0ff; }");
+            return btn;
+            };
+        auto* btnZoomIn = makeBtn("+", "Zoom in  (Ctrl+Scroll)");
+        auto* btnZoomOut = makeBtn(QString::fromUtf8("\u2212"), "Zoom out (Ctrl+Scroll)");
+        auto* btnReset = makeBtn(QString::fromUtf8("\u2299"), "Reset zoom / fit to view");
+
+        header->addWidget(titleLbl);
+        header->addStretch();
+        header->addWidget(p.info);
+        header->addSpacing(12);
+        header->addWidget(btnZoomOut);
+        header->addWidget(btnZoomIn);
+        header->addWidget(btnReset);
+        v->addLayout(header);
+
+        p.scene = new QGraphicsScene(p.container);
+        p.view = new ZoomableGraphicsView(p.container);
+        p.view->setScene(p.scene);
+        p.view->setStyleSheet("QGraphicsView { border:1px solid #cccccc; background:#ffffff; }");
+        v->addWidget(p.view, 1);
+
+        ZoomableGraphicsView* view = p.view;
+        QGraphicsScene* scene = p.scene;
+        QObject::connect(btnZoomIn, &QPushButton::clicked, [view] { view->zoomBy(1.15); });
+        QObject::connect(btnZoomOut, &QPushButton::clicked, [view] { view->zoomBy(1.0 / 1.15); });
+        QObject::connect(btnReset, &QPushButton::clicked, [view, scene] {
+            view->resetZoom();
+            if (!scene->itemsBoundingRect().isEmpty())
+                view->fitInView(scene->itemsBoundingRect(), Qt::KeepAspectRatio);
+            });
+
+        return p;
+    }
+
+    void renderInto(Panel& p, const GraphicalHypergraph& g, double time_sec, int crossings) {
+        p.node_items.clear();
+        p.edge_items.clear();
+        // The real renderer — same call the interactive app makes.
+        HypergraphRenderer::render(g, p.scene, p.node_items, p.edge_items);
+
+        p.info->setText(QString("nodes: %1   edges: %2   crossings: %3   time: %4 s")
+            .arg(p.node_items.size())
+            .arg(p.edge_items.size())
+            .arg(crossings)
+            .arg(time_sec, 0, 'f', 3));
+
+        fit(p);
+    }
+
+    void fit(Panel& p) {
+        if (!p.scene) return;
+        p.view->resetZoom();
+        if (!p.scene->itemsBoundingRect().isEmpty())
+            p.view->fitInView(p.scene->itemsBoundingRect(), Qt::KeepAspectRatio);
+    }
+
+    void showRun(int idx) {
+        if (idx < 0 || idx >= static_cast<int>(runs_.size())) return;
+        const auto& run = runs_[idx];
+        renderInto(mh_panel_, run.graph_mh, run.result.mh_time_sec, run.result.mh_crossings);
+        renderInto(gs_panel_, run.graph_mh_gs, run.result.mh_gs_time_sec, run.result.mh_gs_crossings);
+    }
+
+    std::vector<BenchmarkRun> runs_;
+
+    QComboBox* combo_ = nullptr;
+    Panel mh_panel_;
+    Panel gs_panel_;
+};
 
 // ============================================================================
 // main
@@ -456,6 +724,11 @@ static void writeCsv(const std::vector<BenchmarkResult>& results) {
 
 int main(int argc, char* argv[])
 {
+    // Constructed up front, as Qt requires, even though most of main() below
+    // is unchanged console-mode benchmarking; the GUI only appears at the end.
+    QApplication app(argc, argv);
+    app.setStyle("Fusion");
+
     fs::path dir = (argc > 1) ? argv[1] : BENCHMARK_DIR;
 
     std::cout << "Benchmark Analysis — Crossing Minimisation & Layout Pipeline\n";
@@ -481,12 +754,14 @@ int main(int argc, char* argv[])
 
     printTableHeader();
     std::vector<BenchmarkResult> results;
+    std::vector<BenchmarkRun>    runs;   // kept for the viewer, launched below
 
     for (const auto& path : csv_files) {
         try {
-            BenchmarkResult r = runBenchmark(path);
-            results.push_back(r);
-            printRow(r);
+            BenchmarkRun run = runBenchmark(path);
+            results.push_back(run.result);
+            printRow(run.result);
+            runs.push_back(std::move(run));
         }
         catch (const std::exception& ex) {
             std::cerr << "  [SKIP] " << path.stem().string() << ": " << ex.what() << "\n";
@@ -495,5 +770,13 @@ int main(int argc, char* argv[])
 
     printSummary(results);
     writeCsv(results);
-    return 0;
+
+    // ── all computations are done — now show every hypergraph, menu-selectable ──
+    if (runs.empty()) {
+        std::cerr << "No hypergraphs to display.\n";
+        return 0;
+    }
+    HypergraphViewerWindow viewer(std::move(runs));
+    viewer.show();
+    return app.exec();
 }

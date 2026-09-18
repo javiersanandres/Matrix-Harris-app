@@ -1,22 +1,38 @@
 // ============================================================================
 // minimizeCrossingsResults.cpp
 //
-// Efficiency measurements for the Global Sifting algorithm.
+// Efficiency measurements for the Global Sifting heuristic and the exact
+// ILP-based technique (GlobalSifter::runCrossingILP).
 //
-// For each .asp instance:
+// For each .asp instance, four techniques are measured:
 //
 //   (a) Natural — 50 distinct random permutations of the block list.
-//       Each permutation is sifted for 10 rounds. Averaged over all 50 runs:
-//       avg_before, avg_after, avg_ratio%, avg_time_ms.
-//       ratio% = 100 * after / before
+//       Each permutation is sifted for 10 rounds. Reported per instance:
+//       avg_crossings (final, averaged over all 50 runs), avg_time_ms.
 //
 //   (b) Propagation — one run starting from orderBlocksByLayerPropagation.
 //       The reported time includes both the ordering and the sifting phases.
-//       Reports: crossings_before, crossings_after, ratio%, time_ms.
 //
-// Outputs (written next to this source file):
-//   results_natural.csv
-//   results_propagation.csv
+//   (c) Barycenter — same orderBlocksByLayerPropagation seed as (b), refined
+//       by GlobalSifter::runEfficientBarycenter before sifting. Since it
+//       shares its seed and sifting rounds with (b), the delta between (b)
+//       and (c) isolates exactly what the barycenter pass buys (or costs)
+//       on top of an already-good seed.
+//
+//   (d) ILP — same orderBlocksByLayerPropagation + runEfficientBarycenter
+//       seed as (c), then mirrors Hypergraph::minimizeCrossingsILP() end to
+//       end: (c)'s full sifting result is kept as the fallback baseline,
+//       GlobalSifter::runCrossingILP is attempted under ILP_TIME_BUDGET_SECONDS,
+//       and whichever crossing count is smaller is reported. Time is the
+//       full round-trip (ordering + barycenter + fallback sifting + ILP
+//       attempt) -- exactly what a caller of minimizeCrossingsILP() pays,
+//       win or lose.
+//
+// We only ever care about the FINAL crossing count and the time it took to
+// get there -- no "before" counts, no ratios.
+//
+// Output (written next to this source file):
+//   results.csv  -- one row per (instance, method): instance;method;crossings;time_ms
 //   (semicolon-separated, comma as decimal separator — Spanish Excel format)
 //
 // Prints to stdout: progress + summary averages only.
@@ -67,6 +83,8 @@ struct ResultsSifter : GlobalSifter {
     void callSortAdjacencies() { sortAdjacencies(); }
     int  callSiftingStep(int a) { return siftingStep(a); }
     int  callCountCrossings() { return countCrossings(); }
+    void callRunEfficientBarycenter(int max_iterations) { runEfficientBarycenter(max_iterations); }
+    int  callRunCrossingILP(double time_budget_seconds) { return runCrossingILP(time_budget_seconds); }
 };
 
 static void sortAdjacencies(SiftState& S, BlockList& B) {
@@ -89,11 +107,30 @@ static int countTotalCrossings(SiftState& S, BlockList& B) {
     return r;
 }
 
+static void runEfficientBarycenter(SiftState& S, BlockList& B, int max_iterations = 100) {
+    ResultsSifter g(S, B);
+    g.callRunEfficientBarycenter(max_iterations);
+    S = g.S_; B = g.B_;
+}
+
+// Returns the resulting crossing count on success, or -1 if the solver
+// couldn't produce a usable solution within the time budget -- exactly
+// GlobalSifter::runCrossingILP's own contract. On success, S/B are
+// overwritten with the solved ordering (also matching runCrossingILP);
+// on failure they're left untouched.
+static int runCrossingILP(SiftState& S, BlockList& B, double time_budget_seconds) {
+    ResultsSifter g(S, B);
+    int r = g.callRunCrossingILP(time_budget_seconds);
+    if (r >= 0) { S = g.S_; B = g.B_; }
+    return r;
+}
+
 static constexpr int SIFTING_ROUNDS = 10;
 static constexpr int RANDOM_RUNS = 50;
 static constexpr int RNG_SEED = 42;
+static constexpr double ILP_TIME_BUDGET_SECONDS = 30.0; // matches minimizeCrossingsILP()'s default
 
-// Directory of this source file — CSVs are written here.
+// Directory of this source file — the CSV is written here.
 static const fs::path SOURCE_DIR = fs::path(__FILE__).parent_path();
 
 // ============================================================================
@@ -262,24 +299,25 @@ static BlockList orderBlocksByLayerPropagation(SiftState& S) {
 }
 
 // ============================================================================
-// Sifting runner — works on copies so S_base is never modified
+// Result types -- final crossing count + elapsed time only.
 // ============================================================================
 
 struct SingleRunResult {
-    int    crossings_before;
-    int    crossings_after;
+    int    crossings;
     double elapsed_ms;
-
-    double crossingRatio() const {
-        if (crossings_before == 0) return 0.0;
-        return 100.0 * crossings_after / static_cast<double>(crossings_before);
-    }
 };
+
+struct NaturalAggResult {
+    double avg_crossings;
+    double avg_time_ms;
+};
+
+// ============================================================================
+// Sifting runner — works on copies so S_base is never modified
+// ============================================================================
 
 static SingleRunResult runSifting(SiftState S, BlockList B) {
     sortAdjacencies(S, B);
-    SingleRunResult r;
-    r.crossings_before = countTotalCrossings(S, B);
 
     auto t0 = std::chrono::high_resolution_clock::now();
     int numblocks = static_cast<int>(B.size());
@@ -292,21 +330,15 @@ static SingleRunResult runSifting(SiftState S, BlockList B) {
     }
     auto t1 = std::chrono::high_resolution_clock::now();
 
+    SingleRunResult r;
     r.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
-    r.crossings_after = countTotalCrossings(S, B);
+    r.crossings = countTotalCrossings(S, B);
     return r;
 }
 
 // ============================================================================
-// Aggregated result for the natural (random) condition
+// (a) Natural — 50 random permutations, averaged
 // ============================================================================
-
-struct NaturalAggResult {
-    double avg_before;
-    double avg_after;
-    double avg_crossing_ratio;
-    double avg_time_ms;
-};
 
 static NaturalAggResult runNatural(const SiftState& S_base, std::mt19937& rng) {
     int n = static_cast<int>(S_base.blocks.size());
@@ -327,55 +359,108 @@ static NaturalAggResult runNatural(const SiftState& S_base, std::mt19937& rng) {
         ++attempts;
     }
 
-    double sum_before = 0, sum_after = 0, sum_ratio = 0, sum_time = 0;
+    double sum_crossings = 0, sum_time = 0;
     for (const auto& perm : perms) {
         SingleRunResult r = runSifting(S_base, perm);
-        sum_before += r.crossings_before;
-        sum_after += r.crossings_after;
-        sum_ratio += r.crossingRatio();
+        sum_crossings += r.crossings;
         sum_time += r.elapsed_ms;
     }
 
     int runs = static_cast<int>(perms.size());
-    return { sum_before / runs, sum_after / runs, sum_ratio / runs, sum_time / runs };
+    return { sum_crossings / runs, sum_time / runs };
 }
 
 // ============================================================================
-// CSV writers
+// (c) Barycenter — orderBlocksByLayerPropagation seed, refined by
+// GlobalSifter::runEfficientBarycenter, then sifted. Mirrors Propagation's
+// timing convention (ordering + refinement + sifting all folded into
+// elapsed_ms) so the two rows are directly comparable.
+// ============================================================================
+
+static SingleRunResult runBarycenter(SiftState S_base) {
+    auto t_ord_start = std::chrono::high_resolution_clock::now();
+    BlockList B = orderBlocksByLayerPropagation(S_base);
+    runEfficientBarycenter(S_base, B);
+    auto t_ord_end = std::chrono::high_resolution_clock::now();
+    double ordering_ms = std::chrono::duration<double, std::milli>(
+        t_ord_end - t_ord_start).count();
+
+    SingleRunResult r = runSifting(S_base, B);
+    r.elapsed_ms += ordering_ms;   // fold ordering + barycenter cost into total time
+    return r;
+}
+
+// ============================================================================
+// (d) ILP — same orderBlocksByLayerPropagation + runEfficientBarycenter seed
+// as Barycenter. From there this mirrors Hypergraph::minimizeCrossingsILP()
+// end to end: full sifting on the seed is the fallback baseline, then
+// GlobalSifter::runCrossingILP is attempted under ILP_TIME_BUDGET_SECONDS,
+// and whichever crossing count is smaller wins. Reported elapsed_ms is the
+// FULL round trip (ordering + barycenter + fallback sifting + ILP attempt),
+// since that is exactly what a caller of minimizeCrossingsILP() pays
+// regardless of which side ends up winning.
+// ============================================================================
+
+static SingleRunResult runILP(SiftState S_base) {
+    auto t0 = std::chrono::high_resolution_clock::now();
+
+    BlockList B = orderBlocksByLayerPropagation(S_base);
+    runEfficientBarycenter(S_base, B);
+
+    // Fallback baseline: same seed, fully sifted (mirrors minimizeCrossingsILP()'s
+    // own safety net, which always runs this unconditionally before attempting
+    // the exact solve).
+    SiftState S_fallback = S_base;
+    BlockList B_fallback = B;
+    SingleRunResult fallback = runSifting(S_fallback, B_fallback);
+
+    // Exact solve attempt, on a fresh copy of the same seed.
+    SiftState S_ilp = S_base;
+    BlockList B_ilp = B;
+    sortAdjacencies(S_ilp, B_ilp);
+    int ilp_crossings = runCrossingILP(S_ilp, B_ilp, ILP_TIME_BUDGET_SECONDS);
+
+    auto t1 = std::chrono::high_resolution_clock::now();
+
+    SingleRunResult r;
+    r.crossings = (ilp_crossings >= 0 && ilp_crossings <= fallback.crossings)
+        ? ilp_crossings : fallback.crossings;
+    r.elapsed_ms = std::chrono::duration<double, std::milli>(t1 - t0).count();
+    return r;
+}
+
+// ============================================================================
+// Combined CSV writer
+// One row per (instance, method): instance;method;crossings;time_ms
 // Semicolon-separated, comma as decimal separator (Spanish Excel format).
-// Files are written next to this source file.
+// Written next to this source file.
 // ============================================================================
 
-static void writeNaturalCsv(
+static void writeCombinedCsv(
     const std::vector<std::string>& names,
-    const std::vector<NaturalAggResult>& results)
+    const std::vector<NaturalAggResult>& nat,
+    const std::vector<SingleRunResult>& prop,
+    const std::vector<SingleRunResult>& bary,
+    const std::vector<SingleRunResult>& ilp)
 {
-    fs::path out = SOURCE_DIR / "results_natural.csv";
+    fs::path out = SOURCE_DIR / "results.csv";
     std::ofstream f(out);
-    f << "instance;avg_crossings_before;avg_crossings_after;avg_crossing_ratio_pct;avg_time_ms\n";
-    for (size_t i = 0; i < names.size(); ++i)
-        f << names[i] << ";"
-        << fmtDouble(results[i].avg_before) << ";"
-        << fmtDouble(results[i].avg_after) << ";"
-        << fmtDouble(results[i].avg_crossing_ratio) << ";"
-        << fmtDouble(results[i].avg_time_ms) << "\n";
-    std::cout << "Natural results      -> " << fs::absolute(out) << "\n";
-}
-
-static void writePropCsv(
-    const std::vector<std::string>& names,
-    const std::vector<SingleRunResult>& results)
-{
-    fs::path out = SOURCE_DIR / "results_propagation.csv";
-    std::ofstream f(out);
-    f << "instance;crossings_before;crossings_after;crossing_ratio_pct;time_ms\n";
-    for (size_t i = 0; i < names.size(); ++i)
-        f << names[i] << ";"
-        << results[i].crossings_before << ";"
-        << results[i].crossings_after << ";"
-        << fmtDouble(results[i].crossingRatio()) << ";"
-        << fmtDouble(results[i].elapsed_ms) << "\n";
-    std::cout << "Propagation results  -> " << fs::absolute(out) << "\n";
+    f << "instance;method;crossings;time_ms\n";
+    for (size_t i = 0; i < names.size(); ++i) {
+        f << names[i] << ";Natural;"
+            << fmtDouble(nat[i].avg_crossings) << ";"
+            << fmtDouble(nat[i].avg_time_ms) << "\n";
+        f << names[i] << ";Propagation;"
+            << prop[i].crossings << ";"
+            << fmtDouble(prop[i].elapsed_ms) << "\n";
+        f << names[i] << ";Barycenter;"
+            << bary[i].crossings << ";"
+            << fmtDouble(bary[i].elapsed_ms) << "\n";
+        f << names[i] << ";ILP;"
+            << ilp[i].crossings << ";"
+            << fmtDouble(ilp[i].elapsed_ms) << "\n";
+    }
+    std::cout << "Results -> " << fs::absolute(out) << "\n";
 }
 
 // ============================================================================
@@ -384,7 +469,9 @@ static void writePropCsv(
 
 static void printSummary(
     const std::vector<NaturalAggResult>& nat,
-    const std::vector<SingleRunResult>& prop)
+    const std::vector<SingleRunResult>& prop,
+    const std::vector<SingleRunResult>& bary,
+    const std::vector<SingleRunResult>& ilp)
 {
     auto avg = [](const auto& v, auto fn) {
         if (v.empty()) return 0.0;
@@ -393,31 +480,37 @@ static void printSummary(
         return s / static_cast<double>(v.size());
         };
 
-    double nat_ratio = avg(nat, [](const NaturalAggResult& r) { return r.avg_crossing_ratio; });
+    double nat_crossings = avg(nat, [](const NaturalAggResult& r) { return r.avg_crossings; });
     double nat_time = avg(nat, [](const NaturalAggResult& r) { return r.avg_time_ms; });
-    double prop_ratio = avg(prop, [](const SingleRunResult& r) { return r.crossingRatio(); });
+    double prop_crossings = avg(prop, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
     double prop_time = avg(prop, [](const SingleRunResult& r) { return r.elapsed_ms; });
+    double bary_crossings = avg(bary, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
+    double bary_time = avg(bary, [](const SingleRunResult& r) { return r.elapsed_ms; });
+    double ilp_crossings = avg(ilp, [](const SingleRunResult& r) { return static_cast<double>(r.crossings); });
+    double ilp_time = avg(ilp, [](const SingleRunResult& r) { return r.elapsed_ms; });
 
     std::cout << "\n";
     std::cout << std::string(48, '=') << "\n";
-    std::cout << "SUMMARY  (ratio% = 100 * after / before)\n";
+    std::cout << "SUMMARY  (averages across all instances)\n";
     std::cout << std::string(48, '-') << "\n";
-    std::cout << std::left << std::setw(24) << ""
-        << std::right << std::setw(10) << "Avg.Rat%"
+    std::cout << std::left << std::setw(16) << ""
+        << std::right << std::setw(14) << "Avg.Crossings"
         << std::setw(14) << "Avg.Time(ms)"
         << "\n";
     std::cout << std::string(48, '-') << "\n";
 
-    auto row = [&](const std::string& label, double ratio, double time) {
-        std::cout << std::left << std::setw(24) << label
+    auto row = [&](const std::string& label, double crossings, double time) {
+        std::cout << std::left << std::setw(16) << label
             << std::right
-            << std::setw(9) << std::fixed << std::setprecision(1) << ratio << "%"
+            << std::setw(14) << std::fixed << std::setprecision(2) << crossings
             << std::setw(14) << std::fixed << std::setprecision(2) << time
             << "\n";
         };
 
-    row("Natural", nat_ratio, nat_time);
-    row("Propagation", prop_ratio, prop_time);
+    row("Natural", nat_crossings, nat_time);
+    row("Propagation", prop_crossings, prop_time);
+    row("Barycenter", bary_crossings, bary_time);
+    row("ILP", ilp_crossings, ilp_time);
     std::cout << std::string(48, '=') << "\n";
 }
 
@@ -444,16 +537,19 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Global Sifting - Efficiency Measurements\n";
-    std::cout << "Instances  : " << fs::absolute(dir) << "\n";
-    std::cout << "Rounds     : " << SIFTING_ROUNDS << "\n";
-    std::cout << "Random runs: " << RANDOM_RUNS << "  (seed " << RNG_SEED << ")\n\n";
+    std::cout << "Global Sifting / ILP - Efficiency Measurements\n";
+    std::cout << "Instances    : " << fs::absolute(dir) << "\n";
+    std::cout << "Rounds       : " << SIFTING_ROUNDS << "\n";
+    std::cout << "Random runs  : " << RANDOM_RUNS << "  (seed " << RNG_SEED << ")\n";
+    std::cout << "ILP budget   : " << ILP_TIME_BUDGET_SECONDS << "s per instance\n\n";
 
     std::mt19937 rng(RNG_SEED);
 
     std::vector<std::string>       instance_names;
     std::vector<NaturalAggResult>  nat_results;
     std::vector<SingleRunResult>   prop_results;
+    std::vector<SingleRunResult>   bary_results;
+    std::vector<SingleRunResult>   ilp_results;
     int skipped = 0;
 
     for (const auto& path : files) {
@@ -489,15 +585,20 @@ int main(int argc, char* argv[]) {
         r_prop.elapsed_ms += ordering_ms;   // fold ordering cost into total time
         prop_results.push_back(r_prop);
 
+        // (c) Barycenter: same seed as (b), refined by runEfficientBarycenter
+        bary_results.push_back(runBarycenter(S_base));
+
+        // (d) ILP: same seed as (c), exact solve attempted on top
+        ilp_results.push_back(runILP(S_base));
+
         instance_names.push_back(name);
         std::cout << "  processed: " << name << "\n";
     }
 
-    printSummary(nat_results, prop_results);
+    printSummary(nat_results, prop_results, bary_results, ilp_results);
 
     std::cout << "\n";
-    writeNaturalCsv(instance_names, nat_results);
-    writePropCsv(instance_names, prop_results);
+    writeCombinedCsv(instance_names, nat_results, prop_results, bary_results, ilp_results);
 
     if (skipped > 0)
         std::cout << "\n(" << skipped << " instance(s) skipped)\n";

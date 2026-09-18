@@ -32,7 +32,7 @@ namespace sifting_internal {
 	// ── GlobalSifter: construction ────────────────────────────────────────────────
 
 	GlobalSifter::GlobalSifter(int start_layer, int end_layer,
-		std::map<int, LayerData>& layers, bool order)
+		std::map<int, LayerData>& layers, bool order, int sifting_rounds)
 		: start_layer_(start_layer)
 		, end_layer_(end_layer)
 		, layers_(layers)
@@ -40,6 +40,17 @@ namespace sifting_internal {
 		buildG1();
 		buildBlocks();
 		buildBlockOrder(order);
+		// Only worth the extra pass when we're free to reorder every layer (no
+		// restriction) and there's a large-enough sifting budget ahead of us that
+		// a stronger seed will actually pay for itself.
+		if (order) {
+			if (sifting_rounds >= 10) {
+				runEfficientBarycenter();
+			}
+			else {
+				runEfficientBarycenter(10);
+			}
+		}
 		sortAdjacencies();
 	}
 
@@ -290,6 +301,91 @@ namespace sifting_internal {
 
 			upper_layer_order = lower_layer_order;
 			incoming_edges = data.outgoing_edges;
+		}
+	}
+
+	
+	// ── runEfficientBarycenter ────────────────────────────────────────────────────
+
+	void GlobalSifter::runEfficientBarycenter(int max_iterations) {
+		int nb = static_cast<int>(B_.size());
+		if (nb == 0) return;
+
+		struct Chunk { int begin, end; };
+		std::vector<Chunk> chunks;
+		for (int i = 0; i < nb; ) {
+			int layer = S_.g1_nodes[S_.blocks[B_[i]].upper()].g1_layer;
+			int j = i + 1;
+			while (j < nb && S_.g1_nodes[S_.blocks[B_[j]].upper()].g1_layer == layer) j++;
+			chunks.push_back({ i, j });
+			i = j;
+		}
+
+		// x[block_id]: current coordinate, always a rank local to the block's own chunk.
+		std::vector<double> x(S_.blocks.size(), 0.0);
+		for (const auto& ch : chunks)
+			for (int k = ch.begin; k < ch.end; k++)
+				x[B_[k]] = static_cast<double>(k - ch.begin);
+
+		auto blockOf = [&](int g1_idx) { return S_.g1_nodes[g1_idx].block_id; };
+
+		for (int iter = 0; iter < max_iterations; iter++) {
+			bool changed = false;
+
+			for (const auto& ch : chunks) {
+				// The anchor chunk (if any) is always first and must never move;
+				// its blocks are still read as neighbours below, just not reordered.
+				if (ch.begin < S_.fixed_position_count) continue;
+
+				int size = ch.end - ch.begin;
+				std::vector<double> bary(size);
+				for (int k = 0; k < size; k++) {
+					Block& blk = S_.blocks[B_[ch.begin + k]];
+					const std::vector<int>& parents = S_.g1_in[blk.upper()];
+					const std::vector<int>& children = S_.g1_out[blk.lower()];
+					int d_minus = static_cast<int>(parents.size());
+					int d_plus = static_cast<int>(children.size());
+
+					if (d_minus == 0 && d_plus == 0) {
+						bary[k] = x[B_[ch.begin + k]]; // isolated: don't move it
+					}
+					else if (d_minus == 0) {
+						double sum = 0.0;
+						for (int c : children) sum += x[blockOf(c)];
+						bary[k] = sum / d_plus;
+					}
+					else if (d_plus == 0) {
+						double sum = 0.0;
+						for (int p : parents) sum += x[blockOf(p)];
+						bary[k] = sum / d_minus;
+					}
+					else {
+						double sum_p = 0.0, sum_c = 0.0;
+						for (int p : parents) sum_p += x[blockOf(p)];
+						for (int c : children) sum_c += x[blockOf(c)];
+						bary[k] = sum_p / (2.0 * d_minus) + sum_c / (2.0 * d_plus);
+					}
+				}
+
+				std::vector<int> order(size);
+				std::iota(order.begin(), order.end(), 0);
+				std::stable_sort(order.begin(), order.end(),
+					[&](int a, int b) { return bary[a] < bary[b]; });
+
+				for (int k = 0; k < size; k++) {
+					if (order[k] != k) changed = true;
+				}
+
+				std::vector<int> new_chunk(size);
+				for (int k = 0; k < size; k++)
+					new_chunk[k] = B_[ch.begin + order[k]];
+				for (int k = 0; k < size; k++) {
+					B_[ch.begin + k] = new_chunk[k];
+					x[new_chunk[k]] = static_cast<double>(k);
+				}
+			}
+
+			if (!changed) break;
 		}
 	}
 
@@ -764,7 +860,7 @@ namespace hypergraph_logic {
 	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer) {
 		if (getLayers().empty()) return 0;
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
-		GlobalSifter sifter(start_layer, last_layer, layers_, true);
+		GlobalSifter sifter(start_layer, last_layer, layers_, true, sifting_rounds);
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.runSifting(sifting_rounds);
 		sifter.writeBack();

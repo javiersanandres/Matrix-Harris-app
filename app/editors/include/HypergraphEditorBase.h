@@ -360,10 +360,10 @@ namespace app_logic {
 		// commits the snapshot only if both succeed. Although minimizeCrossings does
 		// not change the topology it does change the visible ordering of nodes, which
 		// the user may want to undo.
-		int minimizeCrossings(int sifting_rounds = 10) {
+		int minimizeCrossings() {
 			auto saved = derived().takeSnapshot();
 			try {
-				int crossings = derived().graph().minimizeCrossings(sifting_rounds);
+				int crossings = derived().graph().minimizeCrossings();
 				derived().graph().computeLayout();
 				derived().commitSnapshot(std::move(saved));
 				return crossings;

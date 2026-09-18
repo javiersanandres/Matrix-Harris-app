@@ -70,8 +70,8 @@ namespace hypergraph_logic {
 		//
 		// Returns the total crossing count of the final ordering.
 		//
-		int minimizeCrossings(int sifting_rounds = 10) {
-			return Hypergraph::minimizeCrossings(sifting_rounds, 0);
+		int minimizeCrossings() {
+			return Hypergraph::minimizeCrossingsILP();
 		}
 
 		// ── Stage 2: node x-coordinates ───────────────────────────────────────────

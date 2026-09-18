@@ -41,6 +41,31 @@ target_link_libraries(hyperedge
 )
 
 # ============================================================================
+# HiGHS (MIT licensed MIP/LP solver) - header+source fetched, used privately
+# by GlobalSiftingILP.cpp for the exact crossing-minimization ILP. Kept
+# separate from the Gurobi setup below: that one is an optional, license-
+# gated dependency for horizontalOrder.cpp; this one is always available and
+# free, so minimizeCrossingsILP() never needs a license to build or run.
+# ============================================================================
+include(FetchContent)
+
+FetchContent_Declare(
+    highs
+    GIT_REPOSITORY https://github.com/ERGO-Code/HiGHS.git
+    GIT_TAG        v1.7.2   # bump if you want a newer release
+)
+
+# FAST_BUILD skips HiGHS' own docs/tests/extra binaries so this doesn't slow
+# down your configure step. Belt-and-suspenders: also shield HiGHS from
+# picking up this project's BUILD_TESTING=ON (used below for
+# graphical_hypergraph) so it doesn't try to build its own test suite too.
+set(FAST_BUILD ON CACHE BOOL "" FORCE)
+set(_saved_build_testing ${BUILD_TESTING})
+set(BUILD_TESTING OFF)
+FetchContent_MakeAvailable(highs)
+set(BUILD_TESTING ${_saved_build_testing})
+
+# ============================================================================
 # Hypergraph library
 # ============================================================================
 add_library(hypergraph)
@@ -49,6 +74,7 @@ target_sources(hypergraph
     PRIVATE
         Hypergraph.cpp
         minimizeCrossings.cpp
+        minimizeCrossingsILP.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -62,6 +88,7 @@ target_include_directories(hypergraph
 
 target_link_libraries(hypergraph
     PUBLIC node hyperedge
+    PRIVATE highs::highs
 )
 
 
@@ -110,8 +137,6 @@ endif()
 # ============================================================================
 # JSON (nlohmann) - header-only, fetched from official release tarball
 # ============================================================================
-include(FetchContent)
-
 FetchContent_Declare(
     json
     URL https://github.com/nlohmann/json/releases/download/v3.12.0/json.tar.xz
