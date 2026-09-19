@@ -1,0 +1,114 @@
+#pragma once
+
+#include "BusySpinner.h"
+#include "ILPCancellationToken.h"
+
+#include <QDialog>
+#include <functional>
+#include <thread>
+
+class QLabel;
+class QPushButton;
+class QTimer;
+
+namespace ui {
+
+    // ============================================================================
+    // MinimizingProgressDialog
+    //
+    // Modal dialog shown while a crossing-minimization runs, in either of the
+    // two modes (see Options below): "fast" (a fixed countdown, no way to
+    // cancel -- there's nothing meaningful to cancel in a ~5s window) or "slow"
+    // (open-ended, with a "Pausar" button wired to token.cancel()). Either way
+    // it runs the caller-supplied `task` on a worker thread, so the dialog's own
+    // event loop stays responsive while everything else in the application is
+    // blocked by its modality -- this is what gives the user feedback that
+    // something is happening, and what stops a frozen window from silently
+    // queuing up repeat clicks that would otherwise all fire at once when the
+    // call finally returns.
+    //
+    // Usage (see MainWindow::onMinimizeCrossings()):
+    //
+    //   int crossings = MinimizingProgressDialog::run(this,
+    //       [&](hypergraph_logic::ILPCancellationToken& token) {
+    //           return editor.minimizeCrossingsInterruptible(token);
+    //       },
+    //       { /*show_pausar=*/true, /*countdown_seconds=*/0 });
+    //
+    // run() blocks the calling (GUI) thread until the worker finishes -- one way
+    // or another -- then either returns the achieved crossing count or rethrows
+    // whatever exception the worker's task threw, so callers can catch it
+    // exactly like a synchronous call.
+    // ============================================================================
+    class MinimizingProgressDialog : public QDialog {
+        Q_OBJECT
+
+    public:
+        using Task = std::function<int(hypergraph_logic::ILPCancellationToken&)>;
+
+        struct Options {
+            // Slow mode: true -- shows "Pausar", wired to token.cancel(). Fast
+            // mode: false -- the exact solve is already capped internally at
+            // kILPTimeBudgetSeconds, so there's nothing useful to cancel in
+            // that short a window. (Task always takes a token regardless, for
+            // interface uniformity; a fast-mode task simply ignores it.)
+            bool show_pausar = true;
+
+            // > 0: shows a countdown from this many seconds down to 0, then
+            // switches to "Finalizando…" (fast mode: kILPTimeBudgetSeconds).
+            // 0: no countdown, just the open-ended "buscando…" text (slow
+            // mode). Purely cosmetic -- the dialog always actually closes on
+            // the worker finishing, never when the countdown reaches 0, since
+            // the real run can take a little longer than the nominal budget
+            // (heuristic fallback + layout recompute on top of the solve
+            // itself).
+            int countdown_seconds = 0;
+        };
+
+        // Runs `task` on a worker thread while showing a modal dialog centered
+        // over anchor's top-level window (anchor is also used as this dialog's
+        // Qt parent, so it stays on top of and closes with that window). Blocks
+        // until the worker finishes; rethrows whatever exception `task` threw,
+        // on the calling thread.
+        static int run(QWidget* anchor, Task task, Options options = {});
+
+    private slots:
+        void onPausarClicked();
+        void onWorkerFinished();
+        void onCountdownTick();
+
+    protected:
+        // Escape (and any other route to reject()) is ignored while the worker
+        // is still running: destroying this dialog with worker_ still joinable
+        // would call std::terminate(), and the whole point of this dialog is
+        // that the only ways out are Pausar (still waits for an actual stop,
+        // when shown at all) or the worker finishing on its own.
+        void reject() override;
+
+    private:
+        explicit MinimizingProgressDialog(QWidget* parent, const Options& options);
+
+        void startWorker(Task task);
+        void updateCountdownLabel();
+
+    signals:
+        // Emitted from the worker thread; Qt marshals this to the GUI thread
+        // automatically (queued connection, since the receiver lives there).
+        void workerFinished();
+
+    private:
+        Options options_;
+        int remaining_seconds_ = 0;
+
+        hypergraph_logic::ILPCancellationToken token_;
+        std::thread worker_;
+        int crossings_ = 0;
+        std::exception_ptr worker_exception_;
+
+        QLabel* message_label_;
+        BusySpinner* spinner_;
+        QPushButton* pausar_btn_ = nullptr; // null when options_.show_pausar is false
+        QTimer* countdown_timer_ = nullptr; // null when options_.countdown_seconds is 0
+    };
+
+} // namespace ui

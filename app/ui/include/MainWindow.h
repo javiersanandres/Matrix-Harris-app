@@ -4,11 +4,13 @@
 #include "DiagramScene.h"
 #include "DiagramView.h"
 #include "DiagramTabBar.h"
+#include "HelpButton.h"
 
 #include <QMainWindow>
 #include <QAction>
+#include <QActionGroup>
 #include <QMenu>
-#include <QPushButton>
+#include <QToolButton>
 #include <memory>
 #include <vector>
 
@@ -24,7 +26,7 @@ namespace ui {
     //   ├─────────────────────────────────────────────────────────┤
     //   │  DiagramTabBar  [ tab0 | tab1 | ... | [+] ]  [joint]   │
     //   ├─────────────────────────────────────────────────────────┤
-    //   │                                          [Minimizar...] │
+    //   │                        [Minimizar cruces (Rápido) ▾][?] │
     //   │              DiagramView (central)                      │
     //   │                                                         │
     //   └─────────────────────────────────────────────────────────┘
@@ -78,6 +80,7 @@ namespace ui {
 
         // ── Minimize crossings button ─────────────────────────────────────────────
         void onMinimizeCrossings();
+        void onMinimizeModeChanged(QAction* action);
         void onRemoveDiagram(int index);
 
     private:
@@ -121,8 +124,25 @@ namespace ui {
         // Tab bar
         DiagramTabBar* tab_bar_;
 
-        // "Minimizar cruces" button (top-right corner of central area)
-        QPushButton* minimize_crossings_btn_;
+        // "Minimizar cruces" split button (top-right corner of central area).
+        // Its label always reflects minimize_mode_ ("... (Rápido)" / "... (Lento)");
+        // clicking its main body runs onMinimizeCrossings() in that mode, and its
+        // side arrow opens a menu (action_mode_fast_ / action_mode_slow_, in
+        // minimize_mode_group_ so exactly one is ever checked) to change it.
+        QToolButton* minimize_crossings_btn_;
+        QAction* action_mode_fast_;
+        QAction* action_mode_slow_;
+        QActionGroup* minimize_mode_group_;
+
+        // "?" button to the right of minimize_crossings_btn_: no click action,
+        // just a hover tooltip explaining the two modes (stays open for as
+        // long as the mouse is over it -- see HelpButton).
+        HelpButton* minimize_help_btn_;
+
+        // Which mode onMinimizeCrossings() currently runs. Kept in sync with
+        // minimize_mode_group_'s checked action by onMinimizeModeChanged().
+        enum class MinimizeMode { Fast, Slow };
+        MinimizeMode minimize_mode_ = MinimizeMode::Fast;
 
         // ── Per-tab zoom state ───────────────────────────────────────────────────────
         // zoom_levels_[i] stores the last zoom factor for regular diagram i.

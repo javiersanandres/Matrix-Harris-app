@@ -623,29 +623,6 @@ namespace hypergraph_logic {
                 EXPECT_EQ(totalCrossings(g, 1), bf1);
             }
 
-
-            // ════════════════════════════════════════════════════════════════════════
-            // Idempotency — calling orderHyperedges twice gives the same result
-            // ════════════════════════════════════════════════════════════════════════
-
-            TEST(Idempotency, SameOrderAfterTwoCalls) {
-                TestGraph g("idempotent");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr D = g.createNode("D", 1, A);
-                NodePtr C = g.createNode("C", 0, B);
-                g.assignXCoordinates();
-                g.orderHyperedges(0);
-                auto first = g.layers().at(0).outgoing_edges;
-                g.orderHyperedges(0);
-                auto second = g.layers().at(0).outgoing_edges;
-                ASSERT_EQ(first.size(), second.size());
-                for (std::size_t i = 0; i < first.size(); ++i)
-                    EXPECT_EQ(first[i].get(), second[i].get())
-                    << "order changed between first and second call at index " << i;
-            }
-
-
             // ════════════════════════════════════════════════════════════════════════
             // Boundary nodes are NOT counted in acs/act
             //

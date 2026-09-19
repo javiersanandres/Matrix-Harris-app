@@ -42,6 +42,15 @@ namespace horizontal_overlapping_internal {
 
         constexpr double kInf = 1.0e30; // HiGHS' convention for "infinite" bound.
 
+        // Both backends are capped at this budget: orderHyperedges() runs
+        // interactively (after edits, on layout refresh, etc.), so a solver
+        // that ran unbounded on a pathological instance would freeze the UI.
+        // Both HiGHS and Gurobi return whatever incumbent they've found so
+        // far when the limit is hit, not a hard failure -- solve() below
+        // accepts that "good enough" solution the same way it would accept a
+        // proven optimum.
+        constexpr double kSolveTimeLimitSeconds = 1.0;
+
         // Incrementally-built row-wise sparse constraint, plus the finished bounds.
         // One instance == one constraint "lo <= sum(idx[i]*val[i]) <= hi".
         struct SparseRow {
@@ -95,6 +104,7 @@ namespace horizontal_overlapping_internal {
 
             Highs highs;
             highs.setOptionValue("output_flag", false);
+            highs.setOptionValue("time_limit", kSolveTimeLimitSeconds);
             if (highs.passModel(model) != HighsStatus::kOk) return result;
 
             // Warm start from the layer's existing hyperedge order (see
@@ -142,6 +152,7 @@ namespace horizontal_overlapping_internal {
                 env.set(GRB_IntParam_OutputFlag, 0);
                 env.start();
                 GRBModel model(env);
+                model.set(GRB_DoubleParam_TimeLimit, kSolveTimeLimitSeconds);
 
                 int n = static_cast<int>(m.col_lower.size());
                 std::vector<GRBVar> vars(n);

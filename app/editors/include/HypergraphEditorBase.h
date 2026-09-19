@@ -1,5 +1,6 @@
 #pragma once
 #include "GraphicalHypergraph.h"
+#include "ILPCancellationToken.h"
 
 #include <deque>
 #include <stdexcept>
@@ -276,10 +277,10 @@ namespace app_logic {
 				std::set<int> mip_layers;
 				if (edge->isSegment()) {
 					HyperedgePtr origin = edge->getOrigin().lock();
-					derived().graph().removeSourcesFromHyperedge(origin, {source.get()}, true, &mip_layers);
+					derived().graph().removeSourcesFromHyperedge(origin, { source.get() }, true, &mip_layers);
 				}
 				else {
-					derived().graph().removeSourcesFromHyperedge(edge, {source.get()}, true, &mip_layers);
+					derived().graph().removeSourcesFromHyperedge(edge, { source.get() }, true, &mip_layers);
 				}
 				derived().graph().computeLayout(mip_layers);
 			}
@@ -299,10 +300,10 @@ namespace app_logic {
 				std::set<int> mip_layers;
 				if (edge->isSegment()) {
 					HyperedgePtr origin = edge->getOrigin().lock();
-					derived().graph().removeTargetsFromHyperedge(origin, {target.get()}, true, &mip_layers);
+					derived().graph().removeTargetsFromHyperedge(origin, { target.get() }, true, &mip_layers);
 				}
 				else {
-					derived().graph().removeTargetsFromHyperedge(edge, {target.get()}, true, &mip_layers);
+					derived().graph().removeTargetsFromHyperedge(edge, { target.get() }, true, &mip_layers);
 				}
 				derived().graph().computeLayout(mip_layers);
 			}
@@ -354,12 +355,12 @@ namespace app_logic {
 			derived().commitSnapshot(std::move(saved));
 		}
 
-		// ── minimizeCrossings ─────────────────────────────────────────────────────
+		// ── minimizeCrossings ("Minimize (fast)") ───────────────────────────────────────
 		//
-		// Clones the graph, runs the global sifting algorithm + computeLayout(), and
-		// commits the snapshot only if both succeed. Although minimizeCrossings does
+		// Clones the graph, runs GraphicalHypergraph::minimizeCrossings + computeLayout(), 
+		// and commits the snapshot only if both succeed. Although minimizeCrossings does
 		// not change the topology it does change the visible ordering of nodes, which
-		// the user may want to undo.
+		// the user may want to undo. minimmizeCrossings call will last 5 seconds at most.
 		int minimizeCrossings() {
 			auto saved = derived().takeSnapshot();
 			try {
@@ -371,7 +372,32 @@ namespace app_logic {
 			catch (...) {
 				throw;
 			}
-		}	
+		}
+
+		// ── minimizeCrossingsInterruptible ("Minimize (slow)") ───────────────────
+		//
+		// Same as minimizeCrossings function above, except the exact solve runs 
+		// with NO time limit, stoppable instead via `token`.
+		//
+		// IMPORTANT (threading): this method itself still blocks synchronously
+		// until the exact solve stops, one way or another -- it does not spawn a
+		// thread. The caller MUST invoke this from a worker thread, not the UI
+		// thread, or the UI will be unable to process the Pause click (or
+		// anything else) while this runs. Do not call this again, on any editor,
+		// before a previously-armed call has actually started and returned.
+		int minimizeCrossingsInterruptible(ILPCancellationToken& token) {
+			auto saved = derived().takeSnapshot();
+			try {
+				beginInterruptibleILP(token);
+				int crossings = derived().graph().minimizeCrossings();
+				derived().graph().computeLayout();
+				derived().commitSnapshot(std::move(saved));
+				return crossings;
+			}
+			catch (...) {
+				throw;
+			}
+		}
 
 		// ── computeBracketedX ─────────────────────────────────────────────────────
 		//

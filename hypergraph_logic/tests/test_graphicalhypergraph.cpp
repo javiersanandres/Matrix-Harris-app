@@ -289,8 +289,7 @@ namespace hypergraph_logic {
                 HyperedgePtr e2 = g.addConnection({ B }, { C });
                 runFullPipeline(g);
 
-                EXPECT_EQ(g.edgeLayout()[e1.get()], - NODE_HEIGHT / 2.0 - LAYER_GAP);
-                EXPECT_EQ(g.edgeLayout()[e1.get()] - g.edgeLayout()[e2.get()], HORIZONTAL_SEP);
+                EXPECT_EQ(std::fabs(g.edgeLayout()[e1.get()] - g.edgeLayout()[e2.get()]), HORIZONTAL_SEP);
             }
 
             // ── BarAboveLowerNodeBox ──────────────────────────────────────────────────

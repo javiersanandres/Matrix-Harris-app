@@ -1,6 +1,7 @@
 #include "GlobalSifting.h"
 #include "Highs.h"
 #include "ILPBackendTestHook.h"
+#include "ILPCancellationToken.h"
 
 #ifdef GUROBI_AVAILABLE
 #include "gurobi_c++.h"
@@ -10,11 +11,10 @@
 #include <cmath>
 #include <map>
 #include <set>
+#include <string>
 #include <unordered_map>
 #include <utility>
 #include <vector>
-
-#include <iostream>
 
 // ==================================================================================
 // 
@@ -46,6 +46,16 @@
 // find_package(Gurobi) succeeds) *and* a working Gurobi license is actually
 // present on the machine at runtime, Gurobi is used instead, since it's
 // substantially faster on this kind of MIP.
+//
+// Two run modes (see ILPCancellationToken.h for the public API): by default
+// ("fast"), the exact-solve attempt is capped at kILPTimeBudgetSeconds and
+// always falls back to the heuristic if that runs out. If
+// hypergraph_logic::beginInterruptibleILP(token) was called immediately
+// before this solve, it instead runs with NO time limit, cooperatively
+// checking `token` from inside whichever backend is solving and stopping as
+// soon as it's cancelled ("slow", externally stoppable via a UI Pause
+// button). Both backends return whatever incumbent they'd found so far when
+// stopped this way, same as running out of a time budget.
 // 
 // ==================================================================================
 
@@ -66,7 +76,6 @@ namespace sifting_internal {
 		constexpr long long kMaxTransitivityConstraints = 300000;
 		constexpr long long kMaxColumns = 200000;
 
-		constexpr double kILPTimeBudgetSeconds = 15.0;
 		constexpr int kFallbackSiftingRounds = 10;
 
 		// Incrementally-built row-wise sparse constraint, plus the finished bounds.
@@ -102,7 +111,15 @@ namespace sifting_internal {
 		// ── HiGHS backend ──────────────────────────────────────────────────────
 		// Always available; this is the code that used to live directly in
 		// runCrossingILP() before there were two backends to choose between.
-		ILPSolveResult solveWithHighs(const ILPModel& m, double time_budget_seconds) {
+		//
+		// token == nullptr: "fast" mode, capped at time_budget_seconds.
+		// token != nullptr: "slow" mode -- time_budget_seconds is ignored
+		// entirely (no time_limit is set at all) and HiGHS's own MIP-interrupt
+		// callback is used instead, checking *token on every call (HiGHS makes
+		// this call periodically, whenever its MIP solver checks its own
+		// computation limits) and asking HiGHS to stop as soon as it's been
+		// cancelled by setting data_in->user_interrupt.
+		ILPSolveResult solveWithHighs(const ILPModel& m, double time_budget_seconds, ILPCancellationToken* token) {
 			ILPSolveResult result;
 
 			HighsModel model;
@@ -132,7 +149,25 @@ namespace sifting_internal {
 
 			Highs highs;
 			highs.setOptionValue("output_flag", false);
-			highs.setOptionValue("time_limit", time_budget_seconds);
+
+			if (token != nullptr) {
+				// Slow mode: no time limit; ask HiGHS to call us back
+				// periodically during the MIP search so we can request a stop.
+				highs.setCallback(
+					[](int, const std::string&, const HighsCallbackDataOut*,
+						HighsCallbackDataIn* data_in, void* user_data) {
+							auto* tok = static_cast<ILPCancellationToken*>(user_data);
+							if (tok != nullptr && tok->isCancelled()) {
+								data_in->user_interrupt = 1;
+							}
+					},
+					static_cast<void*>(token));
+				highs.startCallback(static_cast<int>(HighsCallbackType::kCallbackMipInterrupt));
+			}
+			else {
+				highs.setOptionValue("time_limit", time_budget_seconds);
+			}
+
 			if (highs.passModel(model) != HighsStatus::kOk) return result;
 
 			// Warm start from the heuristic's already-computed block order.
@@ -187,14 +222,41 @@ namespace sifting_internal {
 			return usable;
 		}
 
-		ILPSolveResult solveWithGurobi(const ILPModel& m, double time_budget_seconds) {
+		// Small GRBCallback that cooperatively asks Gurobi to stop as soon as
+		// `token` is cancelled. Gurobi invokes callback() periodically during
+		// the MIP search on its own solving thread, so no separate watcher
+		// thread is needed -- the same pattern as the HiGHS interrupt callback
+		// above, just via Gurobi's own callback mechanism instead.
+		class CancelCallback : public GRBCallback {
+		public:
+			explicit CancelCallback(ILPCancellationToken* token) : token_(token) {}
+		protected:
+			void callback() override {
+				if (token_ != nullptr && token_->isCancelled()) {
+					abort();
+				}
+			}
+		private:
+			ILPCancellationToken* token_;
+		};
+
+		// token == nullptr: "fast" mode, capped at time_budget_seconds.
+		// token != nullptr: "slow" mode -- no TimeLimit is set at all, and a
+		// CancelCallback is registered instead (see above).
+		ILPSolveResult solveWithGurobi(const ILPModel& m, double time_budget_seconds, ILPCancellationToken* token) {
 			ILPSolveResult result;
 			try {
 				GRBEnv env(true);
 				env.set(GRB_IntParam_OutputFlag, 0);
 				env.start();
 				GRBModel model(env);
-				model.set(GRB_DoubleParam_TimeLimit, time_budget_seconds);
+				CancelCallback cancel_cb(token);
+				if (token != nullptr) {
+					model.setCallback(&cancel_cb);
+				}
+				else {
+					model.set(GRB_DoubleParam_TimeLimit, time_budget_seconds);
+				}
 
 				int n = static_cast<int>(m.col_lower.size());
 				std::vector<GRBVar> vars(n);
@@ -257,6 +319,15 @@ namespace sifting_internal {
 		return false;
 #endif
 	}
+
+	// ── interruptible-solve hook (see ILPCancellationToken.h) ──────────────────
+	//
+	// Deliberately a plain (non-atomic) pointer: only the pointer itself needs
+	// no synchronization (it's set on one thread before the solve starts and
+	// read once, at the very start of that same solve, by runCrossingILP()
+	// below, which immediately resets it to nullptr so it can never leak past
+	// the one call it was armed for).
+	ILPCancellationToken* g_active_cancel_token = nullptr;
 
 	// ── runCrossingILP ────────────────────────────────────────────────────────────
 
@@ -464,14 +535,17 @@ namespace sifting_internal {
 		ILPBackendOverride backend = g_ilp_backend_override;
 		g_ilp_backend_override = ILPBackendOverride::kAuto;
 
+		ILPCancellationToken* cancel_token = g_active_cancel_token;
+		g_active_cancel_token = nullptr;
+
 		ILPSolveResult result;
 		switch (backend) {
 		case ILPBackendOverride::kForceHighs:
-			result = solveWithHighs(ilp_model, time_budget_seconds);
+			result = solveWithHighs(ilp_model, time_budget_seconds, cancel_token);
 			break;
 		case ILPBackendOverride::kForceGurobi:
 #ifdef GUROBI_AVAILABLE
-			result = solveWithGurobi(ilp_model, time_budget_seconds);
+			result = solveWithGurobi(ilp_model, time_budget_seconds, cancel_token);
 #endif
 			// No fallback here on purpose: a caller that explicitly forced
 			// Gurobi wants to know Gurobi failed, not get a HiGHS number back
@@ -481,11 +555,11 @@ namespace sifting_internal {
 		default:
 #ifdef GUROBI_AVAILABLE
 			if (gurobiUsable()) {
-				result = solveWithGurobi(ilp_model, time_budget_seconds);
+				result = solveWithGurobi(ilp_model, time_budget_seconds, cancel_token);
 			}
 #endif
 			if (!result.success) {
-				result = solveWithHighs(ilp_model, time_budget_seconds);
+				result = solveWithHighs(ilp_model, time_budget_seconds, cancel_token);
 			}
 			break;
 		}
@@ -557,13 +631,19 @@ namespace hypergraph_logic {
 	//
 	// Exact alternative to minimizeCrossings() for the whole graph.
 	// 
-	// Always runs the existing heuristic pipeline first as a safety net
-	// then spends up to kILPTimeBudgetSeconds attempting the exact solve.
+	// Always runs the existing heuristic pipeline first as a safety net, then
+	// attempts the exact solve in one of two modes (see ILPCancellationToken.h):
+	// by default ("fast"), up to kILPTimeBudgetSeconds; or, if
+	// beginInterruptibleILP() was called immediately before this call, with no
+	// time limit at all, stoppable instead via the token passed there ("slow").
 	// Whichever result is smaller is committed to layers_: the ILP path via
 	// writeBackFromG1Order(), the heuristic path via the existing block/pi-based
-	// writeBack().
+	// writeBack(). A cancelled or timed-out exact solve is handled identically
+	// either way -- it just falls back to the heuristic baseline.
 	int Hypergraph::minimizeCrossingsILP() {
-		if (getLayers().empty()) return 0;
+		if (getLayers().empty() || getAllHyperedges().size() < 2) {
+			throw std::logic_error("There is nothing to minimize.");
+		}
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 
 		GlobalSifter sifter(0, last_layer, layers_, true, kFallbackSiftingRounds);
@@ -573,8 +653,7 @@ namespace hypergraph_logic {
 		sifter.runSifting(kFallbackSiftingRounds);
 		int fallback_crossings = sifter.countCrossings();
 		if (fallback_crossings == 0) { sifter.writeBack(); return 0; }
-
-		// Attempt the exact solve (node-level, independent internal state).
+		
 		int ilp_crossings = sifter.runCrossingILP(kILPTimeBudgetSeconds);
 		if (ilp_crossings >= 0 && ilp_crossings <= fallback_crossings) {
 			sifter.writeBackFromG1Order();
@@ -583,6 +662,11 @@ namespace hypergraph_logic {
 
 		sifter.writeBack();
 		return fallback_crossings;
+	}
+
+	void beginInterruptibleILP(ILPCancellationToken& token) {
+		token.reset();
+		g_active_cancel_token = &token;
 	}
 
 } // namespace hypergraph_logic

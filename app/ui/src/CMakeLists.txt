@@ -23,6 +23,10 @@ target_sources(ui_lib
         DiagramTabWidget.cpp
         DiagramTabBar.cpp
         Dialogs.cpp
+        BusySpinner.cpp
+        MinimizingProgressDialog.cpp
+        HelpButton.cpp
+        HoverPopup.cpp
         MainWindow.cpp
     PUBLIC
         FILE_SET HEADERS
@@ -37,6 +41,10 @@ target_sources(ui_lib
             ../include/DiagramTabBar.h
             ../include/FuseNodesDialog.h
             ../include/AddHypergraphDialog.h
+            ../include/MinimizingProgressDialog.h
+            ../include/BusySpinner.h
+            ../include/HelpButton.h
+            ../include/HoverPopup.h
             ../include/MainWindow.h
 )
 

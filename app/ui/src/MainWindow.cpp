@@ -1,10 +1,13 @@
 #include "MainWindow.h"
 #include "AddHypergraphDialog.h"
 #include "FuseNodesDialog.h"
+#include "MinimizingProgressDialog.h"
+#include "HelpButton.h"
 
 #include <QMenuBar>
 #include <QMenu>
 #include <QAction>
+#include <QActionGroup>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QWidget>
@@ -14,6 +17,7 @@
 #include <QKeySequence>
 #include <QSplitter>
 #include <QStackedWidget>
+#include <QToolButton>
 
 using namespace app_logic;
 using namespace hypergraph_logic;
@@ -113,14 +117,54 @@ namespace ui {
         central_view_ = new DiagramView(nullptr, view_wrapper);
         view_layout->addWidget(central_view_, 1);
 
-        // "Minimizar cruces" button anchored to the top-right.
-        minimize_crossings_btn_ = new QPushButton("Minimizar cruces", view_wrapper);
-        minimize_crossings_btn_->setFixedWidth(140);
-        connect(minimize_crossings_btn_, &QPushButton::clicked,
+        // "Minimizar cruces" split button anchored to the top-right: clicking
+        // its main body runs minimize in the currently selected mode; its side
+        // arrow opens a menu to switch modes. A "?" button next to it explains
+        // the difference on hover.
+        minimize_crossings_btn_ = new QToolButton(view_wrapper);
+        minimize_crossings_btn_->setToolButtonStyle(Qt::ToolButtonTextOnly);
+        minimize_crossings_btn_->setPopupMode(QToolButton::MenuButtonPopup);
+        minimize_crossings_btn_->setFixedWidth(190);
+        connect(minimize_crossings_btn_, &QToolButton::clicked,
             this, &MainWindow::onMinimizeCrossings);
 
+        minimize_mode_group_ = new QActionGroup(this);
+        minimize_mode_group_->setExclusive(true);
+
+        action_mode_fast_ = new QAction("Minimizar cruces (Rápido)", this);
+        action_mode_fast_->setCheckable(true);
+        action_mode_fast_->setChecked(true);
+        minimize_mode_group_->addAction(action_mode_fast_);
+
+        action_mode_slow_ = new QAction("Minimizar cruces (Lento)", this);
+        action_mode_slow_->setCheckable(true);
+        minimize_mode_group_->addAction(action_mode_slow_);
+
+        connect(minimize_mode_group_, &QActionGroup::triggered,
+            this, &MainWindow::onMinimizeModeChanged);
+
+        auto* mode_menu = new QMenu(minimize_crossings_btn_);
+        mode_menu->addAction(action_mode_fast_);
+        mode_menu->addAction(action_mode_slow_);
+        minimize_crossings_btn_->setMenu(mode_menu);
+        minimize_crossings_btn_->setText(action_mode_fast_->text());
+
+        minimize_help_btn_ = new HelpButton(view_wrapper);
+        minimize_help_btn_->setText("?");
+        minimize_help_btn_->setFixedSize(22, 22);
+        minimize_help_btn_->setToolTip(
+            "<b>Rápido:</b> Intenta encontrar el mejor dibujo con un límite "
+            "de tiempo de 5 segundos.<br><br>"
+            "<b>Lento:</b> Busca el mejor dibujo sin límite de tiempo. "
+            "Permite pausar la búsqueda y muestra el mejor dibujo encontrado hasta entonces.<br><br>"
+            "💡 Utiliza el modo <b>Lento</b> para mejores dibujos 💡"
+        );
+
         auto* btn_layout = new QVBoxLayout;
-        btn_layout->addWidget(minimize_crossings_btn_);
+        auto* btn_row = new QHBoxLayout;
+        btn_row->addWidget(minimize_crossings_btn_);
+        btn_row->addWidget(minimize_help_btn_);
+        btn_layout->addLayout(btn_row);
         btn_layout->addStretch();
         view_layout->addLayout(btn_layout);
 
@@ -317,7 +361,7 @@ namespace ui {
                     "El proyecto actual tiene cambios no guardados. ¿Desea descartarlos y abrir otro proyecto?",
                     QMessageBox::Yes | QMessageBox::Cancel);
                 if (btn != QMessageBox::Yes) return;
-			}
+            }
             project_.reset();
             project_ = Project::load(path.toStdString());
             // Rebuild all scenes from the new project.
@@ -461,8 +505,68 @@ namespace ui {
     void MainWindow::onMinimizeCrossings() {
         int idx = project_->getActiveIndex();
         try {
-            if (idx == -1) project_->getJointEditor().minimizeCrossings();
-            else           project_->getEditor(idx).minimizeCrossings();
+            MinimizingProgressDialog::Options opts;
+
+            bool nothing_to_minimize = true;
+            for (const auto& [id, layer] : (idx == -1) ? project_->getJointEditor().getLayers() :
+                                                         project_->getEditor(idx).getLayers()) {
+                if (layer.outgoing_edges.size() > 1) {
+                    nothing_to_minimize = false;
+                    break;
+                }
+            }
+            
+            if (nothing_to_minimize) throw std::logic_error("Nothing to minimize");
+
+            if (minimize_mode_ == MinimizeMode::Fast) {
+                // Fast mode: same modal dialog as slow mode, but with a
+                // countdown from kILPTimeBudgetSeconds instead of open-ended
+                // text, and no "Pausar" button -- the solve is already capped
+                // to a few seconds internally, so there's nothing meaningful
+                // to cancel. Routing fast mode through the dialog too (rather
+                // than calling the editor directly) is what actually fixes
+                // the "looks frozen, clicks queue up" problem: the dialog's
+                // modality is what stops Qt from queuing further clicks on
+                // the button while this runs, and its worker thread is what
+                // keeps the dialog (and its spinner/countdown) responsive
+                // while it does.
+                opts.show_pausar = false;
+                opts.countdown_seconds = static_cast<int>(kILPTimeBudgetSeconds);
+
+                if (idx == -1) {
+                    MinimizingProgressDialog::run(minimize_crossings_btn_,
+                        [this](ILPCancellationToken&) {
+                            return project_->getJointEditor().minimizeCrossings();
+                        }, opts);
+                }
+                else {
+                    MinimizingProgressDialog::run(minimize_crossings_btn_,
+                        [this, idx](ILPCancellationToken&) {
+                            return project_->getEditor(idx).minimizeCrossings();
+                        }, opts);
+                }
+            }
+            else {
+                // Slow mode: same dialog, open-ended text + "Pausar" wired to
+                // token.cancel(). Everything else in the app is blocked by
+                // the dialog's modality while this runs; the dialog itself
+                // stays responsive to its own "Pausar" button.
+                opts.show_pausar = true;
+                opts.countdown_seconds = 0;
+
+                if (idx == -1) {
+                    MinimizingProgressDialog::run(minimize_crossings_btn_,
+                        [this](ILPCancellationToken& token) {
+                            return project_->getJointEditor().minimizeCrossingsInterruptible(token);
+                        }, opts);
+                }
+                else {
+                    MinimizingProgressDialog::run(minimize_crossings_btn_,
+                        [this, idx](ILPCancellationToken& token) {
+                            return project_->getEditor(idx).minimizeCrossingsInterruptible(token);
+                        }, opts);
+                }
+            }
 
             if (idx == -1) joint_scene_->rebuild();
             else           scenes_[idx]->rebuild();
@@ -472,6 +576,11 @@ namespace ui {
         catch (const std::exception& e) {
             QMessageBox::warning(this, "Error", QString::fromStdString(e.what()));
         }
+    }
+
+    void MainWindow::onMinimizeModeChanged(QAction* action) {
+        minimize_mode_ = (action == action_mode_slow_) ? MinimizeMode::Slow : MinimizeMode::Fast;
+        minimize_crossings_btn_->setText(action->text());
     }
 
     // ============================================================================
