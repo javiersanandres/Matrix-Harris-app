@@ -154,6 +154,15 @@ namespace bk_internal {
             const BlockList& B,
             int vdir,
             int hdir);
+
+        // ── Single-neighbour brightener (post-process) ────────────────────────────
+        //
+        // After horizontalCompaction has produced a first estimate of every node's
+        // x-coordinate, this pass looks for nodes with exactly one parent, or
+        // exactly one child (excluding any edge marked as a Type-1 conflict), and
+        // tries to move them directly onto that neighbour's x, clamped so the
+        // minimum separation to same-layer siblings is never violated.
+        static void brightenSingleNeighbours(const G2& g, std::vector<double>& x);
     };
 
 } // namespace bk_internal

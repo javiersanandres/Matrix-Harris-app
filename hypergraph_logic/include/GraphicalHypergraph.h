@@ -6,6 +6,8 @@
 
 using json = nlohmann::json;
 
+namespace port_assignment_internal { struct PortAssigner; };
+
 namespace hypergraph_logic {
 
 	// ── Port ──────────────────────────────────────────────────────────────────────
@@ -215,12 +217,29 @@ namespace hypergraph_logic {
 		//
 		void orderHyperedges(int layer);
 
+		// ── Stage 3.5: settle dummy chains before any port jog/conflict logic ─────
+		//
+		// Finds every maximal run of chain-linked dummy nodes (length 1 counts
+		// a lone "isolated" dummy is handled by exactly the same machinery) and
+		// moves each one, as a single rigid unit, to a settled x.
+		void placeDummyChains(std::vector<port_assignment_internal::PortAssigner*>& assigners, std::vector<double> min_spacing);
+
 		// ── Stage 4: port assignment ───────────────────────────────────────────────
 		//
 		// Builds and spaces ports for every layer pair and resolves
 		// vertical-segment overlaps.
 		//
 		void assignPorts();
+
+		// ── Stage 4.5: recentre node boxes under their own ports ──────────────────
+		//
+		// After buildPorts()/solveVerticalOverlaps() have fixed every port's final
+		// x-coordinate, a node's box may no longer look centred under its own
+		// ports (jog-reduction and conflict-solving both nudge individual ports
+		// independently of the node they sit on). This pass leaves ports exactly
+		// where they are and instead moves the node's box so that its left/right
+		// margin to its own leftmost/rightmost port is equal.
+		void recentreNodesUnderPorts();
 
 		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────
 		//

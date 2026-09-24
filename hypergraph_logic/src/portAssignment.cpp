@@ -2,7 +2,10 @@
 
 #include <algorithm>
 #include <climits>
+#include <cmath>
 #include <limits>
+#include <memory>
+#include <unordered_set>
 
 // ====================================================================================
 // This module implements the port assignment logic. This is almost the final step
@@ -36,6 +39,10 @@ namespace port_assignment_internal {
         , node_layout_(node_layout)
     {
         buildEdgeLookups();
+        for (int i = 0; i < static_cast<int>(upper_.nodes.size()); ++i)
+            upper_pos_[upper_.nodes[i].get()] = i;
+        for (int i = 0; i < static_cast<int>(lower_.nodes.size()); ++i)
+            lower_pos_[lower_.nodes[i].get()] = i;
     }
 
     // ── Lookup-table construction ─────────────────────────────────────────────────
@@ -85,6 +92,59 @@ namespace port_assignment_internal {
         return 1;
     }
 
+    // ── Node-position lookup ─────────────────────────────────────────────────────
+    //
+    // O(1) index of 'node' within its own layer's node list, backed by the
+    // tables built once at construction (upper_pos_/lower_pos_) instead of a
+    // linear scan over upper_.nodes/lower_.nodes.
+    int PortAssigner::positionInLayer(Node* node, bool is_upper) const {
+        const auto& pos_map = is_upper ? upper_pos_ : lower_pos_;
+        auto it = pos_map.find(node);
+        return it != pos_map.end() ? it->second : -1;
+    }
+
+    bool PortAssigner::edgeOrderedBefore(Hyperedge* a, Hyperedge* b) const {
+        return hyperedge_order_.at(a) < hyperedge_order_.at(b);
+    }
+
+
+    bool PortAssigner::isLeftMost(Hyperedge* a, Node* n) const {
+        auto it = leftmost_nodes_.find(a);
+        if (it == leftmost_nodes_.end()) return false;
+        for (const auto& node : it->second) {
+            if (node == n) return true;
+        }
+        return false;
+    }
+
+    bool PortAssigner::isRightMost(Hyperedge* a, Node* n) const {
+        auto it = rightmost_nodes_.find(a);
+        if (it == rightmost_nodes_.end()) return false;
+        for (const auto& node : it->second) {
+            if (node == n) return true;
+        }
+        return false;
+    }
+
+
+    // ── Cross-boundary port search ────────────────────────────────────────────────
+    //
+    // Finds the port matching 'edge' on the named side of this pair -- used by
+    // a dummy chain to find whoever owns the port immediately above (source,
+    // on upper_) or below (target, on lower_) one of its own boundary ports.
+    PortAssigner::PortLookup PortAssigner::findSourceFor(Hyperedge* edge) const {
+        for (const auto& node : upper_.nodes)
+            for (const Port& p : node_layout_.at(node.get()).source_ports)
+                if (p.edge == edge) return { node.get(), p.x, true };
+        return {};
+    }
+
+    PortAssigner::PortLookup PortAssigner::findTargetFor(Hyperedge* edge) const {
+        for (const auto& node : lower_.nodes)
+            for (const Port& p : node_layout_.at(node.get()).target_ports)
+                if (p.edge == edge) return { node.get(), p.x, true };
+        return {};
+    }
 
     // ── Port ordering ─────────────────────────────────────────────────────────────
     //
@@ -135,21 +195,21 @@ namespace port_assignment_internal {
                     // edges has two nodes as rightmost and the other has only one, so we
                     // break the tie giving priority to the one with fewer rightmost nodes,
                     // which is more likely to cause crossings if placed in the middle.
-					size_a = rightmost_nodes_.at(a.edge).size();
+                    size_a = rightmost_nodes_.at(a.edge).size();
                     size_b = rightmost_nodes_.at(b.edge).size();
                     if (size_a != size_b) {
                         return size_a < size_b;
                     }
                     // If they have the same number, the tie is broken by the hyperedge order, as
-					// executed bellow for pos = 1.
+                    // executed bellow for pos = 1.
                 case 1:
                     return source ? hyperedge_order_.at(a.edge) < hyperedge_order_.at(b.edge)
                         : hyperedge_order_.at(a.edge) > hyperedge_order_.at(b.edge);
                 case 0:
                     // The same works for leftmost nodes, but in reverse: the one with fewer leftmost
-					// nodes is more likely to cause crossings if placed in the middle.
-					size_a = leftmost_nodes_.at(a.edge).size();
-					size_b = leftmost_nodes_.at(b.edge).size();
+                    // nodes is more likely to cause crossings if placed in the middle.
+                    size_a = leftmost_nodes_.at(a.edge).size();
+                    size_b = leftmost_nodes_.at(b.edge).size();
                     if (size_a != size_b) {
                         return size_a > size_b;
                     }
@@ -212,9 +272,9 @@ namespace port_assignment_internal {
                 }
                 else {
                     src_span.first = (si == 0)
-                        ? src_x - NODE_WIDTH / 2.0 : src_ports[si - 1].x;
+                        ? src_x - NODE_WIDTH / 2.0 + MIN_VERTICAL_SEP : src_ports[si - 1].x;
                     src_span.second = (si == static_cast<int>(src_ports.size()) - 1)
-                        ? src_x + NODE_WIDTH / 2.0 : src_ports[si + 1].x;
+                        ? src_x + NODE_WIDTH / 2.0 - MIN_VERTICAL_SEP : src_ports[si + 1].x;
                 }
 
                 if (tgt_node->isDummy()) {
@@ -222,9 +282,9 @@ namespace port_assignment_internal {
                 }
                 else {
                     tgt_span.first = (ti == 0)
-                        ? tgt_x - NODE_WIDTH / 2.0 : tgt_ports[ti - 1].x;
+                        ? tgt_x - NODE_WIDTH / 2.0 + MIN_VERTICAL_SEP : tgt_ports[ti - 1].x;
                     tgt_span.second = (ti == static_cast<int>(tgt_ports.size()) - 1)
-                        ? tgt_x + NODE_WIDTH / 2.0 : tgt_ports[ti + 1].x;
+                        ? tgt_x + NODE_WIDTH / 2.0 - MIN_VERTICAL_SEP : tgt_ports[ti + 1].x;
                 }
 
                 double inter_lo = std::max(src_span.first, tgt_span.first);
@@ -237,10 +297,6 @@ namespace port_assignment_internal {
                 src_ports[si].x = new_x;
                 tgt_ports[ti].x = new_x;
 
-                min_spacing = std::min(min_spacing,
-                    prev_src_x < new_x ? src_span.second - new_x : new_x - src_span.first);
-                min_spacing = std::min(min_spacing,
-                    prev_tgt_x < new_x ? tgt_span.second - new_x : new_x - tgt_span.first);
                 return true;
             };
 
@@ -248,11 +304,11 @@ namespace port_assignment_internal {
             return static_cast<int>(std::find_if(ports.begin(), ports.end(),
                 [edge](const Port& p) { return p.edge == edge; }) - ports.begin());
             };
-        
+
         // We loop over the edges, there are three cases to consider:
-		//  1) The edge has only one source and one target, so we can align those two ports.
-		//  2) The edge has two leftmost nodes, one source and one target, so we can align those two ports.
-		//  3) The edge has two rightmost nodes, one source and one target, so we can align those two ports.
+        //  1) The edge has only one source and one target, so we can align those two ports.
+        //  2) The edge has two leftmost nodes, one source and one target, so we can align those two ports.
+        //  3) The edge has two rightmost nodes, one source and one target, so we can align those two ports.
         // 
         // We will also keep track of the adjusted ports to arrange them symmetrically at the end.
         std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_src;
@@ -404,13 +460,8 @@ namespace port_assignment_internal {
         for (const auto& node : lower_.nodes)
             min_spacing = std::min(min_spacing, arrangeSymmetrically(node.get(), node_layout_[node.get()].target_ports));
 
-
-        // Reduce horizontal jogs.
-		min_spacing = std::min(min_spacing, reduceHorizontalJogs());
-
         return min_spacing;
     }
-
 
     // ── Conflict detection ────────────────────────────────────────────────────────
     //
@@ -533,10 +584,8 @@ namespace port_assignment_internal {
     // Given the contiguous ranges of conflicting ports in the upper and lower port
     // lists, redistributes them to eliminate the overlap. We avoid moving dummy ports
     // to avoid having horizontal jogs in the dummy chains, which would not be very 
-    // aesthetic. Four cases:
-    //
-    //   Both dummy -> each has exactly one port. Move the upper port only
-    //                 (to avoid disturbing the start of a dummy chain below).
+    // aesthetic. Three cases (a fourth, both dummy, is handled elsewhere -- see
+    // below):
     //
     //   Upper dummy -> upper port is fixed. Move the one or two conflicting
     //                  lower ports using shiftWithFixedPort.
@@ -554,28 +603,9 @@ namespace port_assignment_internal {
         double min_sep)
     {
         // ── Both dummy ────────────────────────────────────────────────────────────
-        // They have only one port each, so upper_range and lower_range are useless.
-        if (upper_node->isDummy() && lower_node->isDummy()) {
-            double sep = std::abs(lower_ports[0].x - upper_ports[0].x);
-            double deficit = min_sep - sep;
-            if (upper_ports[0].x < lower_ports[0].x) {
-                upper_ports[0].x -= deficit;
-            }
-            else if (upper_ports[0].x > lower_ports[0].x) {
-                upper_ports[0].x += deficit;
-            }
-            else {
-                // Exactly coincident: use edge topology to pick direction.
-                Hyperedge* le = lower_ports[0].edge;
-                if (isLeftmost(lower_node, le, leftmost_nodes_))  upper_ports[0].x -= deficit;
-                else if (isRightmost(lower_node, le, rightmost_nodes_)) upper_ports[0].x += deficit;
-                else {
-                    Hyperedge* ue = upper_ports[0].edge;
-                    upper_ports[0].x += isLeftmost(upper_node, ue, leftmost_nodes_) ? deficit : -deficit;
-                }
-            }
-            return;
-        }
+        // Dummy-to-dummy conflicts are fully resolved by straightenDummyChains(), 
+        // which runs before this pass and moves entire chains as rigid units.
+        if (upper_node->isDummy() && lower_node->isDummy()) return;
 
         // ── Upper dummy: keep upper port fixed, move lower port(s) ───────────────
         // The dummy part can only have one port, so upper_range is useless.
@@ -841,28 +871,769 @@ namespace port_assignment_internal {
         for (auto& [upper_node, lower_node] : detectConflicts(min_vertical_sep))
             solveConflict(upper_node, lower_node, min_vertical_sep);
     }
+
+
+    // ============================================================================
+    // Dummy chain straightening
+    // ============================================================================
+
+    // ── DummyChain ────────────────────────────────────────────────────────────
+
+    struct DummyChain {
+        std::vector<Node*> members;   // top (shallowest) -> bottom (deepest)
+        int top_layer = -1;
+        int bottom_layer = -1;
+    };
+
+    static bool isChainLink(Node* a, Node* b) {
+        if (!a->isDummy() || !b->isDummy()) return false;
+        auto a_children = a->getChildren();
+        if (a_children.size() != 1 || a_children[0].get() != b) return false;
+        auto b_parents = b->getParents();
+        if (b_parents.size() != 1 || b_parents[0].get() != a) return false;
+        return true;
+    }
+
+    // A dummy with more than one child (a branch point) or more than one
+    // parent (a merge point) can never be a chain-link's continuation, so it
+    // always ends up as, respectively, the bottom or the top of its own chain.
+    static std::vector<DummyChain> findDummyChains(const std::map<int, LayerData>& layers) {
+        std::vector<DummyChain> chains;
+        std::unordered_set<Node*> visited;
+
+        for (const auto& [layer, data] : layers) {
+            for (const auto& node_ptr : data.nodes) {
+                Node* d = node_ptr.get();
+                if (!d->isDummy() || visited.count(d)) continue;
+
+                // We found the start of a new chain
+                DummyChain chain;
+                Node* current = d;
+                while (true) {
+                    chain.members.push_back(current);
+                    visited.insert(current);
+                    auto children = current->getChildren();
+                    if (children.size() != 1 || !isChainLink(current, children[0].get())) break;
+                    current = children[0].get();
+                }
+                chain.top_layer = chain.members.front()->getLayer();
+                chain.bottom_layer = chain.members.back()->getLayer();
+                chains.push_back(std::move(chain));
+            }
+        }
+        return chains;
+    }
+
+    // ── Interval helpers ──────────────────────────────────────────────────────
+    //
+    // A chain's feasible x-range is a sorted list of disjoint [lo, hi] pieces:
+    // the node-separation window with every "conflicting region" (a real port's
+    // [-min_sep, +min_sep] buffer) punched out of it.
+
+    using Interval = std::pair<double, double>;
+
+    static std::vector<Interval> normalize(std::vector<Interval> v) {
+        v.erase(std::remove_if(v.begin(), v.end(),
+            [](const Interval& x) { return x.first >= x.second; }), v.end());
+        std::sort(v.begin(), v.end());
+        std::vector<Interval> out;
+        for (const auto& x : v)
+            if (!out.empty() && x.first < out.back().second)
+                out.back().second = std::max(out.back().second, x.second);
+            else
+                out.push_back(x);
+        return out;
+    }
+
+    static std::vector<Interval> subtractRegions(Interval window, std::vector<Interval> forbidden) {
+        std::vector<Interval> result;
+        if (window.first > window.second) return result;
+        double cursor = window.first;
+        for (const auto& [flo, fhi] : normalize(std::move(forbidden))) {
+            if (fhi <= window.first) continue;
+            if (flo >= window.second) break;
+            if (flo >= cursor) result.push_back({ cursor, flo });
+            cursor = fhi;
+        }
+        if (cursor <= window.second) result.push_back({ cursor, window.second });
+        return result;
+    }
+
+    static bool insideAny(const std::vector<Interval>& intervals, double x) {
+        for (auto& [lo, hi] : intervals) if (x >= lo && x <= hi) return true;
+        return false;
+    }
+
+    static double nearestInAny(const std::vector<Interval>& intervals, double x, double tie_break) {
+        double best = x, best_d = std::numeric_limits<double>::max();
+        for (auto& [lo, hi] : intervals) {
+            double cand = std::clamp(x, lo, hi);
+            double d = std::abs(cand - x);
+            if (d < best_d) { best_d = d; best = cand; }
+            else if (d == best_d) {
+                if (std::abs(cand - tie_break) < std::abs(best - tie_break)) best = cand;
+            }
+        }
+        return best;
+    }
+
+    static std::vector<Interval> intersectWithInterval(const std::vector<Interval>& regions, Interval bound) {
+        std::vector<Interval> result;
+        for (const auto& [lo, hi] : regions) {
+            double clo = std::max(lo, bound.first);
+            double chi = std::min(hi, bound.second);
+            if (clo <= chi) result.push_back({ clo, chi });
+        }
+        return result;
+    }
+
+    static std::vector<Interval> intersectIntervalFamilies(const std::vector<Interval>& family_1, const std::vector<Interval>& family_2) {
+        std::vector<Interval> result;
+
+        std::vector<Interval> f1 = normalize(family_1);
+        std::vector<Interval> f2 = normalize(family_2);
+
+        size_t k = 0, l = 0;
+        while (k < f1.size() && l < f2.size()) {
+            double lo = std::max(f1[k].first, f2[l].first);
+            double hi = std::min(f1[k].second, f2[l].second);
+            if (lo <= hi) result.push_back({ lo, hi }); // closed intervals: touching at a point still counts
+
+            // Whichever piece ends first can't overlap anything further along in
+            // the other family either, so it's the one that advances.
+            if (f1[k].second < f2[l].second) ++k;
+            else ++l;
+        }
+
+        return result;
+    }
+
+    // ── Per-chain geometry ────────────────────────────────────────────────────
+
+    // The assigner that treats 'layer' as its upper_ side, if any, else the
+    // one that treats it as its lower_ side.
+    static std::pair<PortAssigner*, bool> assignerForLayer(int layer,
+        const std::vector<PortAssigner*>& assigners)
+    {
+        if (layer < static_cast<int>(assigners.size()) && assigners[layer])
+            return { assigners[layer], true };
+        if (layer > 0 && assigners[layer - 1])
+            return { assigners[layer - 1], false };
+        return { nullptr, false };
+    }
+
+    static Interval memberLayerWindow(const LayerData& data, int idx,
+        std::unordered_map<Node*, NodeLayout>& node_layout)
+    {
+        const auto& nodes = data.nodes;
+        double low = std::numeric_limits<double>::lowest();
+        double high = std::numeric_limits<double>::max();
+        if (idx > 0) {
+            Node* l = nodes[idx - 1].get();
+            double width_l = l->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            low = node_layout.at(l).x + width_l * 0.5 + MIN_BLOCK_SEP;
+        }
+        if (idx < static_cast<int>(nodes.size()) - 1) {
+            Node* r = nodes[idx + 1].get();
+            double width_r = r->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            high = node_layout.at(r).x - width_r * 0.5 - MIN_BLOCK_SEP;
+        }
+        return { low, high };
+    }
+
+    // Intersection across every layer the chain crosses.
+    static Interval chainSeparationWindow(const DummyChain& chain,
+        const std::map<int, LayerData>& layers,
+        std::unordered_map<Node*, NodeLayout>& node_layout,
+        const std::vector<PortAssigner*>& assigners)
+    {
+        double low = std::numeric_limits<double>::lowest();
+        double high = std::numeric_limits<double>::max();
+        for (Node* member : chain.members) {
+            int layer = member->getLayer();
+            auto [assigner, is_upper] = assignerForLayer(layer, assigners);
+            int idx = assigner ? assigner->positionInLayer(member, is_upper) : -1;
+            Interval w = memberLayerWindow(layers.at(layer), idx, node_layout);
+            low = std::max(low, w.first);
+            high = std::min(high, w.second);
+        }
+        return { low, high };
+    }
+
+    // ── Forbidden regions for a dummy-chain boundary port ─────────────────────────
+    std::vector<std::pair<double, double>> PortAssigner::forbiddenRegionsAsUpper(
+        Node* upper_node, double min_sep, Node* skip) const
+    {
+        // Since the node is a dummy, just one source port can be found.
+        Port& upper_port = node_layout_.at(upper_node).source_ports.front();
+        std::vector<std::pair<double, double>> regions;
+        for (const auto& node : lower_.nodes) {
+            if (node.get() == skip) continue;
+
+            for (const Port& p : node_layout_.at(node.get()).target_ports) {
+                if (hyperedge_order_.at(upper_port.edge) > hyperedge_order_.at(p.edge)) {
+                    regions.push_back({ p.x - min_sep, p.x + min_sep });
+                }
+            }
+        }
+        return regions;
+    }
+
+    std::vector<std::pair<double, double>> PortAssigner::forbiddenRegionsAsLower(
+        Node* lower_node, double min_sep, Node* skip) const
+    {
+        // Since the node is a dummy, just one target port can be found.
+        Port& lower_port = node_layout_.at(lower_node).target_ports.front();
+        std::vector<std::pair<double, double>> regions;
+        for (const auto& node : upper_.nodes) {
+            if (node.get() == skip) continue;
+            for (const Port& p : node_layout_.at(node.get()).source_ports) {
+                if (hyperedge_order_.at(p.edge) > hyperedge_order_.at(lower_port.edge)) {
+                    regions.push_back({ p.x - min_sep, p.x + min_sep });
+                }
+            }
+        }
+        return regions;
+    }
+
+    static std::vector<Interval> topForbiddenRegions(const DummyChain& chain,
+        double min_sep, const std::vector<PortAssigner*>& assigners)
+    {
+        int origin = chain.top_layer - 1;
+        if (origin < 0 || origin >= static_cast<int>(assigners.size()) || !assigners[origin]) return {};
+        return assigners[origin]->forbiddenRegionsAsLower(chain.members.front(), min_sep); // our port plays the lower role here
+    }
+
+    static std::vector<Interval> bottomForbiddenRegions(const DummyChain& chain,
+        double min_sep, const std::vector<PortAssigner*>& assigners)
+    {
+        int origin = chain.bottom_layer;
+        if (origin >= static_cast<int>(assigners.size()) || !assigners[origin]) return {};
+        return assigners[origin]->forbiddenRegionsAsUpper(chain.members.back(), min_sep); // our port plays the upper role here
+    }
+
+    static std::vector<Interval> forbiddenRegions(const DummyChain& chain,
+        std::vector<double> min_spacing, const std::vector<PortAssigner*>& assigners) {
+        std::vector<Interval> result;
+
+        result = topForbiddenRegions(chain, min_spacing[chain.top_layer - 1], assigners);
+        for (const Interval& i : bottomForbiddenRegions(chain, min_spacing[chain.bottom_layer], assigners)) {
+            result.push_back(i);
+        }
+
+        return normalize(result);
+    }
+
+    // ── Per-boundary desire ───────────────────────────────────────────────────
+    enum class Kind { ConflictFull, ConflictPartial, ConflictForbiddenMovement, AlignFull, AlignPartial, AlignForbiddenMovement, None, NotVisited };
+
+    // ============================================================================
+    // Dummy chain placement
+    //
+    // Every function below is part of one pass: decide, for every chain end, a
+    // Kind and a desired_x range (resolveChainEnd and its helpers), then unify
+    // each chain's two ends into one final x (unifyChain and its helpers). They
+    // all read and write the same dozen-odd pieces of per-run state, so rather
+    // than have each be a lambda capturing the whole local scope by reference,
+    // they're ordinary free functions taking one shared context.
+    // ============================================================================
+
+    struct ChainPlacementContext {
+        const std::map<int, LayerData>& layers;
+        std::unordered_map<Node*, NodeLayout>& node_layout;
+        const std::vector<PortAssigner*>& assigners;
+        std::vector<double> min_spacing;
+
+        std::vector<DummyChain> chains;
+        std::unordered_map<Node*, int> node_to_chain;
+
+        std::vector<Interval> sep_window;
+        std::vector<std::vector<Interval>> forbidden_regions;
+        std::vector<std::pair<Kind, Kind>> settled;                                     // {top, bottom}
+        std::vector<std::pair<std::vector<Interval>, std::vector<Interval>>> desired_x; // {top, bottom}
+        std::vector<std::pair<double, double>> tie_break_x;                             // {top, bottom}
+    };
+
+    // ── Slot accessors ─────────────────────────────────────────────────────────
+    static Kind& settledSlot(ChainPlacementContext& ctx, int i, bool top) { return top ? ctx.settled[i].first : ctx.settled[i].second; }
+    static std::vector<Interval>& desiredSlot(ChainPlacementContext& ctx, int i, bool top) { return top ? ctx.desired_x[i].first : ctx.desired_x[i].second; }
+    static double& tieBreakSlot(ChainPlacementContext& ctx, int i, bool top) { return top ? ctx.tie_break_x[i].first : ctx.tie_break_x[i].second; }
+
+    static std::vector<Interval> forbiddenFor(ChainPlacementContext& ctx, int i, bool is_top) {
+        return is_top
+            ? topForbiddenRegions(ctx.chains[i], ctx.min_spacing[ctx.chains[i].top_layer - 1], ctx.assigners) // A dummy chain cannot start at level 0
+            : bottomForbiddenRegions(ctx.chains[i], ctx.min_spacing[ctx.chains[i].bottom_layer], ctx.assigners);
+    }
+
+    // A ForbiddenMovement end is already a forced, final position -- it never
+    // yields further, so it jogs against anything rather than being overridden
+    // (see unifyChain).
+    static bool isForbiddenMovement(Kind k) {
+        return k == Kind::ConflictForbiddenMovement || k == Kind::AlignForbiddenMovement;
+    }
+
+    // Used when an end has neither an alignment nor a conflict need. Scans the
+    // neighbouring layer's own ports for the nearest port to our left and to our
+    // right, then either centres in that gap (if it's already tight) or offers
+    // the sub-range that keeps a comfortable 1.5*MIN_VERTICAL_SEP clearance from
+    // each neighbour (if the gap can spare it). Seeding the bounds from
+    // sep_window[idx] (rather than +/-infinity) means the port scan can only
+    // tighten them further, never loosen them past the box-separation window
+    // every other Kind is already built from.
+    static void pushForClarity(ChainPlacementContext& ctx, int idx, bool i_is_top) {
+        int scan_layer = i_is_top ? ctx.chains[idx].top_layer - 1 : ctx.chains[idx].bottom_layer + 1;
+        double chain_x = ctx.node_layout.at(i_is_top ? ctx.chains[idx].members.front() : ctx.chains[idx].members.back()).x;
+
+        double left_bound = ctx.sep_window[idx].first;
+        double right_bound = ctx.sep_window[idx].second;
+        for (const auto& n : ctx.layers.at(scan_layer).nodes) {
+            auto& ports = i_is_top ? ctx.node_layout.at(n.get()).source_ports : ctx.node_layout.at(n.get()).target_ports;
+            for (const Port& p : ports) {
+                if (p.x < chain_x) left_bound = std::max(left_bound, p.x);
+                else if (p.x > chain_x) right_bound = std::min(right_bound, p.x);
+            }
+        }
+
+        if (right_bound - left_bound < 3.0 * MIN_VERTICAL_SEP) {
+            double mid = (left_bound + right_bound) * 0.5;
+            desiredSlot(ctx, idx, i_is_top) = { { mid, mid } };
+            tieBreakSlot(ctx, idx, i_is_top) = mid;
+        }
+        else {
+            Interval shrunk = { left_bound + 1.5 * MIN_VERTICAL_SEP, right_bound - 1.5 * MIN_VERTICAL_SEP };
+            desiredSlot(ctx, idx, i_is_top) = { shrunk };
+            tieBreakSlot(ctx, idx, i_is_top) = nearestInAny({ shrunk }, chain_x, chain_x);
+        }
+    }
+
+    // Tier 5 for the "both ends None" case: a single combined scan across both
+    // neighbouring layers at once (rather than the two independent pushForClarity
+    // results), since both ends are purely cosmetic here and a single shared x
+    // is always preferable to jogging between two arbitrary cosmetic picks.
+    static double solveBothEndsNone(ChainPlacementContext& ctx, int idx) {
+        int scan_layers[2] = { ctx.chains[idx].top_layer - 1, ctx.chains[idx].bottom_layer + 1 };
+        double chain_x = ctx.node_layout.at(ctx.chains[idx].members.front()).x;
+
+        double left_bound = ctx.sep_window[idx].first;
+        double right_bound = ctx.sep_window[idx].second;
+        for (int side = 0; side < 2; ++side) {
+            bool is_top_side = (side == 0);
+            for (const auto& n : ctx.layers.at(scan_layers[side]).nodes) {
+                auto& ports = is_top_side ? ctx.node_layout.at(n.get()).source_ports : ctx.node_layout.at(n.get()).target_ports;
+                for (const Port& p : ports) {
+                    if (p.x < chain_x) left_bound = std::max(left_bound, p.x);
+                    else if (p.x > chain_x) right_bound = std::min(right_bound, p.x);
+                }
+            }
+        }
+
+        if (right_bound - left_bound < 3.0 * MIN_VERTICAL_SEP)
+            return (left_bound + right_bound) * 0.5;
+        return nearestInAny({ { left_bound + 1.5 * MIN_VERTICAL_SEP, right_bound - 1.5 * MIN_VERTICAL_SEP } }, chain_x, chain_x);
+    }
+
+    // Settles one side of a chain-vs-chain conflict (see resolveChainEnd):
+    // chain_idx tries to move into 'interval', clamped against its own
+    // separation window and combined (top+bottom) forbidden regions.
+    static void resolveHalfOfDummyConflict(ChainPlacementContext& ctx, int chain_idx, Interval interval, bool is_top) {
+        auto allowed_space = subtractRegions(ctx.sep_window[chain_idx], ctx.forbidden_regions[chain_idx]);
+        auto intersection = intersectWithInterval(allowed_space, interval);
+        if (intersection.empty()) {
+            desiredSlot(ctx, chain_idx, is_top) = { { interval.second, interval.second } };
+            settledSlot(ctx, chain_idx, is_top) = Kind::ConflictForbiddenMovement;
+        }
+        else {
+            desiredSlot(ctx, chain_idx, is_top) = intersection;
+            tieBreakSlot(ctx, chain_idx, is_top) = nearestInAny(intersection, interval.second, interval.second);
+            settledSlot(ctx, chain_idx, is_top) = Kind::ConflictFull;
+        }
+    }
+
+    // ── Step 1: resolve one end of one chain ─────────────────────────────────
+    //
+    // Settles settledSlot(ctx, idx, i_is_top) and, in every case except a
+    // dummy-vs-dummy alignment miss (see below), desiredSlot/tieBreakSlot too.
+    // A plain recursive free function now rather than a std::function lambda --
+    // it captures nothing, so ordinary self-recursion by name is all it needs.
+    static void resolveChainEnd(ChainPlacementContext& ctx, int idx, bool i_is_top) {
+        Kind& settled_own = settledSlot(ctx, idx, i_is_top);
+        if (settled_own != Kind::NotVisited) return; // End was already visited
+
+        Node* dummy = i_is_top ? ctx.chains[idx].members.front() : ctx.chains[idx].members.back();
+        NodeLayout& dummy_layout = ctx.node_layout.at(dummy);
+        Hyperedge* edge = i_is_top ? dummy_layout.target_ports[0].edge : dummy_layout.source_ports[0].edge;
+
+        // ── Vertical Alignment logic ─────────────────────────────────────────
+        //
+        // Alignment must still respect the OPPOSITE end's forbidden regions,
+        // since both ends share one final x for the whole chain -- a position
+        // already doomed to conflict at the other end isn't a real alignment
+        // candidate here either. It does NOT need to respect THIS end's own
+        // forbidden regions: if the partner is a real node, either
+        // reduceHorizontalJogs() will force the alignment or solveConflicts()
+        // will handle the conflicting regions; if the partner is a dummy, we do
+        // nothing (see below).
+        {
+            std::vector<Node*> counterpart_candidates;
+            if (i_is_top) for (const auto& src : edge->getSources()) counterpart_candidates.push_back(src.get());
+            else          for (const auto& tgt : edge->getTargets()) counterpart_candidates.push_back(tgt.get());
+
+            for (Node* other : counterpart_candidates) {
+                auto& other_ports = i_is_top ? ctx.node_layout.at(other).source_ports : ctx.node_layout.at(other).target_ports;
+                for (const Port& p : other_ports) {
+                    if (p.edge != edge) continue;
+                    if (std::abs(dummy_layout.x - p.x) > MIN_VERTICAL_SEP) continue;
+
+                    if (other->isDummy()) {
+                        // We won't be aligning dummy nodes because they don't fall under any
+                        // of the needed premises. We align ports when:
+                        // - Either we have a binary edge and the nodes are sufficiently close
+                        // - We have two leftmost or rightmost nodes
+                        // None of those conditions are met, because if they did then both
+                        // dummies would already be aligned.
+                        if (std::abs(dummy_layout.x - p.x) < 1e-6) {
+                            // Already aligned, keep the end fixed.
+                            desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
+                            settled_own = Kind::AlignFull;
+                        }
+                        else {
+                            pushForClarity(ctx, idx, i_is_top);
+                            settled_own = Kind::None;
+                        }
+                        return;
+                    }
+
+                    // We will not move real node's ports here.
+                    std::vector<Interval> allowed_space = subtractRegions(ctx.sep_window[idx], forbiddenFor(ctx, idx, !i_is_top));
+                    if (insideAny(allowed_space, p.x)) {
+                        // Full alignment is possible.
+                        desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
+                        settled_own = Kind::AlignFull;
+                        return;
+                    }
+
+                    // Full alignment is not possible. So we would have to restrict
+                    // ourselves to Kind::AlignPartial. However, we will first ask
+                    // the other end of its situation. If it were another partial
+                    // then it makes no sense to have both ends in a partial align and
+                    // add a jog when we could have both full alignments and a jog.
+                    settled_own = Kind::AlignPartial;
+                    Kind& settled_other = settledSlot(ctx, idx, !i_is_top);
+                    if (settled_other == Kind::NotVisited) {
+                        resolveChainEnd(ctx, idx, !i_is_top);
+                        if (settled_other == Kind::AlignForbiddenMovement || settled_other == Kind::ConflictForbiddenMovement) {
+                            // After calling the other end, it has been placed in a forbidden position.
+                            // So both ends work independently and we are free to do whatever we please.
+                            desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
+                            settled_own = Kind::AlignForbiddenMovement;
+                            return;
+                        }
+                    }
+                    else if (settled_other == Kind::AlignPartial) {
+                        // The other end (which had to call) also has partial alignment
+                        // and since this would lead to two partial alignments and a jog
+                        // we will instead replace ours for a full forbidden alignment.
+                        // After returning, the other end will update its own kind.
+                        desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
+                        settled_own = Kind::AlignForbiddenMovement;
+                        return;
+                    }
+
+                    double new_x = nearestInAny(allowed_space, p.x, dummy_layout.x);
+                    desiredSlot(ctx, idx, i_is_top) = { {new_x, new_x} };
+                    return;
+                }
+            }
+        }
+
+        // ── Conflict Resolution logic ────────────────────────────────────────
+        {
+            int pair_layer = i_is_top ? ctx.chains[idx].top_layer - 1 : ctx.chains[idx].bottom_layer;
+            int scan_layer = i_is_top ? ctx.chains[idx].top_layer - 1 : ctx.chains[idx].bottom_layer + 1;
+            PortAssigner* assigner = ctx.assigners[pair_layer];
+
+            std::vector<double> conflicts_x;
+            Node* dummy_conflict = nullptr;
+            Hyperedge* dummy_edge = nullptr;
+            for (const auto& n : ctx.layers.at(scan_layer).nodes) {
+                auto& candidate_ports = i_is_top ? ctx.node_layout.at(n.get()).source_ports : ctx.node_layout.at(n.get()).target_ports;
+                for (const Port& p : candidate_ports) {
+                    bool order_ok = i_is_top ? assigner->edgeOrderedBefore(edge, p.edge)
+                        : assigner->edgeOrderedBefore(p.edge, edge);
+                    if (std::abs(dummy_layout.x - p.x) < ctx.min_spacing[pair_layer] && order_ok) {
+                        if (n->isDummy()) { dummy_conflict = n.get(); dummy_edge = p.edge; }
+                        conflicts_x.push_back(p.x);
+                    }
+                }
+                if (dummy_conflict) break; // No more conflicts can occur, so we stop the search
+            }
+
+            if (!conflicts_x.empty()) {
+                if (dummy_conflict) {
+                    // We will move both ports so that the whole conflict is avoided. Some will have to
+                    // move right and the other will have to move left. That will be determined by first
+                    // the abscisas and then rightmost or leftmost.
+                    Node* left; Node* right;
+                    if (dummy_layout.x < conflicts_x.front()) { left = dummy; right = dummy_conflict; }
+                    else if (dummy_layout.x > conflicts_x.front()) { left = dummy_conflict; right = dummy; }
+                    else {
+                        // Both share the same x-coordinate, hyperedges will decide the draw
+                        if (assigner->isLeftMost(edge, dummy)) { left = dummy_conflict; right = dummy; }
+                        else if (assigner->isRightMost(edge, dummy)) { left = dummy; right = dummy_conflict; }
+                        else if (assigner->isLeftMost(dummy_edge, dummy_conflict)) { left = dummy; right = dummy_conflict; }
+                        else { left = dummy_conflict; right = dummy; }
+                    }
+
+                    // Moving both chains. Let m be the middle point of both, the left chain tries
+                    // to move to (-infty, m - MIN_VERTICAL_SEP/2] whilst the right chain tries the
+                    // analogous [m + MIN_VERTICAL_SEP/2, +infty). dummy_conflict was found via the
+                    // OPPOSITE port kind to ours, so it's addressed at its opposite boundary.
+                    constexpr double INF = std::numeric_limits<double>::infinity();
+                    double m = (dummy_layout.x + conflicts_x.front()) * 0.5;
+                    int other_idx = ctx.node_to_chain.at(dummy_conflict);
+                    if (left == dummy) {
+                        resolveHalfOfDummyConflict(ctx, idx, { -INF, m - MIN_VERTICAL_SEP * 0.5 }, i_is_top);
+                        resolveHalfOfDummyConflict(ctx, other_idx, { m + MIN_VERTICAL_SEP * 0.5, INF }, !i_is_top);
+                    }
+                    else {
+                        resolveHalfOfDummyConflict(ctx, other_idx, { -INF, m - MIN_VERTICAL_SEP * 0.5 }, !i_is_top);
+                        resolveHalfOfDummyConflict(ctx, idx, { m + MIN_VERTICAL_SEP * 0.5, INF }, i_is_top);
+                    }
+                    return;
+                }
+
+                // No dummy conflict whatsoever, but we have to fix the conflicts with the real nodes.
+                auto allowed_whole_space = subtractRegions(ctx.sep_window[idx], ctx.forbidden_regions[idx]);
+                if (!allowed_whole_space.empty()) {
+                    desiredSlot(ctx, idx, i_is_top) = allowed_whole_space;
+                    settled_own = Kind::ConflictFull;
+                    return;
+                }
+
+                auto allowed_own_space = subtractRegions(ctx.sep_window[idx], forbiddenFor(ctx, idx, i_is_top));
+                if (!allowed_own_space.empty()) {
+                    // There is allowed space to move our dummy end to and avoid all conflicts.
+                    // In any case, we will try to move the dummy to the closest point possible
+                    // that respects the spacing.
+                    double new_x = nearestInAny(allowed_own_space, dummy_layout.x, dummy_layout.x);
+                    desiredSlot(ctx, idx, i_is_top) = { { new_x, new_x } };
+                    settled_own = Kind::ConflictForbiddenMovement;
+                    return;
+                }
+
+                // There is no space that wouldn't cause any conflict, so we will place
+                // the dummy port more symmetrically to its current conflicts.
+                if (conflicts_x.size() == 2) {
+                    double middle = (conflicts_x.front() + conflicts_x.back()) * 0.5;
+                    desiredSlot(ctx, idx, i_is_top) = { { middle, middle } };
+                    settled_own = insideAny(forbiddenFor(ctx, idx, !i_is_top), middle)
+                        ? Kind::ConflictForbiddenMovement : Kind::ConflictPartial;
+                }
+                // else: just one conflict (not possible) because allowed_own_space is empty.
+                return;
+            }
+        }
+
+        // If no vertical alignments or conflicts, then push for clarity.
+        pushForClarity(ctx, idx, i_is_top);
+        settled_own = Kind::None;
+    }
+
+    // ── Step 2: unify one chain's two ends into a single final position ─────
+    //
+    // The priority between the two ends is entirely captured by Kind's
+    // declared enum order (ConflictFull > ConflictPartial > ... > None):
+    // whichever end has the lower ordinal wins whenever they can't share
+    // a position. The only two exceptions, both symmetric by nature:
+    //   - A ForbiddenMovement end is already a forced, final position -- it
+    //     never yields further, so it jogs against anything rather than
+    //     being overridden.
+    //   - Two ends of the identical Kind are peers, neither of which should
+    //     be discarded in favour of the other, so they jog too -- except
+    //     None vs None, whose "desire" is purely cosmetic (Tier 5) on both
+    //     sides, so there's no reason to force a jog between two cosmetic
+    //     preferences that simply don't overlap.
+    static void repositionChain(ChainPlacementContext& ctx, int idx, double top_x, double bottom_x) {
+        int size = static_cast<int>(ctx.chains[idx].members.size());
+        for (int i = 0; i < size; i++) {
+            NodeLayout& nl = ctx.node_layout.at(ctx.chains[idx].members[i]);
+            if (i < size / 2) {
+                nl.source_ports[0].x = top_x;
+                nl.target_ports[0].x = top_x;
+                nl.x = top_x;
+            }
+            else if (i > size / 2) {
+                nl.source_ports[0].x = bottom_x;
+                nl.target_ports[0].x = bottom_x;
+                nl.x = bottom_x;
+            }
+            else {
+                nl.source_ports[0].x = bottom_x;
+                nl.target_ports[0].x = top_x;
+                nl.x = (bottom_x + top_x) * 0.5;
+            }
+        }
+    }
+
+    static void unifyChain(ChainPlacementContext& ctx, int i) {
+        double chain_x = ctx.node_layout.at(ctx.chains[i].members.front()).x;
+        Kind top = ctx.settled[i].first, bottom = ctx.settled[i].second;
+
+        if (top == Kind::None && bottom == Kind::None) {
+            double target = solveBothEndsNone(ctx, i);
+            repositionChain(ctx, i, target, target);
+            return;
+        }
+
+        auto intersection = intersectIntervalFamilies(ctx.desired_x[i].first, ctx.desired_x[i].second);
+        if (!intersection.empty()) {
+            double target = nearestInAny(intersection, (ctx.tie_break_x[i].first + ctx.tie_break_x[i].second) * 0.5, chain_x);
+            repositionChain(ctx, i, target, target);
+            return;
+        }
+
+        if (isForbiddenMovement(top) || isForbiddenMovement(bottom) || top == bottom) {
+            double top_x = nearestInAny(ctx.desired_x[i].first, ctx.tie_break_x[i].first, ctx.tie_break_x[i].first);
+            double bottom_x = nearestInAny(ctx.desired_x[i].second, ctx.tie_break_x[i].second, ctx.tie_break_x[i].second);
+            repositionChain(ctx, i, top_x, bottom_x);
+        }
+        else {
+            bool top_wins = static_cast<int>(top) < static_cast<int>(bottom);
+            double target = top_wins ? nearestInAny(ctx.desired_x[i].first, ctx.tie_break_x[i].first, chain_x)
+                : nearestInAny(ctx.desired_x[i].second, ctx.tie_break_x[i].second, chain_x);
+            repositionChain(ctx, i, target, target);
+        }
+    }
+
 } // namespace port_assignment_internal
 
 // ============================================================================
 // GraphicalHypergraph::assignPorts
 // 
-// Iterates over every consecutive layer pair in the graph, running the full
-// port-assignment pipeline for each:
-//   1. buildPorts()            — order and space ports on both layers.
-//   2. solveVerticalOverlaps() — nudge ports to eliminate segment crossings,
-//                                using the minimum spacing from step 1 as the
-//                                required separation threshold.
+// Runs the port-assignment pipeline in three passes over the whole graph:
+//   1. buildPorts(false)         — order and symmetrically space ports on
+//                                   every layer pair, with jog-reduction
+//                                   deferred (see straightenDummyChains()).
+//   2. placeDummyChains()        — settle every dummy chain's to a position
+//                                  where it is better placed.
+//                                              
+//   3. applyHorizontalJogs() /
+//      solveVerticalOverlaps()   — Solves conflicts and reduces jogs.
 // ============================================================================
 namespace hypergraph_logic {
-	using namespace port_assignment_internal;
+    using namespace port_assignment_internal;
 
     void GraphicalHypergraph::assignPorts() {
         int layer_count = static_cast<int>(layers_.size());
+
+        std::vector<std::unique_ptr<PortAssigner>> assigners(layer_count > 0 ? layer_count - 1 : 0);
+        std::vector<double> min_spacing(assigners.size(), MIN_VERTICAL_SEP);
         for (int layer = 0; layer < layer_count - 1; layer++) {
             if (layers_.at(layer).outgoing_edges.empty()) continue;
-            PortAssigner assigner(layer, layers_, node_layout_);
-            double min_spacing = assigner.buildPorts();
-            assigner.solveVerticalOverlaps(min_spacing);
+            assigners[layer] = std::make_unique<PortAssigner>(layer, layers_, node_layout_);
+            min_spacing[layer] = assigners[layer]->buildPorts();
+        }
+
+        std::vector<PortAssigner*> assigner_ptrs(assigners.size());
+        for (size_t i = 0; i < assigners.size(); ++i) assigner_ptrs[i] = assigners[i].get();
+        placeDummyChains(assigner_ptrs, min_spacing);
+
+        for (int layer = 0; layer < layer_count - 1; layer++) {
+            if (!assigners[layer]) continue;
+            min_spacing[layer] = std::min(min_spacing[layer], assigners[layer]->reduceHorizontalJogs());
+            assigners[layer]->solveVerticalOverlaps(min_spacing[layer]);
         }
     }
+
+    // ── placeDummyChains ─────────────────────────────────────────────────
+    //
+    // It finds a better placing for dummy chains so that vertical alignment
+    // is performed or conflicts are solved before being encountered by the
+    // other part.
+    //
+    //   Step 1: Resolve every chain's end status.
+    //   Step 2: Unify every end's desire to the whole dummy chain.
+    //
+    void GraphicalHypergraph::placeDummyChains(std::vector<port_assignment_internal::PortAssigner*>& assigners,
+        std::vector<double> min_spacing) {
+        using namespace port_assignment_internal;
+
+        std::vector<DummyChain> chains = findDummyChains(layers_);
+        if (chains.empty()) return;
+
+        ChainPlacementContext ctx{ layers_, node_layout_, assigners, std::move(min_spacing), std::move(chains) };
+        int n = static_cast<int>(ctx.chains.size());
+
+        for (int i = 0; i < n; ++i)
+            for (Node* m : ctx.chains[i].members) ctx.node_to_chain[m] = i;
+
+        ctx.sep_window.resize(n);
+        ctx.forbidden_regions.resize(n);
+        ctx.settled.assign(n, { Kind::NotVisited, Kind::NotVisited }); // {top, bottom}
+        ctx.desired_x.resize(n);
+        ctx.tie_break_x.resize(n);
+
+        for (int i = 0; i < n; ++i) {
+            ctx.sep_window[i] = chainSeparationWindow(ctx.chains[i], ctx.layers, ctx.node_layout, ctx.assigners);
+            double chain_x = ctx.node_layout.at(ctx.chains[i].members.front()).x;
+            ctx.desired_x[i] = { { { chain_x, chain_x } }, { { chain_x, chain_x } } }; // default: no change needed yet
+            ctx.tie_break_x[i] = { chain_x, chain_x };
+            ctx.forbidden_regions[i] = forbiddenRegions(ctx.chains[i], ctx.min_spacing, ctx.assigners);
+        }
+
+        // ── Step 1: Resolve every chain's end status ──────────────────────
+        for (int i = 0; i < n; ++i) {
+            resolveChainEnd(ctx, i, true);
+            resolveChainEnd(ctx, i, false);
+        }
+
+        // ── Step 2: Unify every end's desire into the whole dummy chain ────
+        for (int i = 0; i < n; ++i)
+            unifyChain(ctx, i);
+    }
+
+    void GraphicalHypergraph::recentreNodesUnderPorts() {
+        for (const auto& [layer, data] : layers_) {
+            const auto& nodes = data.nodes;
+            int k = static_cast<int>(nodes.size());
+
+            auto pass = [&](int start, int end, int step) {
+                for (int i = start; i != end; i += step) {
+                    Node* n = nodes[i].get();
+                    NodeLayout& nl = node_layout_.at(n);
+
+                    double min_p = std::numeric_limits<double>::max();
+                    double max_p = std::numeric_limits<double>::lowest();
+                    for (const Port& p : nl.source_ports) { min_p = std::min(min_p, p.x); max_p = std::max(max_p, p.x); }
+                    for (const Port& p : nl.target_ports) { min_p = std::min(min_p, p.x); max_p = std::max(max_p, p.x); }
+                    if (min_p > max_p) continue; // no ports at all: nothing to centre
+
+                    double target = (min_p + max_p) * 0.5;
+                    double width_n = n->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+
+                    double low = std::numeric_limits<double>::lowest();
+                    if (i > 0) {
+                        Node* l = nodes[i - 1].get();
+                        double width_l = l->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                        low = node_layout_.at(l).x + (width_l + width_n) * 0.5 + MIN_BLOCK_SEP;
+                    }
+
+                    double high = std::numeric_limits<double>::max();
+                    if (i < k - 1) {
+                        Node* r = nodes[i + 1].get();
+                        double width_r = r->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                        high = node_layout_.at(r).x - (width_n + width_r) * 0.5 - MIN_BLOCK_SEP;
+                    }
+
+                    if (low <= high)
+                        nl.x = std::clamp(target, low, high);
+                    // else: siblings already at minimum spacing, no room to move safely.
+                }
+                };
+
+            pass(0, k, 1);       // left  -> right
+            pass(k - 1, -1, -1); // right -> left
+        }
+    }
+
 } // namespace hypergraph_logic

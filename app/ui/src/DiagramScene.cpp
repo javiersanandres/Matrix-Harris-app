@@ -51,7 +51,10 @@ namespace ui {
                 try {
                     joint_editor_->relocateNode(node->shared_from_this(), new_x, -new_y);
                 }
-                catch (const std::exception& e) { showError(e); }
+                catch (const std::exception&) {
+                    rebuild();
+                    return;
+                }
                 rebuild();
                 emit graphChanged();
             });

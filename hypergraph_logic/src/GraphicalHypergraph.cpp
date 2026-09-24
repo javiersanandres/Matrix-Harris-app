@@ -118,10 +118,13 @@ namespace hypergraph_logic {
 
 				for (int i = static_cast<int>(y_levels.size()) - 1; i >= 0; --i) {
 					bool conflict = false;
-					// Check for x-overlap with any bar already in this slot. 
+					// Check for x-overlap with any bar already in this slot but respecting
+					// a MIN_VERTICAL_SEP distance, i.e., the span for s becomes:
+					//      [s.xmin - MIN_VERTICAL_SEP/2, s.xmax + MIN_VERTICAL_SEP/2]
 					// Note: [a1, a2] and [b1, b2] overlap iff a1 <= b2 and b1 <= a2.
 					for (const auto& bar : y_levels[i].bars) {
-						if ((s.xmin <= bar.xmax) && (bar.xmin <= s.xmax)) {
+						if ((s.xmin - MIN_VERTICAL_SEP/2.0 <= bar.xmax) && 
+							(bar.xmin <= s.xmax + MIN_VERTICAL_SEP/2.0)) {
 							conflict = true;
 							break;
 						}

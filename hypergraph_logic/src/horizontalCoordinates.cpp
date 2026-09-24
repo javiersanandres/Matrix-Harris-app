@@ -386,8 +386,72 @@ namespace bk_internal {
 			x.push_back((c[1] + c[2]) * 0.5);
 		}
 
+		brightenSingleNeighbours(g_, x);
+
 		return x;
 	}
+
+	// If v qualifies for brightening, sets 'target' to the neighbour's x and
+	// returns true.
+	static bool brightenTarget(const G2& g, const std::vector<double>& x, int v, double& target) {
+		size_t upper_size = g.upper[v].size();
+		size_t lower_size = g.lower[v].size();
+
+		if (upper_size == 1 && lower_size == 1 &&
+			!g.isMarked(g.upper[v][0], v) && !g.isMarked(v, g.lower[v][0])) return false;
+		if (upper_size == 1 && lower_size <= 1) {
+			int p = g.upper[v][0];
+			if (!g.isMarked(p, v)) { target = x[p]; return true; }
+		}
+		if (lower_size == 1 && upper_size <= 1) {
+			int c = g.lower[v][0];
+			if (!g.isMarked(v, c)) { target = x[c]; return true; }
+		}
+		return false;
+	}
+
+	// One left-to-right sweep over a single layer, clamping each candidate's
+	// move so it never gets closer than MIN_BLOCK_SEP (plus half-widths) to
+	// its immediate left/right sibling.
+	static void brightenLayer(const G2& g, std::vector<double>& x, int layer) {
+		const auto& nodes = g.layers[layer];
+		int k = static_cast<int>(nodes.size());
+
+		for (int i = 0; i < k; ++i) {
+			int v = nodes[i];
+			double target;
+			if (!brightenTarget(g, x, v, target)) continue;
+
+			double width_v = g.nodes[v]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+
+			double low = std::numeric_limits<double>::lowest();
+			if (i > 0) {
+				int l = nodes[i - 1];
+				double width_l = g.nodes[l]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+				low = x[l] + (width_l + width_v) * 0.5 + MIN_BLOCK_SEP;
+			}
+
+			double high = std::numeric_limits<double>::max();
+			if (i < k - 1) {
+				int r = nodes[i + 1];
+				double width_r = g.nodes[r]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+				high = x[r] - (width_v + width_r) * 0.5 - MIN_BLOCK_SEP;
+			}
+
+			if (low <= target && target <= high) {
+				if (x[v] != target)
+					printf("THERE WAS A CHANGE\n");
+				x[v] = target;
+			}
+		}
+	}
+
+	// ── brightenSingleNeighbours ──────────────────────────────────────────────────
+
+	void BrandesKopf::brightenSingleNeighbours(const G2& g, std::vector<double>& x) {
+		for (int i = 0; i < g.num_layers; ++i) brightenLayer(g, x, i);
+	}
+
 
 } // namespace bk_internal
 
