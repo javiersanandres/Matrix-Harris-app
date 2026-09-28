@@ -1015,16 +1015,6 @@ namespace port_assignment_internal {
         return false;
     }
 
-    static double closest_value(const std::vector<double>& vec, double value) {
-        auto it = std::lower_bound(vec.begin(), vec.end(), value);
-
-        if (it == vec.begin()) return *it;
-        if (it == vec.end())   return vec.back();
-
-        auto prev = std::prev(it);
-        return (value - *prev <= *it - value) ? *prev : *it;
-    }
-
     static double nearestInAny(const std::vector<Interval>& intervals, double x, double tie_break) {
         double best = x, best_d = std::numeric_limits<double>::max();
         for (auto& [lo, hi] : intervals) {
@@ -1250,13 +1240,17 @@ namespace port_assignment_internal {
     // every other Kind is already built from.
     static void pushForClarity(ChainPlacementContext& ctx, int idx, bool i_is_top) {
         int scan_layer = i_is_top ? ctx.chains[idx].top_layer - 1 : ctx.chains[idx].bottom_layer + 1;
-        double chain_x = ctx.node_layout.at(i_is_top ? ctx.chains[idx].members.front() : ctx.chains[idx].members.back()).x;
+        NodeLayout& nl = ctx.node_layout.at(i_is_top ? ctx.chains[idx].members.front() : ctx.chains[idx].members.back());
+        double chain_x = nl.x;
+        Hyperedge* edge = i_is_top ? nl.target_ports.front().edge : nl.source_ports.front().edge;
 
         double left_bound = ctx.sep_window[idx].first;
         double right_bound = ctx.sep_window[idx].second;
         for (const auto& n : ctx.layers.at(scan_layer).nodes) {
             auto& ports = i_is_top ? ctx.node_layout.at(n.get()).source_ports : ctx.node_layout.at(n.get()).target_ports;
             for (const Port& p : ports) {
+                if (i_is_top ? !ctx.assigners[edge->getLayer()]->edgeOrderedBefore(edge, p.edge) :
+                               !ctx.assigners[edge->getLayer()]->edgeOrderedBefore(p.edge, edge)) continue;
                 if (p.x < chain_x) left_bound = std::max(left_bound, p.x);
                 else if (p.x > chain_x) right_bound = std::min(right_bound, p.x);
             }
@@ -1359,8 +1353,12 @@ namespace port_assignment_internal {
     //       resolveFarAlignment).
     struct FarPair {
         double lo, hi;
+        Node* top_node;    Port* top_port;     // source port of the real node above the chain
+        Node* bottom_node; Port* bottom_port;  // target port of the real node below the chain
         double mid() const { return (lo + hi) * 0.5; }
     };
+
+    struct AlignCoord { double x; Node* node; Port* port; };
 
     struct EndAlignmentInfo {
         std::vector<std::pair<Node*, Port*>> near;
@@ -1374,17 +1372,15 @@ namespace port_assignment_internal {
         Hyperedge* edge = i_is_top ? dummy_layout.target_ports[0].edge : dummy_layout.source_ports[0].edge;
 
         std::vector<Node*> counterpart_candidates;
-        std::vector<double> alignment_coords;
-        // The original edge always outlives its segments, but guard anyway: without
-        // it there are simply no far pairs.
+        std::vector<AlignCoord> alignment_coords;
         HyperedgePtr original = edge->getOrigin().lock();
         if (i_is_top) {
             for (const auto& src : edge->getSources()) counterpart_candidates.push_back(src.get());
             if (original) {
                 for (const auto& tgt : original->getTargets()) {
                     if (tgt->getLayer() != ctx.chains[idx].bottom_layer + 1) continue;
-                    for (const Port& p : ctx.node_layout.at(tgt.get()).target_ports)
-                        if (p.edge->getOrigin().lock() == original) alignment_coords.push_back(p.x);
+                    for (Port& p : ctx.node_layout.at(tgt.get()).target_ports)
+                        if (p.edge->getOrigin().lock() == original) alignment_coords.push_back({ p.x, tgt.get(), &p });
                 }
             }
         }
@@ -1393,12 +1389,11 @@ namespace port_assignment_internal {
             if (original) {
                 for (const auto& src : original->getSources()) {
                     if (src->getLayer() != ctx.chains[idx].top_layer - 1) continue;
-                    for (const Port& p : ctx.node_layout.at(src.get()).source_ports)
-                        if (p.edge->getOrigin().lock() == original) alignment_coords.push_back(p.x);
+                    for (Port& p : ctx.node_layout.at(src.get()).source_ports)
+                        if (p.edge->getOrigin().lock() == original) alignment_coords.push_back({ p.x, src.get(), &p });
                 }
             }
         }
-        std::sort(alignment_coords.begin(), alignment_coords.end());
 
         for (Node* other : counterpart_candidates) {
             auto& other_ports = i_is_top ? ctx.node_layout.at(other).source_ports : ctx.node_layout.at(other).target_ports;
@@ -1408,14 +1403,18 @@ namespace port_assignment_internal {
                     info.near.push_back({ other, &p });
                 }
                 else {
-                    // Too far to align to directly, but real nodes of non-adjacent
-                    // layers can still be aligned through a clear corridor.
                     if (other->isDummy() || alignment_coords.empty()) continue;
-                    double closest_align_coord = closest_value(alignment_coords, p.x);
-                    double lo = std::min(closest_align_coord, p.x);
-                    double hi = std::max(closest_align_coord, p.x);
-                    if (corridorIsClear(ctx, lo, hi, ctx.chains[idx].top_layer - 1, ctx.chains[idx].bottom_layer + 1))
-                        info.far.push_back({ lo, hi });
+                    const AlignCoord* closest = &alignment_coords.front();
+                    for (const AlignCoord& c : alignment_coords)
+                        if (std::abs(c.x - p.x) < std::abs(closest->x - p.x)) closest = &c;
+
+                    double lo = std::min(closest->x, p.x);
+                    double hi = std::max(closest->x, p.x);
+                    if (!corridorIsClear(ctx, lo, hi, ctx.chains[idx].top_layer - 1, ctx.chains[idx].bottom_layer + 1)) continue;
+
+                    // Either way the pair is (source port above, target port below).
+                    if (i_is_top) info.far.push_back({ lo, hi, other, &p, closest->node, closest->port });
+                    else          info.far.push_back({ lo, hi, closest->node, closest->port, other, &p });
                 }
             }
         }
@@ -1436,6 +1435,12 @@ namespace port_assignment_internal {
         return false;
     }
 
+    // Recomputes everything derived from real node/port positions for one chain.
+    static void refreshChainInfo(ChainPlacementContext& ctx, int i) {
+        ctx.sep_window[i] = chainSeparationWindow(ctx.chains[i], ctx.layers, ctx.node_layout, ctx.assigners);
+        ctx.forbidden_regions[i] = forbiddenRegions(ctx.chains[i], ctx.min_spacing, ctx.assigners);
+    }
+
     // ── Step 1 (pre-pass): align a whole chain through far corridors ─────────
     //
     // Both ends are decided at once. Only tried when neither end can settle on
@@ -1446,47 +1451,61 @@ namespace port_assignment_internal {
     // single winner that is just its own middle point). The whole chain goes
     // to that target -- both ends AlignFull -- if it lies in the chain's
     // allowed space; otherwise nothing is done and both ends are marked None.
-    static bool resolveFarAlignment(ChainPlacementContext& ctx, int idx) {
-        // Ends may already have been settled by another chain's conflict resolution.
-        if (ctx.settled[idx].first != Kind::NotVisited || ctx.settled[idx].second != Kind::NotVisited) return false;
+    static void resolveFarAlignment(ChainPlacementContext& ctx, int idx,
+        std::unordered_map<Node*, std::unordered_set<Port*>>& adjusted_src,
+        std::unordered_map<Node*, std::unordered_set<Port*>>& adjusted_tgt)
+    {
+        if (ctx.settled[idx].first != Kind::NotVisited || ctx.settled[idx].second != Kind::NotVisited) return;
+
+        // Earlier far alignments of this same pass may already have moved real ports.
+        refreshChainInfo(ctx, idx);
 
         EndAlignmentInfo top = gatherAlignmentInfo(ctx, idx, true);
         EndAlignmentInfo bottom = gatherAlignmentInfo(ctx, idx, false);
-        if (endResolvesNearby(ctx, idx, true, top) || endResolvesNearby(ctx, idx, false, bottom)) return false;
+        if (endResolvesNearby(ctx, idx, true, top) || endResolvesNearby(ctx, idx, false, bottom)) return;
 
-        std::vector<double> mids;
-        for (const FarPair& f : top.far) mids.push_back(f.mid());
-        for (const FarPair& f : bottom.far) mids.push_back(f.mid());
-        if (mids.empty()) return false;
+        std::vector<FarPair> pairs = top.far;
+        pairs.insert(pairs.end(), bottom.far.begin(), bottom.far.end());
+        if (pairs.empty()) return;
 
         constexpr double EPS = 1e-6;
         double chain_x = ctx.node_layout.at(ctx.chains[idx].members.front()).x;
 
         double best = std::numeric_limits<double>::max();
-        for (double m : mids) best = std::min(best, std::abs(m - chain_x));
+        for (const FarPair& f : pairs) best = std::min(best, std::abs(f.mid() - chain_x));
 
         double lowest_tied = std::numeric_limits<double>::max();
         double highest_tied = std::numeric_limits<double>::lowest();
-        for (double m : mids) {
-            if (std::abs(m - chain_x) > best + EPS) continue;
-            lowest_tied = std::min(lowest_tied, m);
-            highest_tied = std::max(highest_tied, m);
+        for (const FarPair& f : pairs) {
+            if (std::abs(f.mid() - chain_x) > best + EPS) continue;
+            lowest_tied = std::min(lowest_tied, f.mid());
+            highest_tied = std::max(highest_tied, f.mid());
         }
         double target = (lowest_tied + highest_tied) * 0.5;
 
         std::vector<Interval> allowed_space = subtractRegions(ctx.sep_window[idx], ctx.forbidden_regions[idx]);
-        bool fits = insideAny(allowed_space, target, true);
-        for (bool is_top : { true, false }) {
-            if (fits) {
-                desiredSlot(ctx, idx, is_top) = { { target, target } };
-                tieBreakSlot(ctx, idx, is_top) = target;
-                settledSlot(ctx, idx, is_top) = Kind::AlignFull;
-            }
-            else {
-                settledSlot(ctx, idx, is_top) = Kind::None;
-            }
+        if (!insideAny(allowed_space, target, true)) {
+            settledSlot(ctx, idx, true) = Kind::None;
+            settledSlot(ctx, idx, false) = Kind::None;
+            return;
         }
-        return true;
+
+        for (bool is_top : { true, false }) {
+            desiredSlot(ctx, idx, is_top) = { { target, target } };
+            tieBreakSlot(ctx, idx, is_top) = target;
+            settledSlot(ctx, idx, is_top) = Kind::AlignFull;
+        }
+
+        // Bring the real ports of every pair whose verified corridor contains the
+        // target to it, and note them so the rest of their node's ports can be
+        // rearranged afterwards (same bookkeeping as reduceHorizontalJogs).
+        for (const FarPair& f : pairs) {
+            if (target < f.lo - EPS || target > f.hi + EPS) continue;
+            f.top_port->x = target;
+            f.bottom_port->x = target;
+            adjusted_src[f.top_node].insert(f.top_port);
+            adjusted_tgt[f.bottom_node].insert(f.bottom_port);
+        }
     }
 
     // ── Step 1: resolve one end of one chain ─────────────────────────────────
@@ -1545,11 +1564,59 @@ namespace port_assignment_internal {
                     }
 
                     if (insideAny(allowed_space, p.x)) {
-                        // Full alignment is possible with this candidate. Take it
-                        // and stop looking, even if a closer one only offered partial.
-                        desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
+                        // Full alignment is possible with this candidate. Before taking
+                        // it, look for ties: other real candidates that are also inside
+                        // allowed_space and at the same distance from the chain (the list
+                        // is sorted by distance, so the scan stops at the first farther one).
+                        constexpr double TIE_EPS = 1e-6;
+                        double best_dist = std::abs(dummy_layout.x - p.x);
+                        std::vector<std::pair<Node*, Port*>> tied;
+                        for (const auto& [o, op] : candidates) {
+                            if (std::abs(dummy_layout.x - op->x) > best_dist + TIE_EPS) break;
+                            if (o->isDummy()) continue;
+                            if (insideAny(allowed_space, op->x)) tied.push_back({ o, op });
+                        }
+
+                        Node* chosen_node = other;
+                        Port* chosen_port = &p;
+
+                        double lowest = std::numeric_limits<double>::max();
+                        double highest = std::numeric_limits<double>::lowest();
+                        for (const auto& t : tied) {
+                            lowest = std::min(lowest, t.second->x);
+                            highest = std::max(highest, t.second->x);
+                        }
+
+                        if (tied.size() > 1 && highest - lowest > TIE_EPS) {
+                            // Genuine tie between different positions: align to the
+                            // middle point of the tied alignments if it is allowed.
+                            double mid = (lowest + highest) * 0.5;
+                            if (insideAny(allowed_space, mid)) {
+                                // The chain sits at neither port, so no align_partner is
+                                // recorded (unifyChain's counterpart-pulling must not fire).
+                                desiredSlot(ctx, idx, i_is_top) = { {mid, mid} };
+                                settled_own = Kind::AlignFull;
+                                return;
+                            }
+
+                            // The middle point is not allowed, so prefer one of the tied
+                            // candidates: the one closest to the allowed point nearest to
+                            // the middle point (final tie -> the leftmost, to stay deterministic).
+                            double q = nearestInAny(allowed_space, mid, dummy_layout.x);
+                            for (const auto& t : tied) {
+                                double d_new = std::abs(t.second->x - q);
+                                double d_cur = std::abs(chosen_port->x - q);
+                                if (d_new < d_cur - TIE_EPS ||
+                                    (std::abs(d_new - d_cur) <= TIE_EPS && t.second->x < chosen_port->x)) {
+                                    chosen_node = t.first;
+                                    chosen_port = t.second;
+                                }
+                            }
+                        }
+
+                        desiredSlot(ctx, idx, i_is_top) = { {chosen_port->x, chosen_port->x} };
                         settled_own = Kind::AlignFull;
-                        (i_is_top ? ctx.align_partner[idx].first : ctx.align_partner[idx].second) = { other, &p };
+                        (i_is_top ? ctx.align_partner[idx].first : ctx.align_partner[idx].second) = { chosen_node, chosen_port };
                         return;
                     }
                     // Otherwise: keep looking for a candidate that CAN achieve full
@@ -1652,6 +1719,27 @@ namespace port_assignment_internal {
                 if (!allowed_whole_space.empty()) {
                     desiredSlot(ctx, idx, i_is_top) = allowed_whole_space;
                     settled_own = Kind::ConflictFull;
+
+                    // Prefer points keeping an extra MIN_VERTICAL_SEP from both ends of their piece.
+                    std::vector<Interval> comfortable;
+                    for (const Interval& I : allowed_whole_space)
+                        if (I.second - I.first >= 4 * MIN_VERTICAL_SEP)
+                            comfortable.push_back({ I.first + 2 * MIN_VERTICAL_SEP, I.second - 2 * MIN_VERTICAL_SEP });
+
+                    if (!comfortable.empty()) {
+                        tieBreakSlot(ctx, idx, i_is_top) = nearestInAny(comfortable, dummy_layout.x, dummy_layout.x);
+                    }
+                    else {
+                        // Every piece is narrow: aim for the middle of the piece nearest the chain,
+                        // which is the point with the most clearance there.
+                        double edge_point = nearestInAny(allowed_whole_space, dummy_layout.x, dummy_layout.x);
+                        for (const Interval& I : allowed_whole_space) {
+                            if (edge_point >= I.first && edge_point <= I.second) {
+                                tieBreakSlot(ctx, idx, i_is_top) = (I.first + I.second) * 0.5;
+                                break;
+                            }
+                        }
+                    }
                     return;
                 }
 
@@ -1720,7 +1808,92 @@ namespace port_assignment_internal {
         }
     }
 
-    static void unifyChain(ChainPlacementContext& ctx, int i) {
+    // Range of x over which a real node's box can slide without breaking
+    // MIN_BLOCK_SEP against its immediate neighbours in the layer.
+    static Interval realNodeMovableRange(ChainPlacementContext& ctx, int layer, int pos) {
+        const auto& nodes = ctx.layers.at(layer).nodes;
+        int k = static_cast<int>(nodes.size());
+
+        double low = std::numeric_limits<double>::lowest();
+        double high = std::numeric_limits<double>::max();
+        if (pos > 0) {
+            Node* l = nodes[pos - 1].get();
+            double wl = l->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            low = ctx.node_layout.at(l).x + (wl + NODE_WIDTH) * 0.5 + MIN_BLOCK_SEP;
+        }
+        if (pos < k - 1) {
+            Node* r = nodes[pos + 1].get();
+            double wr = r->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            high = ctx.node_layout.at(r).x - (wr + NODE_WIDTH) * 0.5 - MIN_BLOCK_SEP;
+        }
+        return { low, high };
+    }
+
+    // Both ends of the chain are AlignFull against different real nodes. If those
+    // nodes are free to move (top: no parents and a single source port; bottom: no
+    // children and a single target port), try to move their boxes so that both line
+    // up with the chain on one x. Returns false when nothing could be done.
+    static bool tryMoveAlignedNodes(ChainPlacementContext& ctx, int i, double top_x, double bottom_x) {
+        Node* top_node = ctx.align_partner[i].first.node;
+        Node* bottom_node = ctx.align_partner[i].second.node;
+        NodeLayout& top_nl = ctx.node_layout.at(top_node);
+        NodeLayout& bottom_nl = ctx.node_layout.at(bottom_node);
+
+        int top_layer = ctx.chains[i].top_layer - 1;
+        int bottom_layer = ctx.chains[i].bottom_layer + 1;
+        int top_pos = ctx.assigners[top_layer]->positionInLayer(top_node, true);
+        int bottom_pos = ctx.assigners[ctx.chains[i].bottom_layer]->positionInLayer(bottom_node, false);
+
+        bool top_movable = top_pos >= 0 && top_node->getParents().empty() && top_nl.source_ports.size() == 1;
+        bool bottom_movable = bottom_pos >= 0 && bottom_node->getChildren().empty() && bottom_nl.target_ports.size() == 1;
+        if (!top_movable && !bottom_movable) return false;
+
+        // An end that cannot move stays pinned where it is, so if only one end is
+        // movable the only feasible position is the one the other end dictates.
+        Interval top_range = top_movable ? realNodeMovableRange(ctx, top_layer, top_pos) : Interval{ top_x, top_x };
+        Interval bottom_range = bottom_movable ? realNodeMovableRange(ctx, bottom_layer, bottom_pos) : Interval{ bottom_x, bottom_x };
+
+        std::vector<Interval> feasible = subtractRegions(ctx.sep_window[i], ctx.forbidden_regions[i]);
+        feasible = intersectWithInterval(feasible, top_range);
+        feasible = intersectWithInterval(feasible, bottom_range);
+        feasible = intersectWithInterval(feasible, { std::min(top_x, bottom_x), std::max(top_x, bottom_x) });
+        if (feasible.empty()) return false;
+
+        // Closest feasible point to the middle: when it can't be reached exactly,
+        // one box simply ends up moving more than the other.
+        double mid = (top_x + bottom_x) * 0.5;
+        double target = nearestInAny(feasible, mid, mid);
+
+        if (top_movable) { top_nl.x = target; top_nl.source_ports[0].x = target; }
+        if (bottom_movable) { bottom_nl.x = target; bottom_nl.target_ports[0].x = target; }
+
+        repositionChain(ctx, i, target, target);
+        return true;
+    }
+
+    // Rearranges the free ports of every node that had ports moved (the moved ones
+    // stay fixed) and folds the resulting spacing into ctx.min_spacing.
+    static void redistributeAdjustedPorts(ChainPlacementContext& ctx,
+        std::unordered_map<Node*, std::unordered_set<Port*>>& adjusted_src,
+        std::unordered_map<Node*, std::unordered_set<Port*>>& adjusted_tgt)
+    {
+        for (auto& [node, fixed] : adjusted_src) {
+            NodeLayout& nl = ctx.node_layout.at(node);
+            int pair_layer = node->getLayer();
+            double spacing = ctx.assigners[pair_layer]->redistributePorts(nl.source_ports, fixed, nl.x);
+            ctx.min_spacing[pair_layer] = std::min(ctx.min_spacing[pair_layer], spacing);
+        }
+        for (auto& [node, fixed] : adjusted_tgt) {
+            NodeLayout& nl = ctx.node_layout.at(node);
+            int pair_layer = node->getLayer() - 1;
+            double spacing = ctx.assigners[pair_layer]->redistributePorts(nl.target_ports, fixed, nl.x);
+            ctx.min_spacing[pair_layer] = std::min(ctx.min_spacing[pair_layer], spacing);
+        }
+    }
+
+    static void unifyChain(ChainPlacementContext& ctx, int i,
+        std::unordered_map<Node*, std::unordered_set<Port*>>& adjusted_src,
+        std::unordered_map<Node*, std::unordered_set<Port*>>& adjusted_tgt) {
         double chain_x = ctx.node_layout.at(ctx.chains[i].members.front()).x;
         Kind top = ctx.settled[i].first, bottom = ctx.settled[i].second;
 
@@ -1761,16 +1934,19 @@ namespace port_assignment_internal {
             Port* top_port = ctx.align_partner[i].first.port;
             Port* bottom_port = ctx.align_partner[i].second.port;
 
+            // First choice: move the real boxes themselves when they are free to.
+            if (tryMoveAlignedNodes(ctx, i, top_x, bottom_x)) return;
+
             if (corridorIsClear(ctx, lo, hi, top_neighbor_layer, bottom_neighbor_layer))
             {
+                // Otherwise: current behaviour, pull both ports to the midpoint. They are now
+                // fully aligned, so they are recorded as fixed; the rest of their nodes' ports
+                // are rearranged once, at the very end of placeDummyChains.
                 double mid = (top_x + bottom_x) * 0.5;
                 top_port->x = mid;
                 bottom_port->x = mid;
-
-                ctx.assigners[top_neighbor_layer]->redistributePorts(
-                    ctx.node_layout.at(top_node).source_ports, { top_port }, ctx.node_layout.at(top_node).x);
-                ctx.assigners[ctx.chains[i].bottom_layer]->redistributePorts(
-                    ctx.node_layout.at(bottom_node).target_ports, { bottom_port }, ctx.node_layout.at(bottom_node).x);
+                adjusted_src[top_node].insert(top_port);
+                adjusted_tgt[bottom_node].insert(bottom_port);
 
                 repositionChain(ctx, i, mid, mid);
                 return;
@@ -1842,13 +2018,13 @@ namespace hypergraph_logic {
     //   Step 2: Unify every end's desire to the whole dummy chain.
     //
     void GraphicalHypergraph::placeDummyChains(std::vector<port_assignment_internal::PortAssigner*>& assigners,
-        std::vector<double> min_spacing) {
+        std::vector<double>& min_spacing) {
         using namespace port_assignment_internal;
 
         std::vector<DummyChain> chains = findDummyChains(layers_);
         if (chains.empty()) return;
 
-        ChainPlacementContext ctx{ layers_, node_layout_, assigners, std::move(min_spacing), std::move(chains) };
+        ChainPlacementContext ctx{ layers_, node_layout_, assigners, min_spacing, std::move(chains) };
         int n = static_cast<int>(ctx.chains.size());
 
         for (int i = 0; i < n; ++i)
@@ -1862,23 +2038,50 @@ namespace hypergraph_logic {
         ctx.align_partner.resize(n);
 
         for (int i = 0; i < n; ++i) {
-            ctx.sep_window[i] = chainSeparationWindow(ctx.chains[i], ctx.layers, ctx.node_layout, ctx.assigners);
             double chain_x = ctx.node_layout.at(ctx.chains[i].members.front()).x;
             ctx.desired_x[i] = { { { chain_x, chain_x } }, { { chain_x, chain_x } } }; // default: no change needed yet
             ctx.tie_break_x[i] = { chain_x, chain_x };
-            ctx.forbidden_regions[i] = forbiddenRegions(ctx.chains[i], ctx.min_spacing, ctx.assigners);
+            refreshChainInfo(ctx, i);
         }
 
-        // ── Step 1: Resolve every chain's end status ──────────────────────
+        // ── Step 1a: far alignments first, for every chain ────────────────
+        // resolveFarAlignment already checks that neither end could settle on a
+        // near alignment, so running it for all chains up front is safe.
+        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_src;
+        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_tgt;
+        for (int i = 0; i < n; ++i)
+            resolveFarAlignment(ctx, i, adjusted_src, adjusted_tgt);
+        // Rearrange the free ports of every node that had ports moved, then refresh
+        // everything derived from port positions before any chain end is resolved.
+        redistributeAdjustedPorts(ctx, adjusted_src, adjusted_tgt);
+
+        for (int i = 0; i < n; ++i)
+            refreshChainInfo(ctx, i);
+
+        // ── Step 1b: everything else, per chain end ───────────────────────
+        // Chains settled above are skipped by resolveChainEnd's own early return.
         for (int i = 0; i < n; ++i) {
-            if (resolveFarAlignment(ctx, i)) continue; // both ends settled jointly
             resolveChainEnd(ctx, i, true);
             resolveChainEnd(ctx, i, false);
         }
 
         // ── Step 2: Unify every end's desire into the whole dummy chain ────
         for (int i = 0; i < n; ++i)
-            unifyChain(ctx, i);
+            unifyChain(ctx, i, adjusted_src, adjusted_tgt);
+
+        // Any real port a chain end ended up exactly aligned with must stay where it is.
+        for (int i = 0; i < n; ++i) {
+            auto& [top_p, bottom_p] = ctx.align_partner[i];
+            double top_end_x = ctx.node_layout.at(ctx.chains[i].members.front()).target_ports[0].x;
+            double bottom_end_x = ctx.node_layout.at(ctx.chains[i].members.back()).source_ports[0].x;
+            if (top_p.node && std::abs(top_p.port->x - top_end_x) < 1e-6)
+                adjusted_src[top_p.node].insert(top_p.port);
+            if (bottom_p.node && std::abs(bottom_p.port->x - bottom_end_x) < 1e-6)
+                adjusted_tgt[bottom_p.node].insert(bottom_p.port);
+        }
+        redistributeAdjustedPorts(ctx, adjusted_src, adjusted_tgt);
+
+        min_spacing = std::move(ctx.min_spacing);
     }
 
     void GraphicalHypergraph::recentreNodesUnderPorts() {

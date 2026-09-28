@@ -439,8 +439,6 @@ namespace bk_internal {
 			}
 
 			if (low <= target && target <= high) {
-				if (x[v] != target)
-					printf("THERE WAS A CHANGE\n");
 				x[v] = target;
 			}
 		}

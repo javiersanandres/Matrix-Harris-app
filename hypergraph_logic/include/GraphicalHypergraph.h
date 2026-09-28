@@ -222,7 +222,7 @@ namespace hypergraph_logic {
 		// Finds every maximal run of chain-linked dummy nodes (length 1 counts
 		// a lone "isolated" dummy is handled by exactly the same machinery) and
 		// moves each one, as a single rigid unit, to a settled x.
-		void placeDummyChains(std::vector<port_assignment_internal::PortAssigner*>& assigners, std::vector<double> min_spacing);
+		void placeDummyChains(std::vector<port_assignment_internal::PortAssigner*>& assigners, std::vector<double>& min_spacing);
 
 		// ── Stage 4: port assignment ───────────────────────────────────────────────
 		//
