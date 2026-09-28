@@ -40,6 +40,14 @@ namespace port_assignment_internal {
 		// Returns the minimum port spacing remaining after adjustments.
 		double reduceHorizontalJogs() const;
 
+		// Redistributes free ports evenly within each gap defined by fixed anchor
+		// ports and the node boundaries. Called by reduceHorizontalJogs after all
+		// alignments are done to restore symmetry on affected nodes.
+		// Returns the minimum spacing produced between adjacent ports after redistribution.
+		double redistributePorts(std::vector<Port>& ports,
+			const std::unordered_set<Port*>& fixed,
+			double node_x) const;
+
 		// Detect and resolve vertical-segment overlaps between this layer pair.
 		// min_vertical_sep: the minimum required x-gap between any two vertical segments.
 		void solveVerticalOverlaps(double min_vertical_sep);
@@ -113,14 +121,6 @@ namespace port_assignment_internal {
 		// ── Port ordering and spacing ──────────────────────────────────────────────
 		void orderPorts(Node* node, std::vector<Port>& ports, bool source) const;
 		double arrangeSymmetrically(Node* node, std::vector<Port>& ports) const;
-
-		// Redistributes free ports evenly within each gap defined by fixed anchor
-		// ports and the node boundaries. Called by reduceHorizontalJogs after all
-		// alignments are done to restore symmetry on affected nodes.
-		// Returns the minimum spacing produced between adjacent ports after redistribution.
-		double redistributePorts(std::vector<Port>& ports,
-			const std::unordered_set<Port*>& fixed,
-			double node_x) const;
 
 		// ── Conflict detection ─────────────────────────────────────────────────────
 		std::vector<std::pair<Node*, Node*>> detectConflicts(double min_vertical_sep) const;

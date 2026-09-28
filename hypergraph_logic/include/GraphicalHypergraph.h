@@ -241,6 +241,15 @@ namespace hypergraph_logic {
 		// margin to its own leftmost/rightmost port is equal.
 		void recentreNodesUnderPorts();
 
+		// ── Stage 4.6: centre lone root sources under their single hyperedge ──────
+		//
+		// For every node with no parents and exactly one outgoing hyperedge (a
+		// single source port), tries to move both the node and its port to the
+		// midpoint of that hyperedge's other endpoints, as long as doing so
+		// keeps at least 2*MIN_VERTICAL_SEP away from the nearest source port
+		// on each side within the same layer.
+		void centerSingleHyperedgeRoots(std::vector<port_assignment_internal::PortAssigner*>& assigners);
+
 		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────
 		//
 		// Assigns a y coordinate to the horizontal span of each hyperedge and a

@@ -237,7 +237,23 @@ namespace port_assignment_internal {
         double min_x = node_x - node_width / 2.0;
         for (int i = 0; i < n; ++i)
             ports[i].x = min_x + spacing * (i + 1);
+        if (node->isDummy()) return MIN_VERTICAL_SEP;
         return spacing;
+    }
+
+    // True iff moving this node's port toward 'other_x' would have to leapfrog
+    // its own same-node neighbour in that direction -- i.e. that neighbour is
+    // already sitting between us and where we'd be aligning to.
+    static bool wouldCrossNeighbour(Node* node, const std::vector<Port>& ports, int idx,
+        double node_x, double other_x, bool moving_right)
+    {
+        if (node->isDummy()) return false; // a dummy has only one port; nothing to cross
+        if (moving_right) {
+            double next_port = (idx == static_cast<int>(ports.size()) - 1) ? node_x + NODE_WIDTH / 2.0 : ports[idx + 1].x;
+            return next_port < other_x;
+        }
+        double prev_port = (idx == 0) ? node_x - NODE_WIDTH / 2.0 : ports[idx - 1].x;
+        return prev_port > other_x;
     }
 
     // ── Reduce horizontal jogs ──────────────────────────────────────────────────────────────
@@ -259,32 +275,39 @@ namespace port_assignment_internal {
                 double src_x = node_layout_.at(src_node).x;
                 double tgt_x = node_layout_.at(tgt_node).x;
 
-                if ((src_x != tgt_x) &&
-                    (std::abs(src_ports[si].x - tgt_ports[ti].x) > MIN_VERTICAL_SEP))
-                    return false;
-
                 if (src_node->isDummy() && tgt_node->isDummy()) return false;
+
+                // Let's see if there is any port in between the two. If there is
+                // we don't align them but if there isn't we will align them.
+                if (src_ports[si].x != tgt_ports[ti].x) {
+                    bool src_moving_right = src_ports[si].x < tgt_ports[ti].x;
+                    if (wouldCrossNeighbour(src_node, src_ports, si, src_x, tgt_ports[ti].x, src_moving_right)) return false;
+                    if (wouldCrossNeighbour(tgt_node, tgt_ports, ti, tgt_x, src_ports[si].x, !src_moving_right)) return false;
+                }
+                else {
+                    return true; // Already aligned
+                }
 
                 std::pair<double, double> src_span, tgt_span;
 
                 if (src_node->isDummy()) {
-                    src_span = { src_x, src_x };
+                    src_span = { src_ports[si].x, src_ports[si].x };
                 }
                 else {
                     src_span.first = (si == 0)
-                        ? src_x - NODE_WIDTH / 2.0 + MIN_VERTICAL_SEP : src_ports[si - 1].x;
+                        ? src_x - NODE_WIDTH / 2.0 : src_ports[si - 1].x;
                     src_span.second = (si == static_cast<int>(src_ports.size()) - 1)
-                        ? src_x + NODE_WIDTH / 2.0 - MIN_VERTICAL_SEP : src_ports[si + 1].x;
+                        ? src_x + NODE_WIDTH / 2.0 : src_ports[si + 1].x;
                 }
 
                 if (tgt_node->isDummy()) {
-                    tgt_span = { tgt_x, tgt_x };
+                    tgt_span = { tgt_ports[ti].x, tgt_ports[ti].x };
                 }
                 else {
                     tgt_span.first = (ti == 0)
-                        ? tgt_x - NODE_WIDTH / 2.0 + MIN_VERTICAL_SEP : tgt_ports[ti - 1].x;
+                        ? tgt_x - NODE_WIDTH / 2.0 : tgt_ports[ti - 1].x;
                     tgt_span.second = (ti == static_cast<int>(tgt_ports.size()) - 1)
-                        ? tgt_x + NODE_WIDTH / 2.0 - MIN_VERTICAL_SEP : tgt_ports[ti + 1].x;
+                        ? tgt_x + NODE_WIDTH / 2.0 : tgt_ports[ti + 1].x;
                 }
 
                 double inter_lo = std::max(src_span.first, tgt_span.first);
@@ -292,8 +315,6 @@ namespace port_assignment_internal {
                 if (inter_lo > inter_hi) return false;
 
                 double new_x = (inter_lo + inter_hi) / 2.0;
-                double prev_src_x = src_ports[si].x;
-                double prev_tgt_x = tgt_ports[ti].x;
                 src_ports[si].x = new_x;
                 tgt_ports[ti].x = new_x;
 
@@ -306,7 +327,7 @@ namespace port_assignment_internal {
             };
 
         // We loop over the edges, there are three cases to consider:
-        //  1) The edge has only one source and one target, so we can align those two ports.
+        //  1) The edge has only one source or one target, so we can try some alignment.
         //  2) The edge has two leftmost nodes, one source and one target, so we can align those two ports.
         //  3) The edge has two rightmost nodes, one source and one target, so we can align those two ports.
         // 
@@ -320,18 +341,47 @@ namespace port_assignment_internal {
             const auto& rv = rightmost_nodes_.at(e);
 
             // Case 1: one source, one target.
-            if (edge->getSources().size() == 1 && edge->getTargets().size() == 1) {
-                Node* src_node = edge->getSources()[0].get();
-                Node* tgt_node = edge->getTargets()[0].get();
-                auto& src_ports = node_layout_.at(src_node).source_ports;
-                auto& tgt_ports = node_layout_.at(tgt_node).target_ports;
-                int si = findPortIndex(src_ports, e);
-                int ti = findPortIndex(tgt_ports, e);
-                if (alignPort(src_node, tgt_node, src_ports, si, tgt_ports, ti)) {
-                    adjusted_src[src_node].insert(&src_ports[si]);
-                    adjusted_tgt[tgt_node].insert(&tgt_ports[ti]);
+            if (edge->getSources().size() == 1 || edge->getTargets().size() == 1) {
+                Node* src_node = nullptr, * tgt_node = nullptr;
+                std::vector<Port>* src_ports = nullptr, * tgt_ports = nullptr;
+                int si = 0, ti = 0;
+
+                if (edge->getSources().size() == 1) {
+                    src_node = edge->getSources()[0].get();
+                    src_ports = &node_layout_.at(src_node).source_ports;
+                    si = findPortIndex(*src_ports, e);
                 }
-                continue;
+                if (edge->getTargets().size() == 1) {
+                    tgt_node = edge->getTargets()[0].get();
+                    tgt_ports = &node_layout_.at(tgt_node).target_ports;
+                    ti = findPortIndex(*tgt_ports, e);
+                }
+                if (!tgt_node && src_ports->size() == 1) {
+                    for (const auto& t : edge->getTargets()) {
+                        if (std::abs(node_layout_.at(t.get()).x - src_ports->front().x) >= MIN_BLOCK_SEP * 0.5) continue;
+                        tgt_node = t.get();
+                        tgt_ports = &node_layout_.at(tgt_node).target_ports;
+                        ti = findPortIndex(*tgt_ports, e);
+                        break; // Only one target can meet the distance requirement
+                    }
+                }
+                if (!src_node && tgt_ports->size() == 1) {
+                    for (const auto& s : edge->getSources()) {
+                        if (std::abs(node_layout_.at(s.get()).x - tgt_ports->front().x) >= 3 * MIN_BLOCK_SEP * 0.5) continue;
+                        src_node = s.get();
+                        src_ports = &node_layout_.at(src_node).source_ports;
+                        si = findPortIndex(*src_ports, e);
+                        break; // Only one target can meet the distance requirement
+                    }
+                }
+
+                if (src_node && tgt_node) {
+                    if (alignPort(src_node, tgt_node, *src_ports, si, *tgt_ports, ti)) {
+                        adjusted_src[src_node].insert(&(*src_ports)[si]);
+                        adjusted_tgt[tgt_node].insert(&(*tgt_ports)[ti]);
+                    }
+                    continue;
+                }
             }
 
             // Case 2: two leftmost nodes.
@@ -932,13 +982,13 @@ namespace port_assignment_internal {
 
     using Interval = std::pair<double, double>;
 
-    static std::vector<Interval> normalize(std::vector<Interval> v) {
+    static std::vector<Interval> normalize(std::vector<Interval> v, bool closed) {
         v.erase(std::remove_if(v.begin(), v.end(),
-            [](const Interval& x) { return x.first >= x.second; }), v.end());
+            [closed](const Interval& x) { return closed ? x.first > x.second : x.first >= x.second; }), v.end());
         std::sort(v.begin(), v.end());
         std::vector<Interval> out;
         for (const auto& x : v)
-            if (!out.empty() && x.first < out.back().second)
+            if (!out.empty() && (closed ? x.first <= out.back().second : x.first < out.back().second))
                 out.back().second = std::max(out.back().second, x.second);
             else
                 out.push_back(x);
@@ -949,7 +999,7 @@ namespace port_assignment_internal {
         std::vector<Interval> result;
         if (window.first > window.second) return result;
         double cursor = window.first;
-        for (const auto& [flo, fhi] : normalize(std::move(forbidden))) {
+        for (const auto& [flo, fhi] : normalize(std::move(forbidden), false)) {
             if (fhi <= window.first) continue;
             if (flo >= window.second) break;
             if (flo >= cursor) result.push_back({ cursor, flo });
@@ -959,9 +1009,20 @@ namespace port_assignment_internal {
         return result;
     }
 
-    static bool insideAny(const std::vector<Interval>& intervals, double x) {
-        for (auto& [lo, hi] : intervals) if (x >= lo && x <= hi) return true;
+    static bool insideAny(const std::vector<Interval>& intervals, double x, bool closed = true) {
+        for (auto& [lo, hi] : intervals)
+            if (closed ? (x >= lo && x <= hi) : (x > lo && x < hi)) return true;
         return false;
+    }
+
+    static double closest_value(const std::vector<double>& vec, double value) {
+        auto it = std::lower_bound(vec.begin(), vec.end(), value);
+
+        if (it == vec.begin()) return *it;
+        if (it == vec.end())   return vec.back();
+
+        auto prev = std::prev(it);
+        return (value - *prev <= *it - value) ? *prev : *it;
     }
 
     static double nearestInAny(const std::vector<Interval>& intervals, double x, double tie_break) {
@@ -990,8 +1051,8 @@ namespace port_assignment_internal {
     static std::vector<Interval> intersectIntervalFamilies(const std::vector<Interval>& family_1, const std::vector<Interval>& family_2) {
         std::vector<Interval> result;
 
-        std::vector<Interval> f1 = normalize(family_1);
-        std::vector<Interval> f2 = normalize(family_2);
+        std::vector<Interval> f1 = normalize(family_1, true);
+        std::vector<Interval> f2 = normalize(family_2, true);
 
         size_t k = 0, l = 0;
         while (k < f1.size() && l < f2.size()) {
@@ -1121,7 +1182,7 @@ namespace port_assignment_internal {
             result.push_back(i);
         }
 
-        return normalize(result);
+        return normalize(result, false);
     }
 
     // ── Per-boundary desire ───────────────────────────────────────────────────
@@ -1152,6 +1213,13 @@ namespace port_assignment_internal {
         std::vector<std::pair<Kind, Kind>> settled;                                     // {top, bottom}
         std::vector<std::pair<std::vector<Interval>, std::vector<Interval>>> desired_x; // {top, bottom}
         std::vector<std::pair<double, double>> tie_break_x;                             // {top, bottom}
+
+        // Records which real node/port a chain's end actually achieved
+        // AlignFull against, so unifyChain can, when BOTH ends are AlignFull,
+        // try pulling both counterparts together too.
+        // Left at {nullptr, nullptr} for every other Kind.
+        struct AlignPartner { Node* node = nullptr; Port* port = nullptr; };
+        std::vector<std::pair<AlignPartner, AlignPartner>> align_partner;               // {top, bottom}
     };
 
     // ── Slot accessors ─────────────────────────────────────────────────────────
@@ -1194,13 +1262,13 @@ namespace port_assignment_internal {
             }
         }
 
-        if (right_bound - left_bound < 3.0 * MIN_VERTICAL_SEP) {
+        if (right_bound - left_bound < 4.0 * MIN_VERTICAL_SEP) {
             double mid = (left_bound + right_bound) * 0.5;
             desiredSlot(ctx, idx, i_is_top) = { { mid, mid } };
             tieBreakSlot(ctx, idx, i_is_top) = mid;
         }
         else {
-            Interval shrunk = { left_bound + 1.5 * MIN_VERTICAL_SEP, right_bound - 1.5 * MIN_VERTICAL_SEP };
+            Interval shrunk = { left_bound + 2.0 * MIN_VERTICAL_SEP, right_bound - 2.0 * MIN_VERTICAL_SEP };
             desiredSlot(ctx, idx, i_is_top) = { shrunk };
             tieBreakSlot(ctx, idx, i_is_top) = nearestInAny({ shrunk }, chain_x, chain_x);
         }
@@ -1227,9 +1295,9 @@ namespace port_assignment_internal {
             }
         }
 
-        if (right_bound - left_bound < 3.0 * MIN_VERTICAL_SEP)
+        if (right_bound - left_bound < 4.0 * MIN_VERTICAL_SEP)
             return (left_bound + right_bound) * 0.5;
-        return nearestInAny({ { left_bound + 1.5 * MIN_VERTICAL_SEP, right_bound - 1.5 * MIN_VERTICAL_SEP } }, chain_x, chain_x);
+        return nearestInAny({ { left_bound + 2.0 * MIN_VERTICAL_SEP, right_bound - 2.0 * MIN_VERTICAL_SEP } }, chain_x, chain_x);
     }
 
     // Settles one side of a chain-vs-chain conflict (see resolveChainEnd):
@@ -1247,6 +1315,178 @@ namespace port_assignment_internal {
             tieBreakSlot(ctx, chain_idx, is_top) = nearestInAny(intersection, interval.second, interval.second);
             settledSlot(ctx, chain_idx, is_top) = Kind::ConflictFull;
         }
+    }
+
+
+    // Checks whether the vertical corridor [lo, hi] is genuinely clear across
+    // every layer from top_layer to bottom_layer (inclusive): no real node's
+    // box and no real node's port (other than the two specific ports being
+    // aligned) falls inside it. 
+    static bool corridorIsClear(ChainPlacementContext& ctx, double lo, double hi,
+        int top_layer, int bottom_layer)
+    {
+        for (int layer = top_layer; layer <= bottom_layer; ++layer) {
+            auto it = ctx.layers.find(layer);
+            if (it == ctx.layers.end()) continue;
+            for (const auto& node_ptr : it->second.nodes) {
+                Node* n = node_ptr.get();
+                const NodeLayout& nl = ctx.node_layout.at(n);
+
+                if (!n->isDummy()) {
+                    if (nl.x + NODE_WIDTH * 0.5 > lo && nl.x + NODE_WIDTH * 0.5 < hi) return false;
+                    if (nl.x - NODE_WIDTH * 0.5 > lo && nl.x - NODE_WIDTH * 0.5 < hi) return false;
+                }
+                for (const Port& p : nl.source_ports) {
+                    if (p.x > lo && p.x < hi) return false;
+                }
+                for (const Port& p : nl.target_ports) {
+                    if (p.x > lo && p.x < hi) return false;
+                }
+            }
+        }
+        return true;
+    }
+
+    // ── Alignment candidates for one end of one chain ────────────────────────
+    //
+    // near: counterpart ports within NODE_WIDTH*0.5 of the chain, sorted by
+    //       distance to it. These are aligned to directly (see resolveChainEnd).
+    // far : corridors [lo, hi] between a counterpart port that is too far to
+    //       align to directly and the closest coordinate where the ORIGINAL
+    //       (pre-split) hyperedge lands on the opposite side of the chain,
+    //       kept only when nothing lies inside the corridor. The chain is
+    //       meant to sit in the middle of such a corridor (see
+    //       resolveFarAlignment).
+    struct FarPair {
+        double lo, hi;
+        double mid() const { return (lo + hi) * 0.5; }
+    };
+
+    struct EndAlignmentInfo {
+        std::vector<std::pair<Node*, Port*>> near;
+        std::vector<FarPair> far;
+    };
+
+    static EndAlignmentInfo gatherAlignmentInfo(ChainPlacementContext& ctx, int idx, bool i_is_top) {
+        EndAlignmentInfo info;
+        Node* dummy = i_is_top ? ctx.chains[idx].members.front() : ctx.chains[idx].members.back();
+        NodeLayout& dummy_layout = ctx.node_layout.at(dummy);
+        Hyperedge* edge = i_is_top ? dummy_layout.target_ports[0].edge : dummy_layout.source_ports[0].edge;
+
+        std::vector<Node*> counterpart_candidates;
+        std::vector<double> alignment_coords;
+        // The original edge always outlives its segments, but guard anyway: without
+        // it there are simply no far pairs.
+        HyperedgePtr original = edge->getOrigin().lock();
+        if (i_is_top) {
+            for (const auto& src : edge->getSources()) counterpart_candidates.push_back(src.get());
+            if (original) {
+                for (const auto& tgt : original->getTargets()) {
+                    if (tgt->getLayer() != ctx.chains[idx].bottom_layer + 1) continue;
+                    for (const Port& p : ctx.node_layout.at(tgt.get()).target_ports)
+                        if (p.edge->getOrigin().lock() == original) alignment_coords.push_back(p.x);
+                }
+            }
+        }
+        else {
+            for (const auto& tgt : edge->getTargets()) counterpart_candidates.push_back(tgt.get());
+            if (original) {
+                for (const auto& src : original->getSources()) {
+                    if (src->getLayer() != ctx.chains[idx].top_layer - 1) continue;
+                    for (const Port& p : ctx.node_layout.at(src.get()).source_ports)
+                        if (p.edge->getOrigin().lock() == original) alignment_coords.push_back(p.x);
+                }
+            }
+        }
+        std::sort(alignment_coords.begin(), alignment_coords.end());
+
+        for (Node* other : counterpart_candidates) {
+            auto& other_ports = i_is_top ? ctx.node_layout.at(other).source_ports : ctx.node_layout.at(other).target_ports;
+            for (Port& p : other_ports) {
+                if (p.edge != edge) continue;
+                if (std::abs(dummy_layout.x - p.x) <= NODE_WIDTH * 0.5) {
+                    info.near.push_back({ other, &p });
+                }
+                else {
+                    // Too far to align to directly, but real nodes of non-adjacent
+                    // layers can still be aligned through a clear corridor.
+                    if (other->isDummy() || alignment_coords.empty()) continue;
+                    double closest_align_coord = closest_value(alignment_coords, p.x);
+                    double lo = std::min(closest_align_coord, p.x);
+                    double hi = std::max(closest_align_coord, p.x);
+                    if (corridorIsClear(ctx, lo, hi, ctx.chains[idx].top_layer - 1, ctx.chains[idx].bottom_layer + 1))
+                        info.far.push_back({ lo, hi });
+                }
+            }
+        }
+        std::sort(info.near.begin(), info.near.end(), [&](const auto& a, const auto& b) {
+            return std::abs(dummy_layout.x - a.second->x) < std::abs(dummy_layout.x - b.second->x);
+            });
+        return info;
+    }
+
+    // True iff the per-end logic of resolveChainEnd would settle this end on one
+    // of its near candidates without falling back to a partial alignment: a
+    // dummy candidate (settles immediately) or a real one inside allowed_space.
+    static bool endResolvesNearby(ChainPlacementContext& ctx, int idx, bool i_is_top, const EndAlignmentInfo& info) {
+        if (info.near.empty()) return false;
+        std::vector<Interval> allowed_space = subtractRegions(ctx.sep_window[idx], forbiddenFor(ctx, idx, !i_is_top));
+        for (const auto& [other, port] : info.near)
+            if (other->isDummy() || insideAny(allowed_space, port->x, true)) return true;
+        return false;
+    }
+
+    // ── Step 1 (pre-pass): align a whole chain through far corridors ─────────
+    //
+    // Both ends are decided at once. Only tried when neither end can settle on
+    // a near candidate (near ones always have priority) and at least one far
+    // corridor exists. Each corridor is scored by how far its middle point is
+    // from the chain; the closest one(s) win. When several are tied within an
+    // epsilon, the target is the middle point of their middle points (for a
+    // single winner that is just its own middle point). The whole chain goes
+    // to that target -- both ends AlignFull -- if it lies in the chain's
+    // allowed space; otherwise nothing is done and both ends are marked None.
+    static bool resolveFarAlignment(ChainPlacementContext& ctx, int idx) {
+        // Ends may already have been settled by another chain's conflict resolution.
+        if (ctx.settled[idx].first != Kind::NotVisited || ctx.settled[idx].second != Kind::NotVisited) return false;
+
+        EndAlignmentInfo top = gatherAlignmentInfo(ctx, idx, true);
+        EndAlignmentInfo bottom = gatherAlignmentInfo(ctx, idx, false);
+        if (endResolvesNearby(ctx, idx, true, top) || endResolvesNearby(ctx, idx, false, bottom)) return false;
+
+        std::vector<double> mids;
+        for (const FarPair& f : top.far) mids.push_back(f.mid());
+        for (const FarPair& f : bottom.far) mids.push_back(f.mid());
+        if (mids.empty()) return false;
+
+        constexpr double EPS = 1e-6;
+        double chain_x = ctx.node_layout.at(ctx.chains[idx].members.front()).x;
+
+        double best = std::numeric_limits<double>::max();
+        for (double m : mids) best = std::min(best, std::abs(m - chain_x));
+
+        double lowest_tied = std::numeric_limits<double>::max();
+        double highest_tied = std::numeric_limits<double>::lowest();
+        for (double m : mids) {
+            if (std::abs(m - chain_x) > best + EPS) continue;
+            lowest_tied = std::min(lowest_tied, m);
+            highest_tied = std::max(highest_tied, m);
+        }
+        double target = (lowest_tied + highest_tied) * 0.5;
+
+        std::vector<Interval> allowed_space = subtractRegions(ctx.sep_window[idx], ctx.forbidden_regions[idx]);
+        bool fits = insideAny(allowed_space, target, true);
+        for (bool is_top : { true, false }) {
+            if (fits) {
+                desiredSlot(ctx, idx, is_top) = { { target, target } };
+                tieBreakSlot(ctx, idx, is_top) = target;
+                settledSlot(ctx, idx, is_top) = Kind::AlignFull;
+            }
+            else {
+                settledSlot(ctx, idx, is_top) = Kind::None;
+            }
+        }
+        return true;
     }
 
     // ── Step 1: resolve one end of one chain ─────────────────────────────────
@@ -1274,15 +1514,16 @@ namespace port_assignment_internal {
         // will handle the conflicting regions; if the partner is a dummy, we do
         // nothing (see below).
         {
-            std::vector<Node*> counterpart_candidates;
-            if (i_is_top) for (const auto& src : edge->getSources()) counterpart_candidates.push_back(src.get());
-            else          for (const auto& tgt : edge->getTargets()) counterpart_candidates.push_back(tgt.get());
+            EndAlignmentInfo info = gatherAlignmentInfo(ctx, idx, i_is_top);
+            std::vector<std::pair<Node*, Port*>>& candidates = info.near;
 
-            for (Node* other : counterpart_candidates) {
-                auto& other_ports = i_is_top ? ctx.node_layout.at(other).source_ports : ctx.node_layout.at(other).target_ports;
-                for (const Port& p : other_ports) {
-                    if (p.edge != edge) continue;
-                    if (std::abs(dummy_layout.x - p.x) > MIN_VERTICAL_SEP) continue;
+            if (!candidates.empty()) {
+                std::vector<Interval> allowed_space = subtractRegions(ctx.sep_window[idx], forbiddenFor(ctx, idx, !i_is_top));
+
+                // Walk the candidates closest-first, looking for 
+                // the first one that achieves full alignment.
+                for (const auto& [other, port_ptr] : candidates) {
+                    Port& p = *port_ptr;
 
                     if (other->isDummy()) {
                         // We won't be aligning dummy nodes because they don't fall under any
@@ -1303,46 +1544,50 @@ namespace port_assignment_internal {
                         return;
                     }
 
-                    // We will not move real node's ports here.
-                    std::vector<Interval> allowed_space = subtractRegions(ctx.sep_window[idx], forbiddenFor(ctx, idx, !i_is_top));
                     if (insideAny(allowed_space, p.x)) {
-                        // Full alignment is possible.
+                        // Full alignment is possible with this candidate. Take it
+                        // and stop looking, even if a closer one only offered partial.
                         desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
                         settled_own = Kind::AlignFull;
+                        (i_is_top ? ctx.align_partner[idx].first : ctx.align_partner[idx].second) = { other, &p };
                         return;
                     }
+                    // Otherwise: keep looking for a candidate that CAN achieve full
+                    // alignment; if none do, fall back to the closest one below.
+                }
 
-                    // Full alignment is not possible. So we would have to restrict
-                    // ourselves to Kind::AlignPartial. However, we will first ask
-                    // the other end of its situation. If it were another partial
-                    // then it makes no sense to have both ends in a partial align and
-                    // add a jog when we could have both full alignments and a jog.
-                    settled_own = Kind::AlignPartial;
-                    Kind& settled_other = settledSlot(ctx, idx, !i_is_top);
-                    if (settled_other == Kind::NotVisited) {
-                        resolveChainEnd(ctx, idx, !i_is_top);
-                        if (settled_other == Kind::AlignForbiddenMovement || settled_other == Kind::ConflictForbiddenMovement) {
-                            // After calling the other end, it has been placed in a forbidden position.
-                            // So both ends work independently and we are free to do whatever we please.
-                            desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
-                            settled_own = Kind::AlignForbiddenMovement;
-                            return;
-                        }
-                    }
-                    else if (settled_other == Kind::AlignPartial) {
-                        // The other end (which had to call) also has partial alignment
-                        // and since this would lead to two partial alignments and a jog
-                        // we will instead replace ours for a full forbidden alignment.
-                        // After returning, the other end will update its own kind.
+                // No candidate achieved full alignment: fall back to a partial
+                // alignment with the closest one. However, we will first ask the
+                // other end of its situation. If it were another partial then it
+                // makes no sense to have both ends in a partial align and add a
+                // jog when we could have both full alignments and a jog.
+                Port& p = *candidates.front().second;
+
+                settled_own = Kind::AlignPartial;
+                Kind& settled_other = settledSlot(ctx, idx, !i_is_top);
+                if (settled_other == Kind::NotVisited) {
+                    resolveChainEnd(ctx, idx, !i_is_top);
+                    if (settled_other == Kind::AlignForbiddenMovement || settled_other == Kind::ConflictForbiddenMovement) {
+                        // After calling the other end, it has been placed in a forbidden position.
+                        // So both ends work independently and we are free to do whatever we please.
                         desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
                         settled_own = Kind::AlignForbiddenMovement;
                         return;
                     }
-
-                    double new_x = nearestInAny(allowed_space, p.x, dummy_layout.x);
-                    desiredSlot(ctx, idx, i_is_top) = { {new_x, new_x} };
+                }
+                else if (settled_other == Kind::AlignPartial) {
+                    // The other end (which had to call) also has partial alignment
+                    // and since this would lead to two partial alignments and a jog
+                    // we will instead replace ours for a full forbidden alignment.
+                    // After returning, the other end will update its own kind.
+                    desiredSlot(ctx, idx, i_is_top) = { {p.x, p.x} };
+                    settled_own = Kind::AlignForbiddenMovement;
                     return;
                 }
+
+                double new_x = nearestInAny(allowed_space, p.x, dummy_layout.x);
+                desiredSlot(ctx, idx, i_is_top) = { {new_x, new_x} };
+                return;
             }
         }
 
@@ -1426,7 +1671,7 @@ namespace port_assignment_internal {
                 if (conflicts_x.size() == 2) {
                     double middle = (conflicts_x.front() + conflicts_x.back()) * 0.5;
                     desiredSlot(ctx, idx, i_is_top) = { { middle, middle } };
-                    settled_own = insideAny(forbiddenFor(ctx, idx, !i_is_top), middle)
+                    settled_own = insideAny(forbiddenFor(ctx, idx, !i_is_top), middle, false)
                         ? Kind::ConflictForbiddenMovement : Kind::ConflictPartial;
                 }
                 // else: just one conflict (not possible) because allowed_own_space is empty.
@@ -1492,6 +1737,46 @@ namespace port_assignment_internal {
             return;
         }
 
+        // Both ends achieved full alignment individually, but with different
+        // targets, so the chain would otherwise have to jog between them.
+        // Before accepting that, check whether the wider corridor between
+        // the two counterparts is genuinely empty -- if so we can do better
+        // than the chain alone: pull BOTH counterpart ports together to
+        // their midpoint too, straightening the whole assembly across
+        // non-adjacent layers, not just the chain's own interior.
+        if (top == Kind::AlignFull && bottom == Kind::AlignFull &&
+            ctx.align_partner[i].first.node && ctx.align_partner[i].second.node)
+        {
+            // Full alignments desired_x are just single-point degenerate intervals.
+            double top_x = ctx.desired_x[i].first.front().first;
+            double bottom_x = ctx.desired_x[i].second.front().first;
+            double lo = std::min(top_x, bottom_x);
+            double hi = std::max(top_x, bottom_x);
+
+            int top_neighbor_layer = ctx.chains[i].top_layer - 1;
+            int bottom_neighbor_layer = ctx.chains[i].bottom_layer + 1;
+
+            Node* top_node = ctx.align_partner[i].first.node;
+            Node* bottom_node = ctx.align_partner[i].second.node;
+            Port* top_port = ctx.align_partner[i].first.port;
+            Port* bottom_port = ctx.align_partner[i].second.port;
+
+            if (corridorIsClear(ctx, lo, hi, top_neighbor_layer, bottom_neighbor_layer))
+            {
+                double mid = (top_x + bottom_x) * 0.5;
+                top_port->x = mid;
+                bottom_port->x = mid;
+
+                ctx.assigners[top_neighbor_layer]->redistributePorts(
+                    ctx.node_layout.at(top_node).source_ports, { top_port }, ctx.node_layout.at(top_node).x);
+                ctx.assigners[ctx.chains[i].bottom_layer]->redistributePorts(
+                    ctx.node_layout.at(bottom_node).target_ports, { bottom_port }, ctx.node_layout.at(bottom_node).x);
+
+                repositionChain(ctx, i, mid, mid);
+                return;
+            }
+        }
+
         if (isForbiddenMovement(top) || isForbiddenMovement(bottom) || top == bottom) {
             double top_x = nearestInAny(ctx.desired_x[i].first, ctx.tie_break_x[i].first, ctx.tie_break_x[i].first);
             double bottom_x = nearestInAny(ctx.desired_x[i].second, ctx.tie_break_x[i].second, ctx.tie_break_x[i].second);
@@ -1517,7 +1802,7 @@ namespace port_assignment_internal {
 //   2. placeDummyChains()        — settle every dummy chain's to a position
 //                                  where it is better placed.
 //                                              
-//   3. applyHorizontalJogs() /
+//   3. reduceHorizontalJogs() /
 //      solveVerticalOverlaps()   — Solves conflicts and reduces jogs.
 // ============================================================================
 namespace hypergraph_logic {
@@ -1543,6 +1828,8 @@ namespace hypergraph_logic {
             min_spacing[layer] = std::min(min_spacing[layer], assigners[layer]->reduceHorizontalJogs());
             assigners[layer]->solveVerticalOverlaps(min_spacing[layer]);
         }
+        recentreNodesUnderPorts();
+        centerSingleHyperedgeRoots(assigner_ptrs);
     }
 
     // ── placeDummyChains ─────────────────────────────────────────────────
@@ -1572,6 +1859,7 @@ namespace hypergraph_logic {
         ctx.settled.assign(n, { Kind::NotVisited, Kind::NotVisited }); // {top, bottom}
         ctx.desired_x.resize(n);
         ctx.tie_break_x.resize(n);
+        ctx.align_partner.resize(n);
 
         for (int i = 0; i < n; ++i) {
             ctx.sep_window[i] = chainSeparationWindow(ctx.chains[i], ctx.layers, ctx.node_layout, ctx.assigners);
@@ -1583,6 +1871,7 @@ namespace hypergraph_logic {
 
         // ── Step 1: Resolve every chain's end status ──────────────────────
         for (int i = 0; i < n; ++i) {
+            if (resolveFarAlignment(ctx, i)) continue; // both ends settled jointly
             resolveChainEnd(ctx, i, true);
             resolveChainEnd(ctx, i, false);
         }
@@ -1609,6 +1898,7 @@ namespace hypergraph_logic {
                     if (min_p > max_p) continue; // no ports at all: nothing to centre
 
                     double target = (min_p + max_p) * 0.5;
+                    if (nl.x == target) continue;
                     double width_n = n->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
 
                     double low = std::numeric_limits<double>::lowest();
@@ -1628,6 +1918,102 @@ namespace hypergraph_logic {
                     if (low <= high)
                         nl.x = std::clamp(target, low, high);
                     // else: siblings already at minimum spacing, no room to move safely.
+                }
+                };
+
+            pass(0, k, 1);       // left  -> right
+            pass(k - 1, -1, -1); // right -> left
+        }
+    }
+
+    void GraphicalHypergraph::centerSingleHyperedgeRoots(std::vector<port_assignment_internal::PortAssigner*>& assigners) {
+        using namespace port_assignment_internal;
+
+        for (const auto& [layer, data] : layers_) {
+            const auto& nodes = data.nodes;
+            int k = static_cast<int>(nodes.size());
+
+            auto pass = [&](int start, int end, int step) {
+                for (int i = start; i != end; i += step) {
+                    Node* node = nodes[i].get();
+                    if (!node->getParents().empty()) continue;
+
+                    NodeLayout& nl = node_layout_.at(node);
+                    if (nl.source_ports.size() != 1) continue;
+
+                    Hyperedge* edge = nl.source_ports[0].edge;
+                    double min_x = std::numeric_limits<double>::max();
+                    double max_x = std::numeric_limits<double>::lowest();
+                    for (const auto& src : edge->getSources()) {
+                        if (src.get() == node) continue;
+                        for (const Port& p : node_layout_.at(src.get()).source_ports)
+                            if (p.edge == edge) { min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x); }
+                    }
+                    bool aligned = false;
+                    std::vector<double> tgt_ports; // Store the target ports for later steps
+                    for (const auto& tgt : edge->getTargets()) {
+                        for (const Port& p : node_layout_.at(tgt.get()).target_ports) {
+                            if (p.edge == edge) {
+                                if (p.x == nl.source_ports[0].x) aligned = true;
+                                min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+                                tgt_ports.push_back(p.x);
+                            }
+                            if (aligned) break;
+                        }
+                        if (aligned) break;
+                    }
+                    if (aligned || min_x > max_x) continue; // Do nothing when two ports are already aligned.
+                    double candidate = (min_x + max_x) * 0.5;
+
+                    double low = (i == 0) ? std::numeric_limits<double>::lowest() :
+                        nodes[i - 1]->isDummy() ? node_layout_.at(nodes[i - 1].get()).x + (DUMMY_NODE_WIDTH + NODE_WIDTH) * 0.5 + MIN_BLOCK_SEP
+                        : node_layout_.at(nodes[i - 1].get()).x + NODE_WIDTH + MIN_BLOCK_SEP;
+
+                    double high = (i == k - 1) ? std::numeric_limits<double>::max() :
+                        nodes[i + 1]->isDummy() ? node_layout_.at(nodes[i + 1].get()).x - (DUMMY_NODE_WIDTH + NODE_WIDTH) * 0.5 - MIN_BLOCK_SEP
+                        : node_layout_.at(nodes[i + 1].get()).x - NODE_WIDTH - MIN_BLOCK_SEP;
+
+                    std::vector<Interval> forbidden_regions;
+                    for (const auto& e : data.outgoing_edges) {
+                        if (assigners[layer]->edgeOrderedBefore(e.get(), edge)) {
+                            for (const auto& tgt : e->getTargets()) {
+                                for (const Port& p : node_layout_.at(tgt.get()).target_ports) {
+                                    if (low < p.x + 3 * MIN_VERTICAL_SEP && p.x - 3 * MIN_VERTICAL_SEP < high) {
+                                        forbidden_regions.push_back({ p.x - 2 * MIN_VERTICAL_SEP, p.x + 2 * MIN_VERTICAL_SEP });
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    auto allowed_space = subtractRegions({ low, high }, forbidden_regions);
+                    if (insideAny(allowed_space, candidate)) {
+                        nl.x = candidate;
+                        nl.source_ports[0].x = candidate;
+                    }
+                    else {
+                        // Try to align it to the target port which is closest to
+                        // the middle point and also lives inside allowed_space.
+                        double alignment_port = nl.x;
+                        double best_d = std::abs(nl.x - candidate);
+                        for (auto port : tgt_ports) {
+                            if (insideAny(allowed_space, port)) {
+                                double diff = std::abs(port - candidate);
+                                if (diff < best_d) {
+                                    alignment_port = port;
+                                    best_d = diff;
+                                }
+                                else if (diff == best_d) {
+                                    if (std::abs(alignment_port - nl.x) < std::abs(port - nl.x)) {
+                                        alignment_port = port;
+                                    }
+                                }
+                            }
+                        }
+                        if (alignment_port != nl.x) {
+                            nl.x = alignment_port;
+                            nl.source_ports[0].x = alignment_port;
+                        }
+                    }
                 }
                 };
 

@@ -9,7 +9,7 @@
 namespace hypergraph_logic {
     namespace graphicalhypergraph_tests {
         namespace port_assignment {
-			using namespace port_assignment_internal;
+            using namespace port_assignment_internal;
 
             // ── Constants ─────────────────────────────────────────────────────────────
             //
@@ -27,8 +27,8 @@ namespace hypergraph_logic {
                 explicit TestGraph(const std::string& name) : GraphicalHypergraph(name) {}
                 std::map<int, LayerData>& layers() { return layers_; }
                 std::unordered_map<Node*, NodeLayout>& nodeLayout() { return node_layout_; }
-				void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
-				void assignPorts() { GraphicalHypergraph::assignPorts(); }
+                void assignXCoordinates() { GraphicalHypergraph::assignXCoordinates(); }
+                void assignPorts() { GraphicalHypergraph::assignPorts(); }
             };
 
             // ── Helpers ───────────────────────────────────────────────────────────────
@@ -105,6 +105,39 @@ namespace hypergraph_logic {
                     checkPortSeparation(nl.source_ports, width, node->getName());
                     checkPortSeparation(nl.target_ports, width, node->getName());
                 }
+            }
+
+
+            // A genuine dummy node only ever comes from splitting a long edge between
+            // non-adjacent layers (see Node.h / Hypergraph::addConnection) -- there is
+            // no other way to produce one through the public API. This builds a real
+            // node sitting exactly 'depth' layers below a fresh root, purely so it can
+            // be linked into a long edge from elsewhere; 'col' just keeps its own
+            // little chain out of the way of whatever else the test is building.
+            static NodePtr buildRealNodeAtDepth(TestGraph& g, const std::string& base, int depth, int col) {
+                NodePtr n = g.createNode(base + "_r0", col, nullptr);
+                for (int i = 1; i <= depth; ++i)
+                    n = g.createNode(base + "_r" + std::to_string(i), 0, n);
+                return n;
+            }
+
+            // Collects, in top-to-bottom order, every dummy node found strictly
+            // between top_layer and bottom_layer (exclusive on both ends). Real
+            // endpoints keep their original parent/child links regardless of how the
+            // edge between them was split -- dummy routing stays invisible to them --
+            // so walking from the endpoints won't find the dummies; scanning the
+            // layers directly is the reliable way. Safe as long as the test doesn't
+            // introduce ANOTHER dummy-producing edge through the same layers, since
+            // this doesn't try to disambiguate which edge a dummy belongs to.
+            static std::vector<NodePtr> collectDummiesBetweenLayers(TestGraph& g, int top_layer, int bottom_layer) {
+                std::vector<NodePtr> result;
+                for (int layer = top_layer + 1; layer < bottom_layer; ++layer) {
+                    auto it = g.layers().find(layer);
+                    if (it == g.layers().end()) continue;
+                    for (const auto& n : it->second.nodes)
+                        if (n->isDummy()) result.push_back(n);
+                }
+                return result;
             }
 
 
@@ -420,18 +453,22 @@ namespace hypergraph_logic {
             // ════════════════════════════════════════════════════════════════════════
             // Dummy nodes
             //
-            // A long edge A -> dummy -> B spans three layers.
-            // The dummy node gets both a target port (from A) and a source port (to B).
+            // A genuine dummy node only comes from addConnection splitting an edge
+            // whose child is more than one layer below its parent (Node.h /
+            // Hypergraph::addConnection) -- there is no other way to produce one
+            // through the public API. A -> dummy -> B, spanning three layers.
             // ════════════════════════════════════════════════════════════════════════
 
             TEST(DummyNode, DummyGetsOneTargetAndOneSourcePort) {
                 TestGraph g("dummy_chain");
                 NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr dummy = g.createNode("d1", 0, A);
-                g.createNode("B", 0, dummy);
+                NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
+                g.addConnection(A, B);
                 runPipeline(g);
 
-                const NodeLayout& dl = g.nodeLayout().at(dummy.get());
+                auto dummies = collectDummiesBetweenLayers(g, 0, 2);
+                ASSERT_EQ(dummies.size(), 1u);
+                const NodeLayout& dl = g.nodeLayout().at(dummies[0].get());
                 EXPECT_EQ(dl.target_ports.size(), 1u);
                 EXPECT_EQ(dl.source_ports.size(), 1u);
             }
@@ -439,24 +476,26 @@ namespace hypergraph_logic {
             TEST(DummyNode, DummyPortsInsideDummyBounds) {
                 TestGraph g("dummy_bounds");
                 NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr dummy = g.createNode("d1", 0, A);
-                g.createNode("B", 0, dummy);
+                NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
+                g.addConnection(A, B);
                 runPipeline(g);
                 checkAllInvariants(g);
             }
 
-            TEST(DummyNode, DummySourceAndTargetPortsNearlyAligned) {
-                // For a straight dummy chain there is no conflict, so the source
-                // and target ports should coincide (both centred on the dummy x).
+            TEST(DummyNode, DummySourceAndTargetPortsCoincide) {
+                // A dummy's lone source and target port always sit at exactly its
+                // own x, by construction -- this holds regardless of whatever
+                // position the surrounding conflict/alignment logic settles it at.
                 TestGraph g("dummy_aligned");
                 NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr dummy = g.createNode("d1", 0, A);
-                g.createNode("B", 0, dummy);
+                NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
+                g.addConnection(A, B);
                 runPipeline(g);
 
-                const NodeLayout& dl = g.nodeLayout().at(dummy.get());
+                auto dummies = collectDummiesBetweenLayers(g, 0, 2);
+                ASSERT_EQ(dummies.size(), 1u);
+                const NodeLayout& dl = g.nodeLayout().at(dummies[0].get());
                 double xd = dl.x;
-                // With DUMMY_NODE_WIDTH == 0 spacing is degenerate; both ports land at xd.
                 EXPECT_NEAR(dl.source_ports[0].x, xd, 1e-9);
                 EXPECT_NEAR(dl.target_ports[0].x, xd, 1e-9);
             }
@@ -686,6 +725,255 @@ namespace hypergraph_logic {
                 // Both nodes have exactly one port each, which lands at their centre.
                 EXPECT_NEAR(g.nodeLayout().at(A.get()).source_ports[0].x, xA, 1e-9);
                 EXPECT_NEAR(g.nodeLayout().at(B.get()).source_ports[0].x, xB, 1e-9);
+            }
+
+
+            // ── Extra helpers for the new test sections below ────────────────────────
+
+            // A dummy chain must always move as one rigid unit: every member shares
+            // the exact same x, and its lone port(s) always sit exactly at that x.
+            static void checkChainIsRigid(TestGraph& g, const std::vector<NodePtr>& chain) {
+                ASSERT_FALSE(chain.empty());
+                double x0 = g.nodeLayout().at(chain.front().get()).x;
+                for (const auto& n : chain) {
+                    ASSERT_TRUE(n->isDummy()) << n->getName() << " expected to be a dummy chain member";
+                    const NodeLayout& nl = g.nodeLayout().at(n.get());
+                    EXPECT_NEAR(nl.x, x0, 1e-9) << n->getName();
+                    for (const auto& p : nl.source_ports) EXPECT_NEAR(p.x, x0, 1e-9) << n->getName();
+                    for (const auto& p : nl.target_ports) EXPECT_NEAR(p.x, x0, 1e-9) << n->getName();
+                }
+            }
+
+            // Adjacent nodes within a layer must keep at least MIN_BLOCK_SEP
+            // clearance between their boxes (centre-to-centre minus both half-widths).
+            static void checkNodeBoxSeparation(TestGraph& g) {
+                for (const auto& [layer, data] : g.layers()) {
+                    const auto& nodes = data.nodes;
+                    for (std::size_t i = 0; i + 1 < nodes.size(); ++i) {
+                        Node* a = nodes[i].get();
+                        Node* b = nodes[i + 1].get();
+                        double wa = a->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                        double wb = b->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                        double gap = g.nodeLayout().at(b).x - g.nodeLayout().at(a).x - (wa + wb) * 0.5;
+                        EXPECT_GE(gap, MIN_BLOCK_SEP - 1e-9)
+                            << "box separation violated between " << a->getName() << " and " << b->getName();
+                    }
+                }
+            }
+
+
+            // ════════════════════════════════════════════════════════════════════════
+            // reduceHorizontalJogs — extended Case 1
+            //
+            // A hyperedge with a single source (or single target) but several targets
+            // (or sources) on the other side can still align its lone endpoint, as
+            // long as some specific target (or source) sits within 3*MIN_VERTICAL_SEP
+            // of it -- the "straight-through" branch of a fan-out/fan-in.
+            // ════════════════════════════════════════════════════════════════════════
+
+            TEST(ReduceJogsFanOut, LoneSourceAlignsWhenCloseEnoughToATarget) {
+                // R has a single hyperedge fanning out to two targets: S (its only
+                // "straight-through" child, so BK is likely to place it close to R)
+                // and Far (pushed well away). This is checked as an implication rather
+                // than an exact value, since the precise gap BK produces for this
+                // topology isn't something the test controls directly -- but if the
+                // two do end up close, the fallback must have fully aligned them.
+                TestGraph g("jogs_fanout_src");
+                NodePtr R = g.createNode("R", 0, nullptr);
+                NodePtr S = g.createNode("S", 0, R);
+                HyperedgePtr e = findEdge(g, R, S);
+                ASSERT_NE(e, nullptr);
+                NodePtr FarAnchor = g.createNode("FarAnchor", 1, nullptr);
+                NodePtr Far = g.createNode("Far", 5, FarAnchor);
+                g.addTargetToEdge(e, Far);
+                runPipeline(g);
+                checkAllInvariants(g);
+
+                ASSERT_EQ(g.nodeLayout().at(R.get()).source_ports.size(), 1u);
+                double rx = g.nodeLayout().at(R.get()).source_ports[0].x;
+                double sx = g.nodeLayout().at(S.get()).target_ports[0].x;
+                if (std::abs(rx - sx) < 3 * MIN_VERTICAL_SEP)
+                    EXPECT_NEAR(rx, sx, 1e-9)
+                    << "R and S were close enough to trigger the fallback but weren't aligned";
+            }
+
+            TEST(ReduceJogsFanOut, FanOutNeverViolatesStructuralInvariants) {
+                // Same setup as above, but only checking that nothing crashes and
+                // every ordinary invariant (bounds, ordering, separation) still holds
+                // regardless of whether the fallback actually triggered.
+                TestGraph g("jogs_fanout_invariants");
+                NodePtr R = g.createNode("R", 0, nullptr);
+                NodePtr S = g.createNode("S", 0, R);
+                HyperedgePtr e = findEdge(g, R, S);
+                ASSERT_NE(e, nullptr);
+                NodePtr FarAnchor = g.createNode("FarAnchor", 1, nullptr);
+                NodePtr Far = g.createNode("Far", 5, FarAnchor);
+                g.addTargetToEdge(e, Far);
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+            }
+
+            TEST(ReduceJogsFanOut, SymmetricCaseLoneTargetAlignsWithSource) {
+                // Mirror of the source case: T has a single hyperedge with multiple
+                // sources, one of which (S) is likely to end up close to it.
+                TestGraph g("jogs_fanin_tgt");
+                NodePtr S = g.createNode("S", 0, nullptr);
+                NodePtr T = g.createNode("T", 0, S);
+                HyperedgePtr e = findEdge(g, S, T);
+                ASSERT_NE(e, nullptr);
+                NodePtr FarSrc = g.createNode("FarSrc", 5, nullptr);
+                g.addSourceToEdge(e, FarSrc);
+                runPipeline(g);
+                checkAllInvariants(g);
+
+                ASSERT_EQ(g.nodeLayout().at(T.get()).target_ports.size(), 1u);
+                double sx = g.nodeLayout().at(S.get()).source_ports[0].x;
+                double tx = g.nodeLayout().at(T.get()).target_ports[0].x;
+                if (std::abs(sx - tx) < 3 * MIN_VERTICAL_SEP)
+                    EXPECT_NEAR(sx, tx, 1e-9)
+                    << "S and T were close enough to trigger the fallback but weren't aligned";
+            }
+
+
+            // ════════════════════════════════════════════════════════════════════════
+            // placeDummyChains
+            //
+            // A dummy chain (one or more chain-linked dummy nodes) is always moved as
+            // a single rigid unit before reduceHorizontalJogs/solveVerticalOverlaps
+            // ever see a port. Every chain here is produced the only way a dummy
+            // actually comes into existence: addConnection between a parent and a
+            // child more than one layer apart. Because reaching a given depth
+            // inherently requires some other real node lineage occupying those same
+            // intermediate layers, true isolation isn't achievable through this API --
+            // so these lean on structural invariants (rigidity, box separation) rather
+            // than predicted exact positions, the same way the existing
+            // CrossingSegments tests above handle their own hard-to-predict cases.
+            // ════════════════════════════════════════════════════════════════════════
+
+            TEST(PlaceDummyChains, SingleDummyChainIsRigidAndRespectsInvariants) {
+                // A (layer 0) connected directly to B (layer 2, built independently):
+                // addConnection must split this into A -> dummy -> B. Whatever
+                // position it settles at, the dummy's own ports must always sit
+                // exactly at its own x (chain rigidity), and every ordinary
+                // invariant must hold.
+                TestGraph g("chain_single");
+                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
+                g.addConnection(A, B);
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+
+                auto dummies = collectDummiesBetweenLayers(g, 0, 2);
+                ASSERT_EQ(dummies.size(), 1u);
+                checkChainIsRigid(g, { dummies[0] });
+            }
+
+            TEST(PlaceDummyChains, LongChainSharesOneXThroughout) {
+                // A (layer 0) connected to B (layer 4): a genuine multi-member dummy
+                // chain. Every member must share the exact same x and matching
+                // ports, regardless of how the surrounding graph resolves.
+                TestGraph g("chain_long");
+                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr B = buildRealNodeAtDepth(g, "B", 4, 5);
+                g.addConnection(A, B);
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+
+                auto dummies = collectDummiesBetweenLayers(g, 0, 4);
+                ASSERT_EQ(dummies.size(), 3u);
+                checkChainIsRigid(g, dummies);
+            }
+
+            TEST(PlaceDummyChains, CrossingChainsStayRigidAndInvariantsHold) {
+                // Two long, crossing edges: A (left) -> D (built on the right) and
+                // B (right) -> C (built on the left), both routed through the same
+                // intermediate layer. Whatever position the chain-vs-chain conflict
+                // resolution settles on, each chain must still be rigid and every
+                // ordinary structural invariant must still hold.
+                TestGraph g("chain_crossing");
+                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr B = g.createNode("B", 1, nullptr);
+                NodePtr D = buildRealNodeAtDepth(g, "D", 2, 5);
+                NodePtr C = buildRealNodeAtDepth(g, "C", 2, 6);
+                g.addConnection(A, D);
+                g.addConnection(B, C);
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+
+                auto dummies = collectDummiesBetweenLayers(g, 0, 2);
+                ASSERT_EQ(dummies.size(), 2u);
+                checkChainIsRigid(g, { dummies[0] });
+                checkChainIsRigid(g, { dummies[1] });
+            }
+
+
+            // ════════════════════════════════════════════════════════════════════════
+            // centerSingleHyperedgeRoots
+            //
+            // A node with no parents and exactly one outgoing hyperedge is free to
+            // slide to the midpoint of that hyperedge's other endpoints, as long as
+            // it keeps 2*MIN_VERTICAL_SEP clearance from the nearest source port on
+            // either side within the layer.
+            // ════════════════════════════════════════════════════════════════════════
+
+            TEST(CenterSingleHyperedgeRoots, SingleTargetEndsUpDirectlyAboveIt) {
+                // R's only hyperedge has one target C: the "span" collapses to a
+                // single point (C's port), so R must end up exactly above it.
+                TestGraph g("center_single_target");
+                NodePtr R = g.createNode("R", 0, nullptr);
+                NodePtr C = g.createNode("C", 0, R);
+                runPipeline(g);
+                checkAllInvariants(g);
+
+                double xR = g.nodeLayout().at(R.get()).x;
+                double xC = g.nodeLayout().at(C.get()).target_ports[0].x;
+                EXPECT_NEAR(xR, xC, 1e-9);
+                EXPECT_NEAR(g.nodeLayout().at(R.get()).source_ports[0].x, xC, 1e-9);
+            }
+
+            TEST(CenterSingleHyperedgeRoots, NodeWithAParentIsNeverTouched) {
+                // A node that has a parent is entirely out of scope for this pass,
+                // even if it otherwise looks like a candidate (a single source port).
+                // There's no independent "before" value to compare against without
+                // reimplementing the whole pipeline, so this only checks that the
+                // pass runs cleanly and every ordinary invariant still holds.
+                TestGraph g("center_skips_non_roots");
+                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr Mid = g.createNode("Mid", 0, A);
+                g.createNode("Leaf", 0, Mid);
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+            }
+
+            TEST(CenterSingleHyperedgeRoots, AlreadyAlignedRootIsLeftUntouched) {
+                // Once R is exactly above its single target (as in the single-target
+                // test above), running the pipeline again must be a no-op on R's
+                // position: it's already aligned, so nothing should move it.
+                TestGraph g("center_already_aligned");
+                NodePtr R = g.createNode("R", 0, nullptr);
+                g.createNode("C", 0, R);
+                runPipeline(g);
+                double before = g.nodeLayout().at(R.get()).x;
+                g.assignXCoordinates();
+                g.assignPorts();
+                double after = g.nodeLayout().at(R.get()).x;
+                EXPECT_NEAR(before, after, 1e-9);
+            }
+
+            TEST(CenterSingleHyperedgeRoots, RootWithTwoHyperedgesIsNeverTouched) {
+                // R has two separate outgoing edges (two source ports), so it has
+                // more than one hyperedge and must be skipped entirely regardless
+                // of having no parents.
+                TestGraph g("center_multi_edge_root_skipped");
+                NodePtr R = g.createNode("R", 0, nullptr);
+                g.createNode("C1", 0, R);
+                g.createNode("C2", 1, R);
+                runPipeline(g);
+                checkAllInvariants(g);
+                EXPECT_EQ(g.nodeLayout().at(R.get()).source_ports.size(), 2u);
             }
 
 

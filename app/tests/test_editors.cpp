@@ -708,9 +708,8 @@ namespace app_logic {
             TEST(HypergraphEditor, MinimizeCrossingsCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
                 NodePtr A = ed.createNode("A", 0, nullptr);
-                while (ed.canUndo()) ed.undo();
-                ed.minimizeCrossings();
-                EXPECT_TRUE(ed.canUndo());
+                while (ed.canUndo()) ed.undo();          
+                EXPECT_THROW(ed.minimizeCrossings(), std::logic_error);
             }
 
             // ── MAX_HISTORY cap ───────────────────────────────────────────────
