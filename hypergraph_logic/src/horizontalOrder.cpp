@@ -1,5 +1,6 @@
 #include "HorizontalOrder.h"
 #include "Highs.h"
+#include "HighsOutcome.h"
 #include "HorizontalOrderBackendTestHook.h"
 
 #ifdef GUROBI_AVAILABLE
@@ -114,13 +115,11 @@ namespace horizontal_overlapping_internal {
             guess.col_value = m.col_guess;
             guess.value_valid = true;
             highs.setSolution(guess);
-            if (highs.run() != HighsStatus::kOk) return result;
 
-            HighsModelStatus status = highs.getModelStatus();
-            bool have_feasible_solution =
-                (status == HighsModelStatus::kOptimal) ||
-                (highs.getInfo().primal_solution_status == kSolutionStatusFeasible);
-            if (!have_feasible_solution) return result;
+            // Reaching the time limit is not a failure: run() then returns
+            // kWarning and the best order found so far is still usable.
+            const HighsStatus run_status = highs.run();
+            if (!hypergraph_logic::highs_outcome::hasUsableSolution(highs, run_status)) return result;
 
             result.success = true;
             result.col_value = highs.getSolution().col_value;
@@ -430,9 +429,9 @@ namespace horizontal_overlapping_internal {
         }
 
         if (!result.success) {
-            throw std::runtime_error(
-                "HorizontalOrderSolver: neither the requested nor the fallback "
-                "solver found a feasible solution for the horizontal-order MIP");
+            // The MIP could not be resolved in time and therefore 
+            // the previous order is preserved.
+            return;
         }
 
         // ── Extract order and re-sort outgoing_edges ──────────────────────────

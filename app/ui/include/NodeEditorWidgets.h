@@ -46,6 +46,10 @@ namespace ui {
     //
     // Gradient header at the top of a node dialog: a glyph, a title and a
     // subtitle, painted in white over an indigo-violet gradient.
+    //
+    // The node dialogs have no window title bar, so the banner stands in for it:
+    // dragging it moves the dialog, and its "×" button (top right) emits
+    // closeRequested().
     // ============================================================================
     class DialogBanner : public QWidget {
         Q_OBJECT
@@ -55,13 +59,23 @@ namespace ui {
         DialogBanner(Glyph glyph, const QString& title, const QString& subtitle,
             QWidget* parent = nullptr);
 
+    signals:
+        void closeRequested();
+
     protected:
         void paintEvent(QPaintEvent* event) override;
+        void resizeEvent(QResizeEvent* event) override;
+        void mousePressEvent(QMouseEvent* event) override;
+        void mouseMoveEvent(QMouseEvent* event) override;
+        void mouseReleaseEvent(QMouseEvent* event) override;
 
     private:
         Glyph glyph_;
         QString title_;
         QString subtitle_;
+        QToolButton* close_;
+        bool dragging_ = false;
+        QPoint drag_offset_;
     };
 
     // ============================================================================

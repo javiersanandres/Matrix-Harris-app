@@ -20,10 +20,11 @@ namespace ui {
 
     namespace {
 
-        // Room left around the dialog inside the main window, and an estimate of
-        // the window frame (title bar + borders) the dialog adds around its client.
+        // Room left around the dialog inside the main window. The dialogs are
+        // frameless (the banner acts as their title bar), so nothing is added
+        // around the client area.
         constexpr int WINDOW_MARGIN = 24;
-        constexpr int FRAME_ALLOWANCE = 40;
+        constexpr int FRAME_ALLOWANCE = 0;
 
         // Sizes the dialog to fit its content, but never beyond the main window
         // (or the screen, when there is no parent), and centres it there. Whatever
@@ -63,10 +64,22 @@ namespace ui {
         {
             dialog->setObjectName("NodeDialog");
             dialog->setModal(true);
+            // No system title bar: the banner already names the dialog, moves
+            // it and closes it. Esc still cancels.
+            dialog->setWindowFlags(dialog->windowFlags() | Qt::FramelessWindowHint);
+            // The window itself is invisible; what shows is a rounded card inside it.
+            dialog->setAttribute(Qt::WA_TranslucentBackground);
             dialog->setStyleSheet(dialog_theme::styleSheet());
+            QObject::connect(banner, &DialogBanner::closeRequested, dialog, &QDialog::reject);
 
-            auto* root = new QVBoxLayout(dialog);
-            root->setContentsMargins(0, 0, 0, 0);
+            auto* outer = new QVBoxLayout(dialog);
+            outer->setContentsMargins(0, 0, 0, 0);
+            auto* card = new QFrame(dialog);
+            card->setObjectName("nodeDialogCard");
+            outer->addWidget(card);
+
+            auto* root = new QVBoxLayout(card);
+            root->setContentsMargins(1, 1, 1, 1); // inside the card's 1px border
             root->setSpacing(0);
             root->addWidget(banner);
 

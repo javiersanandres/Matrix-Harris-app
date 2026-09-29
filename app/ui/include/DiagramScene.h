@@ -190,6 +190,11 @@ namespace ui {
         void onCreateTarget(hypergraph_logic::Hyperedge* edge);
         void onRemoveNode(hypergraph_logic::Node* node);
         void onRemoveHyperedge(hypergraph_logic::Hyperedge* edge);
+        // Draws the whole connection with a continuous or a dashed line
+        // (clearing any "conexión dudosa" marks on it).
+        void onSetLineStyle(hypergraph_logic::Hyperedge* edge, bool continuous);
+        // Marks or unmarks the connection as doubtful ("dudosa") at node.
+        void onToggleUncertain(hypergraph_logic::Hyperedge* edge, hypergraph_logic::Node* node);
 
         // Background / joint operations
         void onCreateRootNode(const QPointF& scene_pos);

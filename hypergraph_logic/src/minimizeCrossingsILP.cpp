@@ -1,5 +1,6 @@
 #include "GlobalSifting.h"
 #include "Highs.h"
+#include "HighsOutcome.h"
 #include "ILPBackendTestHook.h"
 #include "ILPCancellationToken.h"
 
@@ -175,13 +176,13 @@ namespace sifting_internal {
 			guess.col_value = m.col_guess;
 			guess.value_valid = true;
 			highs.setSolution(guess);
-			if (highs.run() != HighsStatus::kOk) return result;
 
-			HighsModelStatus status = highs.getModelStatus();
-			bool have_feasible_solution =
-				(status == HighsModelStatus::kOptimal) ||
-				(highs.getInfo().primal_solution_status == kSolutionStatusFeasible);
-			if (!have_feasible_solution) return result;
+			// Stopping early is not a failure: when the time limit ("fast"
+			// mode) or the user's "Pausar" ("slow" mode) ends the search,
+			// run() returns kWarning and the best solution found so far is
+			// still usable (see HighsOutcome.h).
+			const HighsStatus run_status = highs.run();
+			if (!highs_outcome::hasUsableSolution(highs, run_status)) return result;
 
 			result.success = true;
 			result.col_value = highs.getSolution().col_value;

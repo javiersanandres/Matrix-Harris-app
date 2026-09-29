@@ -22,7 +22,7 @@ namespace ui {
     AddTabButton::AddTabButton(QWidget* parent)
         : QAbstractButton(parent)
     {
-        setFixedSize(WIDTH, DiagramTabWidget::TAB_HEIGHT);
+        setFixedSize(SIZE, SIZE);
         setCursor(Qt::PointingHandCursor);
         setToolTip(QStringLiteral("Nuevo esquema"));
 
@@ -68,9 +68,9 @@ namespace ui {
         p.drawRoundedRect(card, 12, 12);
 
         // The plus grows a little under the mouse and dips while pressed.
-        const double arm = (isDown() ? 11.5 : 12.0 + 2.0 * h);
+        const double arm = (isDown() ? 8.5 : 9.0 + 1.5 * h);
         const QPointF c = card.center();
-        p.setPen(QPen(mix(palette::faint, palette::accent, h), 3.4, Qt::SolidLine, Qt::RoundCap));
+        p.setPen(QPen(mix(palette::faint, palette::accent, h), 3.0, Qt::SolidLine, Qt::RoundCap));
         p.drawLine(QPointF(c.x() - arm, c.y()), QPointF(c.x() + arm, c.y()));
         p.drawLine(QPointF(c.x(), c.y() - arm), QPointF(c.x(), c.y() + arm));
     }
@@ -111,7 +111,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         tabs_layout_->setAlignment(Qt::AlignLeft | Qt::AlignTop);
 
         add_button_ = new AddTabButton(scroll_content_);
-        tabs_layout_->addWidget(add_button_, 0, Qt::AlignTop);
+        tabs_layout_->addWidget(add_button_, 0, Qt::AlignVCenter);
         tabs_layout_->addStretch();
 
         scroll_area_->setWidget(scroll_content_);
@@ -212,7 +212,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             scroll_content_->resize(
                 std::max(scroll_content_->minimumSizeHint().width(), scroll_area_->viewport()->width()),
                 scroll_area_->viewport()->height());
-            scroll_area_->ensureWidgetVisible(target, AddTabButton::WIDTH + 16, 0);
+            scroll_area_->ensureWidgetVisible(target, AddTabButton::SIZE + 16, 0);
         });
     }
 

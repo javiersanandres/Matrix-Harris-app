@@ -1,5 +1,6 @@
 #include "Hyperedge.h"
 #include <algorithm>
+#include <stdexcept>
 
 namespace hypergraph_logic {
 
@@ -33,6 +34,65 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Identity
 	// ============================================================================
+
+	const Hyperedge* Hyperedge::styleOwner() const noexcept {
+		if (!is_segment_) return this;
+		return origin_.lock().get(); // the graph keeps the origin alive while its segments exist
+	}
+
+	bool Hyperedge::isContinuous() const noexcept {
+		const Hyperedge* owner = styleOwner();
+		return owner ? owner->continuous_ : true;
+	}
+
+	void Hyperedge::setContinuous(bool continuous) {
+		if (is_segment_) {
+			throw std::logic_error("El estilo de línea solo se puede cambiar en la conexión completa.");
+		}
+		continuous_ = continuous;
+		// A decision for the whole connection overrides the per-end ones.
+		uncertain_sources_.clear();
+		uncertain_targets_.clear();
+	}
+
+	bool Hyperedge::isSourceUncertain(const Node* node) const noexcept {
+		const Hyperedge* owner = styleOwner();
+		return owner && owner->uncertain_sources_.count(node) > 0;
+	}
+
+	bool Hyperedge::isTargetUncertain(const Node* node) const noexcept {
+		const Hyperedge* owner = styleOwner();
+		return owner && owner->uncertain_targets_.count(node) > 0;
+	}
+
+	void Hyperedge::setSourceUncertain(const NodePtr& node, bool uncertain) {
+		if (is_segment_) {
+			throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+		}
+		if (!containsSource(node)) {
+			throw std::invalid_argument("La caja no está por encima en esta conexión.");
+		}
+		if (sources_.size() == 1) return setContinuous(!uncertain);
+		if (uncertain) uncertain_sources_.insert(node.get());
+		else           uncertain_sources_.erase(node.get());
+	}
+
+	void Hyperedge::setTargetUncertain(const NodePtr& node, bool uncertain) {
+		if (is_segment_) {
+			throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+		}
+		if (!containsTarget(node)) {
+			throw std::invalid_argument("La caja no está por debajo en esta conexión.");
+		}
+		if (targets_.size() == 1) return setContinuous(!uncertain);
+		if (uncertain) uncertain_targets_.insert(node.get());
+		else           uncertain_targets_.erase(node.get());
+	}
+
+	bool Hyperedge::hasUncertainEnds() const noexcept {
+		const Hyperedge* owner = styleOwner();
+		return owner && (!owner->uncertain_sources_.empty() || !owner->uncertain_targets_.empty());
+	}
 
 	bool Hyperedge::isSegment() const noexcept {
 		return is_segment_;
@@ -147,6 +207,7 @@ namespace hypergraph_logic {
 		if (it == sources_.end()) return false;
 
 		sources_.erase(it, sources_.end());
+		uncertain_sources_.erase(node.get());
 		return true;
 	}
 
@@ -162,6 +223,7 @@ namespace hypergraph_logic {
 		if (it == targets_.end()) return false;
 
 		targets_.erase(it, targets_.end());
+		uncertain_targets_.erase(node.get());
 		return true;
 	}
 
@@ -180,6 +242,7 @@ namespace hypergraph_logic {
 
 		if (it == sources_.end()) return;
 		sources_.erase(it);
+		const bool was_uncertain = uncertain_sources_.erase(oldNode.get()) > 0;
 
 		bool replace = false;
 		for (const auto& newNode : newNodes) {
@@ -193,8 +256,12 @@ namespace hypergraph_logic {
 			if (it2 != sources_.end()) continue; // Avoid adding duplicates
 			replace = true;
 			sources_.push_back(newNode);
+			if (was_uncertain) uncertain_sources_.insert(newNode.get());
 		}
-		if (!replace) sources_.push_back(oldNode);
+		if (!replace) {
+			sources_.push_back(oldNode);
+			if (was_uncertain) uncertain_sources_.insert(oldNode.get());
+		}
 	}
 
 	void Hyperedge::replaceTarget(const NodePtr& oldNode, const NodePtr& newNode) {
@@ -212,6 +279,7 @@ namespace hypergraph_logic {
 
 		if (it == targets_.end()) return;
 		targets_.erase(it);
+		const bool was_uncertain = uncertain_targets_.erase(oldNode.get()) > 0;
 
 		bool replace = false;
 		for (const auto& newNode : newNodes) {
@@ -224,7 +292,11 @@ namespace hypergraph_logic {
 			if (it2 != targets_.end()) continue; // Avoid adding duplicates
 			replace = true;
 			targets_.push_back(newNode);
+			if (was_uncertain) uncertain_targets_.insert(newNode.get());
 		}
-		if (!replace) targets_.push_back(oldNode);
+		if (!replace) {
+			targets_.push_back(oldNode);
+			if (was_uncertain) uncertain_targets_.insert(oldNode.get());
+		}
 	}
 }

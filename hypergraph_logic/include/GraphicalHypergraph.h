@@ -23,10 +23,18 @@ namespace hypergraph_logic {
 	// ports, the top half for target ports. For rectangles that is always the
 	// box's bottom/top edge; for circles and rhombi it gets closer to the node's
 	// centre the further x is from it. Dummy ports sit exactly on the layer's y.
+	//
+	// uncertain mirrors the connection's mark for this node (see
+	// Hyperedge::isSourceUncertain / isTargetUncertain): the user is not sure this
+	// node belongs to the connection, so the part of the line that only exists to
+	// reach this port is drawn discontinuous. Always false on dummy nodes. It is
+	// refreshed by refreshUncertainPorts(), which computeLayout() calls.
+	//
 	struct Port {
 		Hyperedge* edge = nullptr;  // The hyperedge this port belongs to.
 		double x = 0.0;             // Assigned x coordinate on the node's top/bottom edge.
 		double y = 0.0;             // Assigned y coordinate on the node's boundary.
+		bool uncertain = false;     // The connection is doubted at this node.
 	};
 
 	// ── NodeLayout ────────────────────────────────────────────────────────────────
@@ -99,6 +107,14 @@ namespace hypergraph_logic {
 		//
 		void computeLayout(const std::set<int>& mip_layers);
 		void computeLayout();
+
+		// ── refreshUncertainPorts ─────────────────────────────────────────────────
+		//
+		// Copies each connection's uncertain ends into Port::uncertain on the
+		// real nodes' ports. Cheap and layout-neutral: marking an end does not move
+		// anything, so callers that only change marks need this, not computeLayout.
+		//
+		void refreshUncertainPorts();
 
 		// ── relocateNodeInLayer ───────────────────────────────────────────────────
 		//

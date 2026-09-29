@@ -194,6 +194,76 @@ namespace app_logic {
 			derived().commitSnapshot(std::move(saved));
 		}
 
+		// ── setHyperedgeContinuous ────────────────────────────────────────────────
+		//
+		// Draws the whole connection with a continuous (true) or discontinuous
+		// (false) line, overriding any uncertain ends. Purely cosmetic, so the
+		// layout is untouched; undoable like any other change. edge must be an
+		// original hyperedge (a segment throws).
+		void setHyperedgeContinuous(const HyperedgePtr& edge, bool continuous) {
+			if (edge && !edge->isSegment() && edge->isContinuous() == continuous
+				&& !edge->hasUncertainEnds()) return;
+			auto saved = derived().takeSnapshot();
+			try {
+				if (!edge) throw std::invalid_argument("La conexión no puede ser nula.");
+				edge->setContinuous(continuous);
+				derived().graph().refreshUncertainPorts();
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
+		}
+
+		// ── isConnectionEndUncertain ──────────────────────────────────────────────
+		//
+		// Whether the connection is doubted at node: marked there, or drawn
+		// discontinuous as a whole (which is the same as doubting every end).
+		static bool isConnectionEndUncertain(const HyperedgePtr& edge, const NodePtr& node) {
+			if (!edge || !node) return false;
+			if (!edge->isContinuous()) return true;
+			return edge->containsSource(node) ? edge->isSourceUncertain(node.get())
+			                                  : edge->isTargetUncertain(node.get());
+		}
+
+		// ── setConnectionEndUncertain ─────────────────────────────────────────────
+		//
+		// Marks (or unmarks) the connection as uncertain at node, one of its sources
+		// or targets. A connection drawn discontinuous as a whole counts as doubted
+		// at every end, so unmarking one end of it keeps the others marked; and
+		// marking every end is stored as "discontinuous as a whole". Undoable.
+		void setConnectionEndUncertain(const HyperedgePtr& edge, const NodePtr& node, bool uncertain) {
+			if (!edge || !node) throw std::invalid_argument("La conexión y la caja no pueden ser nulas.");
+			if (edge->isSegment()) throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+			const bool as_source = edge->containsSource(node);
+			if (!as_source && !edge->containsTarget(node))
+				throw std::invalid_argument("La caja no forma parte de esta conexión.");
+			if (isConnectionEndUncertain(edge, node) == uncertain) return;
+
+			auto saved = derived().takeSnapshot();
+			try {
+				if (!edge->isContinuous()) {
+					// Discontinuous as a whole == every end doubted: spell that out first.
+					edge->setContinuous(true);
+					for (const auto& s : edge->getSources()) edge->setSourceUncertain(s, true);
+					for (const auto& t : edge->getTargets()) edge->setTargetUncertain(t, true);
+				}
+				if (as_source) edge->setSourceUncertain(node, uncertain);
+				else           edge->setTargetUncertain(node, uncertain);
+
+				bool every_end = true;
+				for (const auto& s : edge->getSources()) every_end = every_end && edge->isSourceUncertain(s.get());
+				for (const auto& t : edge->getTargets()) every_end = every_end && edge->isTargetUncertain(t.get());
+				if (every_end) edge->setContinuous(false);
+
+				derived().graph().refreshUncertainPorts();
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
+		}
+
 		// ── addConnection ─────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts addConnection + computeLayout(), and commits

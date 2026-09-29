@@ -7,6 +7,7 @@
 #include <QGraphicsRectItem>
 #include <QGraphicsPathItem>
 #include <QPainterPath>
+#include <QPen>
 #include <QRectF>
 
 #include <functional>
@@ -56,6 +57,7 @@ namespace ui {
         double x;
         double y;
         Node* generating_node;
+        bool uncertain = false; // Port::uncertain: the connection is doubted at this node
     };
 
     // ============================================================================
@@ -102,7 +104,29 @@ namespace ui {
 
         // Factory types for the interactive overload.
         using NodeItemFactory = std::function<NodeItem* (Node*, const QRectF&)>;
-        using EdgeItemFactory = std::function<HyperedgeItem* (Hyperedge*, const QPainterPath&)>;
+        // The edge factory gets the connection's drawing split in two: the part
+        // drawn with a continuous line and the part drawn discontinuous (see
+        // "Discontinuous parts" below).
+        using EdgeItemFactory = std::function<HyperedgeItem* (Hyperedge*, const QPainterPath& solid,
+            const QPainterPath& dashed)>;
+
+        // Pen for drawing (part of) a connection: solid, or dashed when
+        // continuous is false. Dashes keep the same length on screen whatever
+        // the width (a hovered or emphasised connection is thicker).
+        static QPen connectionPen(bool continuous, const QColor& colour = Qt::black, qreal width = 1.5);
+
+        // ── Discontinuous parts ───────────────────────────────────────────────────
+        //
+        // A connection is drawn as a tree: stubs from every port to a bar, the
+        // bars, and, across several layers, the chains through dummy nodes with
+        // their jogs. The ports on real nodes are its leaves. A piece of that tree
+        // is drawn discontinuous when everything it leads to on one of its sides
+        // is uncertain ports (Port::uncertain): it only exists to reach nodes the
+        // user doubts. So an uncertain port dashes its own branch -- its stub,
+        // the stretch of bar that only it needs, and any bend or multi-layer run
+        // built to reach it -- up to where it meets the rest of the connection;
+        // in a one-to-one connection that is the whole line. A connection that
+        // is not continuous as a whole is drawn discontinuous entirely.
 
         // ── Static overload ───────────────────────────────────────────────────────
         //
@@ -175,63 +199,29 @@ namespace ui {
             const std::unordered_map<Node*, NodeLayout>& node_layout,
             EdgeInfo& edge_info);
 
-        // ── drawVerticalSegments ──────────────────────────────────────────────────
-        //
-        // Draws all vertical segments for one hyperedge in the current gap
-        // (layer L-1 → layer L) and records the occupied y ranges in
-        // vertical_occupancy.
-        //
-        // Every segment runs between a port's own y (where it meets its node's
-        // boundary, or the layer's y for a dummy) and bar_y:
-        //
-        // Source ports (from nodes in layer L-1):
-        //   segment from (x, port.y) to (x, bar_y). For a dummy node whose own
-        //   target port x disagrees, also draws a jog at y = layer_y_prev.
-        //
-        // Target ports (from nodes in layer L):
-        //   segment from (x, bar_y) to (x, port.y). No jog for dummy targets.
-        //
-        // Trivial edges (single x) are one segment from the source port's y
-        // straight down to the target port's y; bar_y is ignored.
-        //
-        static void drawVerticalSegments(
-            const std::vector<PortInfo>& src_ports,
-            const std::vector<PortInfo>& tgt_ports,
-            double bar_y,
-            double layer_y_prev,
-            bool is_trivial,
-            const std::unordered_map<Node*, NodeLayout>& node_layout,
-            std::map<double, std::vector<VerticalRange>>& vertical_occupancy,
-            QPainterPath& path);
-
-        // ── drawHorizontalBar ─────────────────────────────────────────────────────
-        //
-        // Draws the horizontal bar from x_min to x_max at bar_y, inserting an
-        // upward semicircular hop (radius HOP_RADIUS) wherever the bar strictly
-        // crosses an already-occupied vertical segment. Consecutive hops that
-        // would collide are merged into a single cubic Bézier arch (ARCH_HEIGHT).
-        //
-        static void drawHorizontalBar(
-            double x_min,
-            double x_max,
-            double bar_y,
-            const std::map<double, std::vector<VerticalRange>>& vertical_occupancy,
-            QPainterPath& path);
-
         // ── Core sweep ────────────────────────────────────────────────────────────
         //
-        // Shared layer-by-layer sweep used by both render() overloads.
-        // Populates edge_paths (one QPainterPath per original edge) and calls
+        // Shared layer-by-layer sweep used by both render() overloads. Builds
+        // each original edge's drawing (see "Discontinuous parts") and calls
         // place_node for each real node encountered.
         //
+        // In every gap (layer L-1 -> layer L), each segment contributes vertical
+        // stubs between its ports' own y (where they meet the node's boundary,
+        // or the layer's y for a dummy) and its bar, a jog at the dummy's layer
+        // where a dummy's incoming and outgoing x differ, and its horizontal
+        // bar. Trivial segments (single x) are one vertical line from source
+        // port to target port. Bars are drawn after every vertical of the gap, so
+        // they hop (radius HOP_RADIUS) over each vertical they strictly cross;
+        // hops too close together merge into one arch (ARCH_HEIGHT).
+        //
         // place_node(Node*, QRectF) — called once per real node box.
-        // commit_edge(Hyperedge*, QPainterPath&) — called once per original edge
+        // commit_edge(Hyperedge*, solid, dashed) — called once per original edge
         //   after all its segments have been processed.
         //
         static void coreSweep(
             const GraphicalHypergraph& graph,
             const std::function<void(Node*, const QRectF&)>& place_node,
-            const std::function<void(Hyperedge*, QPainterPath&)>& commit_edge);
+            const std::function<void(Hyperedge*, QPainterPath& solid, QPainterPath& dashed)>& commit_edge);
 
         static constexpr double HOP_RADIUS = 5.0;
         static constexpr double ARCH_HEIGHT = 10.0;

@@ -135,6 +135,11 @@ namespace hypergraph_logic {
 
 			auto new_orig = std::make_shared<Hyperedge>(new_sources, new_targets);
 			new_orig->setLayer(orig->getLayer());
+			new_orig->setContinuous(orig->isContinuous());
+			for (const auto& s : orig->getSources())
+				if (orig->isSourceUncertain(s.get())) new_orig->setSourceUncertain(node_map.at(s.get()), true);
+			for (const auto& t : orig->getTargets())
+				if (orig->isTargetUncertain(t.get())) new_orig->setTargetUncertain(node_map.at(t.get()), true);
 			edge_map[orig.get()] = new_orig;
 			copy.all_hyperedges_[new_orig] = {};
 
@@ -171,9 +176,9 @@ namespace hypergraph_logic {
 			NodeLayout new_layout;
 			new_layout.x = layout.x;
 			for (const auto& port : layout.source_ports)
-				new_layout.source_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y });
+				new_layout.source_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y, port.uncertain });
 			for (const auto& port : layout.target_ports)
-				new_layout.target_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y });
+				new_layout.target_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y, port.uncertain });
 			copy.node_layout_[node_map.at(raw).get()] = new_layout;
 		}
 		for (const auto& [raw, y] : edge_layout_)
@@ -257,6 +262,16 @@ namespace hypergraph_logic {
 			entry["segment"] = is_segment;
 			entry["origin"] = is_segment ? json(origin_id) : json(nullptr);
 			entry["layer"] = e->getLayer();
+			if (!is_segment) {
+				entry["continuous"] = e->isContinuous();
+				json uncertain_sources = json::array(), uncertain_targets = json::array();
+				for (const auto& s : e->getSources())
+					if (e->isSourceUncertain(s.get())) uncertain_sources.push_back(node_id.at(s.get()));
+				for (const auto& t : e->getTargets())
+					if (e->isTargetUncertain(t.get())) uncertain_targets.push_back(node_id.at(t.get()));
+				if (!uncertain_sources.empty()) entry["uncertain_sources"] = std::move(uncertain_sources);
+				if (!uncertain_targets.empty()) entry["uncertain_targets"] = std::move(uncertain_targets);
+			}
 
 			json srcs = json::array();
 			for (const auto& s : e->getSources())
@@ -406,6 +421,12 @@ namespace hypergraph_logic {
 
 			auto e = std::make_shared<Hyperedge>(sources, targets);
 			e->setLayer(entry.at("layer").get<int>());
+			// Files saved before line styles existed have only continuous lines.
+			e->setContinuous(entry.value("continuous", true));
+			if (entry.contains("uncertain_sources"))
+				for (int sid : entry.at("uncertain_sources")) e->setSourceUncertain(node_by_id.at(sid), true);
+			if (entry.contains("uncertain_targets"))
+				for (int tid : entry.at("uncertain_targets")) e->setTargetUncertain(node_by_id.at(tid), true);
 
 			int id = entry.at("id").get<int>();
 			edge_by_id[id] = e;
@@ -520,6 +541,7 @@ namespace hypergraph_logic {
 		// Port y-coordinates are not persisted: they follow from the layer y's,
 		// the port x's and each node's shape.
 		g.assignPortYCoordinates();
+		g.refreshUncertainPorts(); // Port::uncertain comes from the connections, not the file
 
 		return g;
 	}

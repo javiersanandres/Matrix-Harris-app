@@ -163,9 +163,13 @@ QPushButton#secondary:hover { background: #F1F2F7; }
         setModal(true);
         setStyleSheet(dialogStyleSheet());
 
-        // Room around the card for its shadow.
+        // Room around the card for its shadow. The layout fixes the dialog's
+        // size from the start (it is never resized by hand), so the window is
+        // created at its real size instead of a provisional one that Windows
+        // would then have to enlarge to the minimum.
         auto* outer = new QVBoxLayout(this);
         outer->setContentsMargins(22, 18, 22, 26);
+        outer->setSizeConstraint(QLayout::SetFixedSize);
 
         auto* card = new QFrame(this);
         card->setObjectName("dialogCard");
@@ -240,12 +244,19 @@ QPushButton#secondary:hover { background: #F1F2F7; }
         return b;
     }
 
-    void StyledDialog::showEvent(QShowEvent* event) {
-        QDialog::showEvent(event);
-        adjustSize();
-        // Centred over the window it belongs to.
-        if (QWidget* host = parentWidget() ? parentWidget()->window() : nullptr)
-            move(host->geometry().center() - rect().center());
+    void StyledDialog::setVisible(bool visible) {
+        if (visible && !isVisible()) {
+            // Settle the final size and position *before* the native window is
+            // shown. Otherwise Windows first gets a provisional size smaller
+            // than the dialog's fixed one (and later a centring move whose
+            // rounding at fractional screen scales asks for 1px more), and Qt
+            // logs "Unable to set geometry" as Windows corrects it.
+            if (layout()) layout()->activate();
+            resize(sizeHint());
+            if (QWidget* host = parentWidget() ? parentWidget()->window() : nullptr)
+                move(host->geometry().center() - rect().center());
+        }
+        QDialog::setVisible(visible);
     }
 
     void StyledDialog::keyPressEvent(QKeyEvent* event) {

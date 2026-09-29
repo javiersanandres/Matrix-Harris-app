@@ -277,6 +277,27 @@ namespace ui::style {
                 p.drawText(QRectF(2.0, 11.5, 12.5, 5.5), Qt::AlignCenter, QStringLiteral("PDF"));
                 break;
             }
+            case Icon::LineSolid:
+            case Icon::LineDashed: {
+                // The line runs between two boxes and turns once, like a
+                // connection on the canvas.
+                QPen line = c.pen(palette::accent, 1.8);
+                if (which == Icon::LineDashed) {
+                    line.setCapStyle(Qt::FlatCap);
+                    line.setDashPattern({ 1.6, 1.3 });
+                }
+                p.setPen(line);
+                p.setBrush(Qt::NoBrush);
+                QPainterPath path;
+                path.moveTo(6.5, 6.5);
+                path.lineTo(6.5, 10.0);
+                path.lineTo(13.5, 10.0);
+                path.lineTo(13.5, 13.5);
+                p.drawPath(path);
+                c.existing({ 2.5, 1.5, 8, 5 });
+                c.existing({ 9.5, 13.5, 8, 5 });
+                break;
+            }
             case Icon::ImageFolder: {
                 QPainterPath folder;
                 folder.moveTo(1.5, 4.5);

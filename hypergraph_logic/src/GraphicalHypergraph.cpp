@@ -213,6 +213,7 @@ namespace hypergraph_logic {
 		}
 		assignPorts();
 		assignYCoordinates();
+		refreshUncertainPorts();
 	}
 
 	void GraphicalHypergraph::computeLayout() {
@@ -226,6 +227,17 @@ namespace hypergraph_logic {
 		}
 		assignPorts();
 		assignYCoordinates();
+		refreshUncertainPorts();
+	}
+
+	void GraphicalHypergraph::refreshUncertainPorts() {
+		for (auto& [node, layout] : node_layout_) {
+			const bool real = !node->isDummy();
+			for (auto& port : layout.source_ports)
+				port.uncertain = real && port.edge && port.edge->isSourceUncertain(node);
+			for (auto& port : layout.target_ports)
+				port.uncertain = real && port.edge && port.edge->isTargetUncertain(node);
+		}
 	}
 
 	void GraphicalHypergraph::relocateNodeInLayer(const NodePtr& node, double new_x_coordinate, std::set<int>* out_altered_layers) {

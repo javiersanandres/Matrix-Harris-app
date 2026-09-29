@@ -56,6 +56,8 @@ namespace ui::style {
         Trash,
         PdfDocument,       // a page with a red "PDF" label
         ImageFolder,       // a folder holding a picture
+        LineSolid,         // two boxes joined by a continuous line
+        LineDashed,        // two boxes joined by a discontinuous line
     };
 
     QIcon icon(Icon which);

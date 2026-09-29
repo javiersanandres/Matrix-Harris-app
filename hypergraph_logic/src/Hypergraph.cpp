@@ -307,6 +307,17 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Connection addition management
 	// ============================================================================
+	// A hyperedge built to carry on (part of) an existing connection keeps that
+	// connection's line style, and the uncertain marks of the nodes it still holds.
+	static void inheritLineStyle(const HyperedgePtr& to, const HyperedgePtr& from) {
+		if (!to || !from) return;
+		to->setContinuous(from->isContinuous()); // first: it clears the marks
+		for (const auto& s : to->getSources())
+			if (from->isSourceUncertain(s.get())) to->setSourceUncertain(s, true);
+		for (const auto& t : to->getTargets())
+			if (from->isTargetUncertain(t.get())) to->setTargetUncertain(t, true);
+	}
+
 	NodePtr Hypergraph::createNode(const NodeAttributes& attributes, int layer, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers) {
 		if (layer < -1) {
 			throw std::invalid_argument("El nivel indicado no es válido.");
@@ -414,15 +425,18 @@ namespace hypergraph_logic {
 
 		if (edge_layer >= 0) {
 			// If it was short, the two new edges will also be short
-			createHyperedge(sources, { node }, edge_layer, out_altered_layers);
+			inheritLineStyle(createHyperedge(sources, { node }, edge_layer, out_altered_layers), edge);
 			const auto& new_edge = createHyperedge({ node }, targets, edge_layer + 1, out_altered_layers);
+			inheritLineStyle(new_edge, edge);
 			relocateNodes(new_edge->getTargets(), &min_layer, out_altered_layers); // Relocate the targets to one layer down
 		}
 		else {
 			const auto& new_edge_1 = createHyperedge(sources, { node }, -1);
+			inheritLineStyle(new_edge_1, edge);
 			settleEdgePlacement(new_edge_1, &min_layer, out_altered_layers);
 
 			const auto& new_edge_2 = createHyperedge({ node }, targets, -1);
+			inheritLineStyle(new_edge_2, edge);
 			if (!relocateNodes(new_edge_2->getTargets(), &min_layer, out_altered_layers)) {
 				settleEdgePlacement(new_edge_2, &min_layer, out_altered_layers);
 			}
@@ -580,12 +594,14 @@ namespace hypergraph_logic {
 				}
 
 				auto new_edge = createHyperedge({ parent }, { child }, -1);
+				inheritLineStyle(new_edge, edge);
 				settleAndMinimizeIfSplit(new_edge, nullptr, out_altered_layers);
 
 				if (!remaining_sources.empty() && !remaining_targets.empty()) {
 					// If there are both remaining sources and targets, the previous removeSources call
 					// removed the connection between parent and remaining targets, so we reinstate it.
 					auto new_edge2 = createHyperedge({ parent }, remaining_targets, -1);
+					inheritLineStyle(new_edge2, edge);
 					settleAndMinimizeIfSplit(new_edge2, nullptr, out_altered_layers);
 				}
 
@@ -757,6 +773,7 @@ namespace hypergraph_logic {
 					// Add a new hyperedge with the remaining targets from affected hyperedges from the source.
 					// This avoids data loss since the source was removed from those hyperedges before.
 					HyperedgePtr new_edge = createHyperedge({ source }, remaining_targets, -1);
+					inheritLineStyle(new_edge, hyperedge);
 
 					// Since all dummy nodes created will be located minimizing crossings,
 					// their layers should not affect min_start_layer computation.
@@ -908,6 +925,7 @@ namespace hypergraph_logic {
 					// Add a new hyperedge with the remaining sources from affected hyperedges to the target.
 					// This avoids data loss since the target was removed from those hyperedges before.
 					HyperedgePtr new_edge = createHyperedge(remaining_sources, { target }, -1);
+					inheritLineStyle(new_edge, hyperedge);
 
 					// Since all dummy nodes created will be located minimizing crossings,
 					// their layers should not affect min_start_layer computation.
@@ -1077,6 +1095,7 @@ namespace hypergraph_logic {
 				}
 
 				const auto& new_edge = createHyperedge(remaining_sources, { child }, -1);
+				inheritLineStyle(new_edge, edge);
 				int min_start_layer = INT_MAX;
 				if (relocateNodes({ child }, &min_start_layer, out_altered_layers)) {
 					if (child->getChildren().empty()) {
@@ -2040,6 +2059,7 @@ namespace hypergraph_logic {
 		for (Node* n : sources) sources_vec.push_back(n->shared_from_this());
 
 		const auto& new_edge = createHyperedge(sources_vec, remaining_targets, -1);
+		inheritLineStyle(new_edge, edge);
 		settleEdgePlacement(new_edge, out_min_new_layer, out_altered_layers);
 		return new_edge;
 	}
@@ -2161,6 +2181,7 @@ namespace hypergraph_logic {
 		// valid here because removeTargetsFromHyperedge never touches an edge's source list.
 		const auto& sources = edge->getSources();
 		const auto& new_edge = createHyperedge(sources, { target }, -1);
+		inheritLineStyle(new_edge, edge);
 		settleEdgePlacement(new_edge, out_min_new_layer, out_altered_layers);
 		return new_edge;
 	}

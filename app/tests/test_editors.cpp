@@ -38,6 +38,28 @@ namespace app_logic {
 
             // ── Construction ─────────────────────────────────────────────────
 
+            TEST(HypergraphEditor, SetHyperedgeContinuousIsUndoable) {
+                HypergraphEditor ed(makeTwoNodeGraph("line_style"));
+                HyperedgePtr edge = firstRealEdge(ed);
+                ASSERT_NE(edge, nullptr);
+                EXPECT_TRUE(edge->isContinuous());
+
+                ed.setHyperedgeContinuous(edge, false);
+                EXPECT_FALSE(firstRealEdge(ed)->isContinuous());
+                EXPECT_TRUE(ed.canUndo());
+
+                ed.undo();
+                EXPECT_TRUE(firstRealEdge(ed)->isContinuous());
+                ed.redo();
+                EXPECT_FALSE(firstRealEdge(ed)->isContinuous());
+            }
+
+            TEST(HypergraphEditor, SetHyperedgeContinuousToTheSameStyleRecordsNothing) {
+                HypergraphEditor ed(makeTwoNodeGraph("line_style_same"));
+                ed.setHyperedgeContinuous(firstRealEdge(ed), true);
+                EXPECT_FALSE(ed.canUndo());
+            }
+
             TEST(HypergraphEditor, ConstructionDoesNotThrow) {
                 EXPECT_NO_THROW(HypergraphEditor ed(GraphicalHypergraph("g")));
             }

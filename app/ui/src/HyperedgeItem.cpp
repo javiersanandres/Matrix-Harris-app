@@ -1,7 +1,9 @@
 #include "HyperedgeItem.h"
 #include "DiagramScene.h"
 #include "UiStyle.h"
+#include "HypergraphRenderer.h"
 
+#include <QPainter>
 #include <QPen>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QPainterPath>
@@ -9,13 +11,24 @@
 
 namespace ui {
 
+namespace {
+    QPainterPath combined(const QPainterPath& a, const QPainterPath& b) {
+        QPainterPath both = a;
+        both.addPath(b);
+        return both;
+    }
+}
+
 HyperedgeItem::HyperedgeItem(hypergraph_logic::Hyperedge* edge,
-                             const QPainterPath& path,
+                             const QPainterPath& solid,
+                             const QPainterPath& dashed,
                              QGraphicsItem* parent)
-    : QGraphicsPathItem(path, parent)
+    : QGraphicsPathItem(combined(solid, dashed), parent)
     , edge_(edge)
+    , solid_(solid)
+    , dashed_(dashed)
 {
-    setPen(QPen(Qt::black, 1.5));
+    refreshPen();
     setZValue(0.0); // edges behind nodes
     setAcceptHoverEvents(true);
 }
@@ -35,12 +48,25 @@ void HyperedgeItem::setSelectionRole(SelectionRole role) {
 }
 
 void HyperedgeItem::refreshPen() {
+    // Only colour and width depend on the state; paint() draws each part of
+    // the connection with its own line style.
     if (role_ == SelectionRole::Focus)
-        setPen(QPen(style::palette::accent, 3.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        setPen(HypergraphRenderer::connectionPen(true, style::palette::accent, 3.0));
     else if (hovered_ && role_ == SelectionRole::None)
-        setPen(QPen(style::palette::accent, 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        setPen(HypergraphRenderer::connectionPen(true, style::palette::accent, 2.4));
     else
-        setPen(QPen(Qt::black, 1.5));
+        setPen(HypergraphRenderer::connectionPen(true));
+}
+
+void HyperedgeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) {
+    painter->setRenderHint(QPainter::Antialiasing);
+    painter->setBrush(Qt::NoBrush);
+    const QColor colour = pen().color();
+    const qreal width = pen().widthF();
+    painter->setPen(HypergraphRenderer::connectionPen(true, colour, width));
+    painter->drawPath(solid_);
+    painter->setPen(HypergraphRenderer::connectionPen(false, colour, width));
+    painter->drawPath(dashed_);
 }
 
 void HyperedgeItem::hoverEnterEvent(QGraphicsSceneHoverEvent* event) {

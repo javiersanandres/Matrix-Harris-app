@@ -97,8 +97,8 @@ namespace ui {
             [](Node* node, const QRectF& rect) {
                 return new NodeItem(node, rect);
             },
-            [](Hyperedge* edge, const QPainterPath& path) {
-                return new HyperedgeItem(edge, path);
+            [](Hyperedge* edge, const QPainterPath& solid, const QPainterPath& dashed) {
+                return new HyperedgeItem(edge, solid, dashed);
             });
 
         // Normalize: set sceneRect to the actual items bounding box,
@@ -332,6 +332,46 @@ namespace ui {
             InteractionState::WaitingForSecondNode_FuseNodes,
             QStringLiteral("Ninguna caja puede fusionarse con esta"));
 
+        // "Conexiones hipotéticas": one checkable entry per connection of this box,
+        // named after the boxes at its other end. A doubtful connection is drawn
+        // discontinuous from this box (see HypergraphRenderer).
+        style::addMenuSection(menu, QStringLiteral("Estilo"));
+        QMenu* doubtful = style::createMenu(menu);
+        doubtful->setTitle(QStringLiteral("Conexiones hipotéticas"));
+        doubtful->setIcon(style::icon(style::Icon::LineDashed));
+        doubtful->setToolTipsVisible(true);
+        menu->addMenu(doubtful);
+        {
+            const NodePtr node_ptr = node->shared_from_this();
+            auto names = [](const std::vector<NodePtr>& nodes) {
+                QStringList out;
+                for (const auto& n : nodes) out << QStringLiteral("«%1»").arg(QString::fromStdString(n->getName()));
+                return out.join(QStringLiteral(", "));
+            };
+            int entries = 0;
+            for (const auto& e : currentGraph().getAllHyperedges()) {
+                if (e->isSegment()) continue;
+                const bool as_source = e->containsSource(node_ptr);
+                if (!as_source && !e->containsTarget(node_ptr)) continue;
+                const QString others = names(as_source ? e->getTargets() : e->getSources());
+                const QString text = QStringLiteral("Con %1 (%2)")
+                    .arg(QFontMetrics(doubtful->font()).elidedText(others, Qt::ElideRight, 260),
+                         as_source ? QStringLiteral("abajo") : QStringLiteral("arriba"));
+                QAction* a = doubtful->addAction(text);
+                a->setCheckable(true);
+                a->setChecked(HypergraphEditor::isConnectionEndUncertain(e, node_ptr));
+                a->setToolTip(QStringLiteral("Marca esta conexión si no estás seguro de ella: "
+                                             "se dibujará discontinua desde esta caja."));
+                Hyperedge* raw = e.get();
+                connect(a, &QAction::triggered, this, [this, raw, node] { onToggleUncertain(raw, node); });
+                ++entries;
+            }
+            if (entries == 0) {
+                doubtful->menuAction()->setEnabled(false);
+                doubtful->menuAction()->setToolTip(QStringLiteral("Esta caja no tiene conexiones"));
+            }
+        }
+
         style::addMenuSection(menu, QStringLiteral("Eliminar"));
         addPick(style::Icon::RemovePartial, QStringLiteral("Eliminar conexión parcial"),
             InteractionState::WaitingForSecondNode_RemoveConnection,
@@ -392,6 +432,21 @@ namespace ui {
         addPick(style::Icon::ForkDownExisting, QStringLiteral("Bifurcar abajo con caja existente"),
             InteractionState::WaitingForSecondNode_AddTarget,
             QStringLiteral("Ninguna caja puede unirse a esta conexión por abajo"));
+
+        // Each entry names what it will do, with an icon of the result. A
+        // connection that is partly dashed (doubtful at some boxes) offers both.
+        style::addMenuSection(menu, QStringLiteral("Estilo"));
+        const bool all_continuous = edge->isContinuous() && !edge->hasUncertainEnds();
+        if (!all_continuous) {
+            QAction* solid = menu->addAction(style::icon(style::Icon::LineSolid), QStringLiteral("Usar línea continua"),
+                [this, edge] { onSetLineStyle(edge, true); });
+            if (edge->hasUncertainEnds())
+                solid->setToolTip(QStringLiteral("Quita también las marcas de conexión dudosa"));
+        }
+        if (edge->isContinuous()) {
+            menu->addAction(style::icon(style::Icon::LineDashed), QStringLiteral("Usar línea discontinua"),
+                [this, edge] { onSetLineStyle(edge, false); });
+        }
 
         style::addMenuSection(menu, QStringLiteral("Eliminar"));
         addPick(style::Icon::Simplify, QStringLiteral("Simplificar conexión"),
@@ -560,6 +615,30 @@ namespace ui {
             HyperedgePtr ptr = edge->shared_from_this();
             if (is_joint_) joint_editor_->removeHyperedge(ptr);
             else           regular_editor_->removeHyperedge(ptr);
+            rebuild();
+            emit graphChanged();
+        }
+        catch (const std::exception& e) { showError(e); }
+    }
+
+    void DiagramScene::onSetLineStyle(Hyperedge* edge, bool continuous) {
+        try {
+            HyperedgePtr ptr = edge->shared_from_this();
+            if (is_joint_) joint_editor_->setHyperedgeContinuous(ptr, continuous);
+            else           regular_editor_->setHyperedgeContinuous(ptr, continuous);
+            rebuild();
+            emit graphChanged();
+        }
+        catch (const std::exception& e) { showError(e); }
+    }
+
+    void DiagramScene::onToggleUncertain(Hyperedge* edge, Node* node) {
+        try {
+            HyperedgePtr edge_ptr = edge->shared_from_this();
+            NodePtr node_ptr = node->shared_from_this();
+            const bool uncertain = !HypergraphEditor::isConnectionEndUncertain(edge_ptr, node_ptr);
+            if (is_joint_) joint_editor_->setConnectionEndUncertain(edge_ptr, node_ptr, uncertain);
+            else           regular_editor_->setConnectionEndUncertain(edge_ptr, node_ptr, uncertain);
             rebuild();
             emit graphChanged();
         }

@@ -3,6 +3,7 @@
 #include "Node.h"
 
 #include <memory>
+#include <set>
 #include <vector>
 
 namespace hypergraph_logic {
@@ -81,6 +82,37 @@ namespace hypergraph_logic {
 		// original edge's sources.
 		//
 		int getLayer() const noexcept;
+
+		// ── isContinuous / setContinuous ──────────────────────────────────────────────────────────────
+		//
+		// Whether the whole connection is drawn with a continuous (true, the default) or a
+		// discontinuous, dashed (false) line. It is a property of the original hyperedge only:
+		// a segment reports its origin's value (true if the origin is gone), and setContinuous
+		// throws std::logic_error on a segment.
+		//
+		// Setting it decides for the whole connection, so it also clears every uncertain end
+		// (see below).
+		//
+		bool isContinuous() const noexcept;
+		void setContinuous(bool continuous);
+
+		// ── Uncertain ends ────────────────────────────────────────────────────────────────────────────
+		//
+		// One end of the connection -- a source or a target node -- can be marked as uncertain:
+		// the user is not sure that node belongs to the connection. The part of the drawing that
+		// only exists to reach an uncertain end is drawn discontinuous (see
+		// GraphicalHypergraph's Port::uncertain and the renderer).
+		//
+		// Like the line style, the marks belong to the original hyperedge: on a segment the
+		// queries answer for its origin, and the setters throw std::logic_error. Setting a mark
+		// on a node that is not a source (resp. target) throws std::invalid_argument. A node that
+		// leaves the connection loses its mark; one replaced by another (fusion) hands it over.
+		//
+		bool isSourceUncertain(const Node* node) const noexcept;
+		bool isTargetUncertain(const Node* node) const noexcept;
+		void setSourceUncertain(const NodePtr& node, bool uncertain);
+		void setTargetUncertain(const NodePtr& node, bool uncertain);
+		bool hasUncertainEnds() const noexcept;
 
 		// ====================================================================
 		// Adjacency
@@ -192,6 +224,13 @@ namespace hypergraph_logic {
 		bool is_segment_;
 		WeakHyperedgePtr origin_;
 		int layer_;  // Layer this hyperedge originates from (set by Hypergraph)
+		bool continuous_ = true;  // Line style of the whole connection (originals only)
+		std::set<const Node*> uncertain_sources_;  // Uncertain ends (originals only)
+		std::set<const Node*> uncertain_targets_;
+
+		// The original hyperedge whose style and marks this one follows (itself, or a
+		// segment's origin); nullptr if the origin is gone.
+		const Hyperedge* styleOwner() const noexcept;
 		std::vector<WeakNodePtr> sources_;
 		std::vector<WeakNodePtr> targets_;
 

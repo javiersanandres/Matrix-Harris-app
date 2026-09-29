@@ -16,6 +16,8 @@ add_executable(hypergraph_logic_tests
     test_graphicalhypergraph.cpp
     test_jointgraphicalhypergraph.cpp
     test_operation_feasibility.cpp
+    test_highs_outcome.cpp
+    test_line_style.cpp
 )
 
 target_include_directories(hypergraph_logic_tests
@@ -28,6 +30,7 @@ target_link_libraries(hypergraph_logic_tests
         hypergraph_logic
         GTest::gtest
         GTest::gtest_main
+        highs::highs  # test_highs_outcome.cpp checks the shared HiGHS outcome rule directly
 )
 
 target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST GS_TEST JGH_TEST)

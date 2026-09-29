@@ -16,16 +16,16 @@ namespace ui {
     // ============================================================================
     // AddTabButton
     //
-    // Narrow tab-shaped card with a large "+" that sits right after the last
-    // tab. On hover it fades into the accent colour (dashed outline, tint and
-    // plus), and it dips slightly while pressed.
+    // Small rounded square with a "+" that sits right after the last tab,
+    // centred on the tabs' height. On hover it fades into the accent colour
+    // (dashed outline, tint and plus), and it dips slightly while pressed.
     // ============================================================================
     class AddTabButton : public QAbstractButton {
         Q_OBJECT
     public:
         explicit AddTabButton(QWidget* parent = nullptr);
 
-        static constexpr int WIDTH = 58;
+        static constexpr int SIZE = 56;
 
     protected:
         void paintEvent(QPaintEvent* event) override;

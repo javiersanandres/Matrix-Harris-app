@@ -18,6 +18,11 @@ namespace ui {
 // While a two-click operation is pending, every edge is dimmed except the one
 // the operation works on, which is emphasised (see SelectionRole).
 //
+// The drawing comes in two parts: what is drawn with a continuous line and what
+// is drawn discontinuous (the whole connection, or the branches that lead only
+// to uncertain ports -- see HypergraphRenderer). Both take the same colour and
+// width; path() holds them together for hit-testing.
+//
 // The item stores a raw Hyperedge* pointing to the original edge (never a
 // segment). The pointer is valid for the lifetime of the scene.
 // ============================================================================
@@ -26,7 +31,8 @@ public:
     enum class SelectionRole { None, Dimmed, Focus };
 
     explicit HyperedgeItem(hypergraph_logic::Hyperedge* edge,
-                           const QPainterPath& path,
+                           const QPainterPath& solid,
+                           const QPainterPath& dashed,
                            QGraphicsItem* parent = nullptr);
 
     hypergraph_logic::Hyperedge* edge() const { return edge_; }
@@ -35,6 +41,9 @@ public:
     QPainterPath shape() const override;
 
     void setSelectionRole(SelectionRole role);
+
+    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
+               QWidget* widget = nullptr) override;
 
 protected:
     void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
@@ -46,6 +55,8 @@ private:
     void refreshPen();
 
     hypergraph_logic::Hyperedge* edge_;
+    QPainterPath solid_;
+    QPainterPath dashed_;
     SelectionRole role_ = SelectionRole::None;
     bool hovered_ = false;
 

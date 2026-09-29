@@ -10,6 +10,7 @@
 #include <QLabel>
 #include <QLineEdit>
 #include <QListWidget>
+#include <QMouseEvent>
 #include <QMenu>
 #include <QPainter>
 #include <QPainterPath>
@@ -102,7 +103,8 @@ namespace ui {
     namespace dialog_theme {
         QString styleSheet() {
             return QStringLiteral(R"(
-QDialog#NodeDialog { background: #F5F6FA; }
+QDialog#NodeDialog { background: transparent; }
+QFrame#nodeDialogCard { background: #F5F6FA; border: 1px solid #C9CDD9; border-radius: 14px; }
 QFrame#card { background: white; border: 1px solid #E3E6EF; border-radius: 14px; }
 QLabel { color: #1F2330; }
 QLabel#sectionTitle { color: #8A90A2; font-size: 8pt; font-weight: 700; letter-spacing: 1px; padding-top: 6px; }
@@ -173,7 +175,9 @@ QFrame#chip[conflict="true"] { background: #FFF7E6; border-color: #F5C26B; }
 QFrame#sideHeader { background: #F8F8FC; border: 1px solid #E6E8EF; border-radius: 10px; }
 QScrollArea#dialogScroll { background: transparent; border: none; }
 QWidget#dialogBody { background: transparent; }
-QFrame#dialogFooter { background: #F5F6FA; border: none; }
+QFrame#dialogFooter {
+    background: #F5F6FA; border: none; border-bottom-left-radius: 13px; border-bottom-right-radius: 13px;
+}
 QFrame#dialogFooter[divided="true"] { border-top: 1px solid #E3E6EF; }
 QScrollBar:vertical { background: transparent; width: 10px; margin: 4px 2px 4px 0; }
 QScrollBar:horizontal { background: transparent; height: 10px; margin: 0 4px 2px 4px; }
@@ -221,12 +225,57 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         : QWidget(parent), glyph_(glyph), title_(title), subtitle_(subtitle)
     {
         setFixedHeight(86);
+        setCursor(Qt::SizeAllCursor); // it is how the dialog is moved
+
+        close_ = new QToolButton(this);
+        close_->setText(QStringLiteral("✕"));
+        close_->setToolTip(QStringLiteral("Cerrar (Esc)"));
+        close_->setCursor(Qt::PointingHandCursor);
+        close_->setFixedSize(30, 30);
+        close_->setStyleSheet(QStringLiteral(
+            "QToolButton { color: white; background: transparent; border: none; border-radius: 15px;"
+            " font-size: 11pt; font-weight: 700; }"
+            "QToolButton:hover { background: rgba(255, 255, 255, 45); }"
+            "QToolButton:pressed { background: rgba(255, 255, 255, 75); }"));
+        connect(close_, &QToolButton::clicked, this, &DialogBanner::closeRequested);
+    }
+
+    void DialogBanner::resizeEvent(QResizeEvent* event) {
+        QWidget::resizeEvent(event);
+        close_->move(width() - close_->width() - 12, 12);
+    }
+
+    void DialogBanner::mousePressEvent(QMouseEvent* event) {
+        if (event->button() != Qt::LeftButton) return QWidget::mousePressEvent(event);
+        dragging_ = true;
+        drag_offset_ = event->globalPosition().toPoint() - window()->frameGeometry().topLeft();
+        event->accept();
+    }
+
+    void DialogBanner::mouseMoveEvent(QMouseEvent* event) {
+        if (!dragging_) return QWidget::mouseMoveEvent(event);
+        window()->move(event->globalPosition().toPoint() - drag_offset_);
+        event->accept();
+    }
+
+    void DialogBanner::mouseReleaseEvent(QMouseEvent* event) {
+        dragging_ = false;
+        QWidget::mouseReleaseEvent(event);
     }
 
     void DialogBanner::paintEvent(QPaintEvent*) {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
         const QRectF r = rect();
+
+        // Only the top corners are rounded, following the dialog's card (whose
+        // radius is one pixel larger, as the banner sits inside its border).
+        constexpr double RADIUS = 13.0;
+        QPainterPath top_rounded;
+        top_rounded.addRoundedRect(r.adjusted(0, 0, 0, RADIUS), RADIUS, RADIUS);
+        QPainterPath clip;
+        clip.addRect(r);
+        p.setClipPath(top_rounded.intersected(clip));
 
         QLinearGradient bg(r.topLeft(), r.bottomRight());
         bg.setColorAt(0.0, QColor("#4F46E5"));
@@ -277,14 +326,14 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         title_font.setBold(true);
         p.setFont(title_font);
         p.setPen(Qt::white);
-        const QRectF text_area(84, 16, r.width() - 100, 30);
+        const QRectF text_area(84, 16, r.width() - 130, 30); // clear of the close button
         p.drawText(text_area, Qt::AlignLeft | Qt::AlignVCenter, title_);
 
         QFont sub_font = font();
         sub_font.setPointSizeF(font().pointSizeF() * 0.95);
         p.setFont(sub_font);
         p.setPen(QColor(255, 255, 255, 215));
-        p.drawText(QRectF(84, 46, r.width() - 100, 24), Qt::AlignLeft | Qt::AlignVCenter, subtitle_);
+        p.drawText(QRectF(84, 46, r.width() - 130, 24), Qt::AlignLeft | Qt::AlignVCenter, subtitle_);
     }
 
     // ============================================================================

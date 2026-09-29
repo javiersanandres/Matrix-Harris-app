@@ -51,8 +51,11 @@ namespace ui {
 
         int choice() const { return choice_; }
 
+        // Sizes and centres the dialog before its window is shown, so Windows
+        // creates it with its final geometry (see AppDialogs.cpp).
+        void setVisible(bool visible) override;
+
     protected:
-        void showEvent(QShowEvent* event) override;
         void keyPressEvent(QKeyEvent* event) override;
         void mousePressEvent(QMouseEvent* event) override;
         void mouseMoveEvent(QMouseEvent* event) override;
