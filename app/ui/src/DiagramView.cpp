@@ -1,4 +1,5 @@
 #include "DiagramView.h"
+#include "DiagramScene.h"
 
 #include <QScrollBar>
 #include <QMouseEvent>
@@ -28,25 +29,48 @@ namespace ui {
     void DiagramView::resetZoom() {
         resetTransform();
         current_zoom_ = 1.0;
+        emit zoomChanged(current_zoom_);
     }
 
-    void DiagramView::fitWithMargin(const QRectF& scene_rect) {
+    void DiagramView::fitWithMargin(const QRectF& scene_rect, double margin) {
         if (scene_rect.isEmpty()) return;
-        // Expand the rect by MARGIN pixels on each side before fitting.
-        QRectF padded = scene_rect.adjusted(-MARGIN, -MARGIN, MARGIN, MARGIN);
+        // Expand the rect by margin pixels on each side before fitting.
+        QRectF padded = scene_rect.adjusted(-margin, -margin, margin, margin);
         fitInView(padded, Qt::KeepAspectRatio);
         // Sync current_zoom_ from the actual transform.
         current_zoom_ = transform().m11();
+        emit zoomChanged(current_zoom_);
+    }
+
+    void DiagramView::setThumbnailMode(bool on) {
+        thumbnail_ = on;
+        setInteractive(!on);
+        viewport()->setCursor(on ? Qt::OpenHandCursor : Qt::ArrowCursor);
+    }
+
+    void DiagramView::mouseDoubleClickEvent(QMouseEvent* event) {
+        if (thumbnail_) { event->accept(); return; } // a thumbnail is only a picture
+        QGraphicsView::mouseDoubleClickEvent(event);
     }
 
     void DiagramView::mousePressEvent(QMouseEvent* event) {
+        // While the scene waits for the second node of an operation, a click on
+        // the background cancels it rather than panning.
+        if (event->button() == Qt::LeftButton && !itemAt(event->pos())) {
+            if (auto* ds = qobject_cast<DiagramScene*>(scene()); ds && ds->isInteractionPending()) {
+                ds->cancelInteraction();
+                event->accept();
+                return;
+            }
+        }
         if (event->button() == Qt::MiddleButton ||
             (event->button() == Qt::LeftButton &&
-                !itemAt(event->pos()))) {
-            // Start pan when middle-clicking or left-clicking the background.
+                (thumbnail_ || !itemAt(event->pos())))) {
+            // Start pan when middle-clicking or left-clicking the background
+            // (anywhere at all on a thumbnail).
             panning_ = true;
             pan_start_ = event->position().toPoint();
-            setCursor(Qt::ClosedHandCursor);
+            viewport()->setCursor(Qt::ClosedHandCursor);
             event->accept();
             return;
         }
@@ -71,7 +95,7 @@ namespace ui {
         if (panning_ && (event->button() == Qt::MiddleButton ||
             event->button() == Qt::LeftButton)) {
             panning_ = false;
-            setCursor(Qt::ArrowCursor);
+            viewport()->setCursor(thumbnail_ ? Qt::OpenHandCursor : Qt::ArrowCursor);
             event->accept();
             return;
         }
@@ -87,6 +111,9 @@ namespace ui {
         else {
             QGraphicsView::wheelEvent(event);
         }
+        // Over a thumbnail the wheel belongs to it, even with nothing to
+        // scroll: it must not slide the whole tab strip instead.
+        if (thumbnail_) event->accept();
     }
 
     void DiagramView::applyZoom(double factor) {
@@ -94,6 +121,7 @@ namespace ui {
         if (new_zoom < ZOOM_MIN || new_zoom > ZOOM_MAX) return;
         scale(factor, factor);
         current_zoom_ = new_zoom;
+        emit zoomChanged(current_zoom_);
     }
 
 } // namespace ui

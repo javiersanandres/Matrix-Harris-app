@@ -39,7 +39,8 @@ namespace ui {
         // Fit the supplied scene rect into the view with a fixed pixel margin on
         // all sides. Use this instead of fitInView() to avoid the "single giant
         // node" effect when a diagram contains only a few items.
-        void fitWithMargin(const QRectF& scene_rect);
+        // margin is in view pixels; thumbnails pass a small one.
+        void fitWithMargin(const QRectF& scene_rect, double margin = MARGIN);
 
         double currentZoom() const { return current_zoom_; }
 
@@ -52,8 +53,19 @@ namespace ui {
             applyZoom(factor);
         }
 
+        // Thumbnail mode (tab miniatures): the scene cannot be edited, any left
+        // or middle drag pans (even over nodes), the wheel works as in the
+        // editing view (Ctrl+wheel zooms, wheel scrolls) and is never passed on
+        // to the parent, and the idle cursor is an open hand.
+        void setThumbnailMode(bool on);
+
+    signals:
+        // Emitted whenever the zoom factor changes (zoom, fit, reset).
+        void zoomChanged(double zoom);
+
     protected:
         void mousePressEvent(QMouseEvent* event) override;
+        void mouseDoubleClickEvent(QMouseEvent* event) override;
         void mouseMoveEvent(QMouseEvent* event) override;
         void mouseReleaseEvent(QMouseEvent* event) override;
         void wheelEvent(QWheelEvent* event) override;
@@ -63,6 +75,7 @@ namespace ui {
 
         double  current_zoom_ = 1.0;
         bool    panning_ = false;
+        bool    thumbnail_ = false;
         QPoint  pan_start_;
 
         static constexpr double ZOOM_STEP = 1.15;

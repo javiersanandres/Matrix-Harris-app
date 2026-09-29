@@ -89,7 +89,7 @@ namespace hypergraph_logic {
 		//
 		// Nodes may only enter the joint graph through addHypergraph().
 		// Calling any of these methods throws std::logic_error.
-		NodePtr createNode(const NodeAttributes&, int, const NodePtr&) {
+		NodePtr createNode(const NodeAttributes&, int, int, const NodePtr&) {
 			throw std::logic_error(
 				"JointGraphicalHypergraph: createNode is disabled. "
 				"Add nodes via addHypergraph().");

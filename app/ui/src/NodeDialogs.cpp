@@ -153,12 +153,12 @@ namespace ui {
         : QDialog(parent)
     {
         const bool create = mode == Mode::Create;
-        setWindowTitle(create ? QStringLiteral("Crear nodo") : QStringLiteral("Propiedades del nodo"));
+        setWindowTitle(create ? QStringLiteral("Crear caja") : QStringLiteral("Propiedades de la caja"));
 
         auto* banner = new DialogBanner(
             create ? DialogBanner::Glyph::Create : DialogBanner::Glyph::Edit,
-            create ? QStringLiteral("Nuevo nodo") : QStringLiteral("Propiedades del nodo"),
-            create ? QStringLiteral("Dale un nombre y un aspecto a tu nuevo nodo")
+            create ? QStringLiteral("Nueva caja") : QStringLiteral("Propiedades de la caja"),
+            create ? QStringLiteral("Dale un nombre y un aspecto a tu nueva caja")
                    : QStringLiteral("Modifica cualquier atributo de «%1»").arg(QString::fromStdString(initial.name)),
             this);
 
@@ -183,13 +183,13 @@ namespace ui {
         const QList<QColor>& recent_colours, QWidget* parent)
         : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("Fusionar nodos"));
+        setWindowTitle(QStringLiteral("Fusionar cajas"));
 
         const QString first_title = QStringLiteral("«%1»").arg(QString::fromStdString(first.name));
         const QString second_title = QStringLiteral("«%1»").arg(QString::fromStdString(second.name));
 
         auto* banner = new DialogBanner(DialogBanner::Glyph::Fuse,
-            QStringLiteral("Fusionar nodos"),
+            QStringLiteral("Fusionar cajas"),
             QStringLiteral("Elige qué valor prevalece en cada campo, o escríbelo tú mismo"),
             this);
 
@@ -200,7 +200,7 @@ namespace ui {
         preview_->setFixedWidth(360);
 
         accept_ = buildNodeDialog(this, banner, form_, preview_,
-            QStringLiteral("Vista previa del nodo fusionado"), QStringLiteral("Fusionar"), 1000);
+            QStringLiteral("Vista previa de la caja fusionada"), QStringLiteral("Fusionar"), 1000);
 
         form_->focusName();
     }

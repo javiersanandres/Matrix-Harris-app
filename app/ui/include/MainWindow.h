@@ -5,6 +5,7 @@
 #include "DiagramView.h"
 #include "DiagramTabBar.h"
 #include "HelpButton.h"
+#include "ViewOverlays.h"
 
 #include <QMainWindow>
 #include <QAction>
@@ -14,6 +15,8 @@
 #include <memory>
 #include <vector>
 
+class QLabel;
+
 namespace ui {
 
     // ============================================================================
@@ -22,25 +25,27 @@ namespace ui {
     // Top-level application window. Layout:
     //
     //   ┌─────────────────────────────────────────────────────────┐
-    //   │  Menú: Archivo | Editar                                 │
+    //   │  Archivo | Editar | Ver | Esquema | Ayuda               │
     //   ├─────────────────────────────────────────────────────────┤
-    //   │  DiagramTabBar  [ tab0 | tab1 | ... | [+] ]  [joint]   │
+    //   │  DiagramTabBar  [ tab0 | tab1 | ... | [+] ]  [joint]    │
     //   ├─────────────────────────────────────────────────────────┤
-    //   │                        [Minimizar cruces (Rápido) ▾][?] │
-    //   │              DiagramView (central)                      │
-    //   │                                                         │
+    //   │   (selection hint)   ⋮⋮ [Minimizar cruces][fast|slow](?)│
+    //   │              DiagramView (central, full area)           │
+    //   ├─────────────────────────────────────────────────────────┤
+    //   │  6 cajas · 7 conexiones · 3 niveles              100 %  │
     //   └─────────────────────────────────────────────────────────┘
     //
     // The central DiagramView always shows the currently active diagram's scene.
-    // The tab bar shows miniatures of all diagrams; the active tab shows only its
-    // name. The fixed joint tab sits at the far right of the tab bar.
+    // The tab bar shows live miniatures of all diagrams. The fixed joint tab sits
+    // at the far right of the tab bar.
     //
     // One DiagramScene is created per diagram (and one for the joint). Scenes are
     // created once and reused. The central DiagramView simply swaps which scene
     // it displays when the active tab changes.
     //
     // Undo/redo is per-diagram — Ctrl+Z / Ctrl+Y are forwarded to the currently
-    // active editor.
+    // active editor. Projects can also be opened from the recent list, by
+    // dropping a .json file on the window, or from the command line.
     // ============================================================================
     class MainWindow : public QMainWindow {
         Q_OBJECT
@@ -52,22 +57,45 @@ namespace ui {
         // Constructs the window from an existing loaded project.
         explicit MainWindow(app_logic::Project&& project, QWidget* parent = nullptr);
 
+        // Opens the project at path, asking first about unsaved changes.
+        void openProject(const QString& path);
+
     protected:
         void closeEvent(QCloseEvent* event) override;
+        void dragEnterEvent(QDragEnterEvent* event) override;
+        void dropEvent(QDropEvent* event) override;
 
     private slots:
-        // ── Archivo menu ──────────────────────────────────────────────────────────
+        // ── Archivo ───────────────────────────────────────────────────────────────
+        void onNuevoProyecto();
         void onNuevoDiagrama();
         void onAbrirProyecto();
         void onGuardarProyecto();
         void onGuardarComo();
+        void onExportarImagen();
+        void onExportarProyecto();
         void onSalir();
 
-        // ── Editar menu ───────────────────────────────────────────────────────────
+        // ── Editar ────────────────────────────────────────────────────────────────
         void onDeshacer();
         void onRehacer();
+
+        // ── Ver ───────────────────────────────────────────────────────────────────
         void onAcercar();
         void onAlejar();
+        void onAjustarVentana();
+        void onTamanoReal();
+        void onPantallaCompleta(bool on);
+
+        // ── Esquema ───────────────────────────────────────────────────────────────
+        void onRenombrarEsquema();
+        void onEliminarEsquemaActivo();
+        void onEsquemaSiguiente();
+        void onEsquemaAnterior();
+
+        // ── Ayuda ─────────────────────────────────────────────────────────────────
+        void onAtajos();
+        void onAcercaDe();
 
         // ── Tab bar ───────────────────────────────────────────────────────────────
         void onTabClicked(int index);
@@ -80,19 +108,28 @@ namespace ui {
 
         // ── Minimize crossings button ─────────────────────────────────────────────
         void onMinimizeCrossings();
-        void onMinimizeModeChanged(QAction* action);
         void onRemoveDiagram(int index);
 
     private:
         // ── Setup ─────────────────────────────────────────────────────────────────
         void setupMenuBar();
         void setupCentralArea();
-        void setupTabBar();
+        void setupStatusBar();
+        void setupMinimizePanel(QWidget* host);
         void buildFromProject();
+
+        // Removes every scene and regular tab (before replacing the project).
+        void teardownProject();
+
+        // Replaces the current project (already torn down) and rebuilds the UI.
+        void adoptProject(std::unique_ptr<app_logic::Project> project);
 
         // ── Active diagram switching ───────────────────────────────────────────────
         // Switch the central view to show diagram at index (-1 = joint).
         void switchToTab(int index);
+
+        // The scene on screen (regular or joint), or nullptr.
+        DiagramScene* activeScene() const;
 
         // ── Scene management ──────────────────────────────────────────────────────
         // Create and register a new DiagramScene for the regular editor at index.
@@ -102,16 +139,36 @@ namespace ui {
         // recently used colours (always the current project_).
         void attachColourStore(DiagramScene* scene);
 
-        // ── Undo / redo state sync ────────────────────────────────────────────────
+        // Forwards the scene's selection hints to the banner while it is shown.
+        void connectHint(DiagramScene* scene);
+
+        // ── State sync ────────────────────────────────────────────────────────────
         void updateUndoRedoActions();
+        void updateWindowTitle();
+        void updateStatusBar();
+        void updateZoomLabel();
+
+        // Tells the user an export finished, offering to open what was written
+        // (a PDF or a folder) with the system's default application.
+        void showExportDone(const QString& title, const QString& text,
+            const QString& open_text, const QString& target);
+
+        // Folder to propose in file dialogs: the project's own, else Documents.
+        QString defaultExportFolder() const;
+
+        // ── Recent projects (kept in QSettings) ──────────────────────────────────
+        QStringList recentProjects() const;
+        void rememberRecentProject(const QString& path);
+        void forgetRecentProject(const QString& path);
+        void rebuildRecentMenu();
 
         // ── Unsaved changes guard ─────────────────────────────────────────────────
         // Returns true if it is safe to proceed (no unsaved changes, or user
-        // chose to discard them).
+        // chose to save or discard them).
         bool mayContinue();
 
         // ── Save helpers ──────────────────────────────────────────────────────────
-        bool saveWithPath();   // prompts for path if not set
+        bool saveWithPath();   // prompts for a path
         bool saveToKnownPath();
 
         // ── Data ──────────────────────────────────────────────────────────────────
@@ -128,25 +185,28 @@ namespace ui {
         // Tab bar
         DiagramTabBar* tab_bar_;
 
-        // "Minimizar cruces" split button (top-right corner of central area).
-        // Its label always reflects minimize_mode_ ("... (Rápido)" / "... (Lento)");
-        // clicking its main body runs onMinimizeCrossings() in that mode, and its
-        // side arrow opens a menu (action_mode_fast_ / action_mode_slow_, in
-        // minimize_mode_group_ so exactly one is ever checked) to change it.
+        // Floating, draggable panel over the view holding the "Minimizar cruces"
+        // button (its icon shows the current mode: lightning or turtle), the
+        // fast/slow switch and a "?" button whose hover popup explains both
+        // modes (see HelpButton).
+        FloatingPanel* minimize_panel_;
         QToolButton* minimize_crossings_btn_;
-        QAction* action_mode_fast_;
-        QAction* action_mode_slow_;
-        QActionGroup* minimize_mode_group_;
-
-        // "?" button to the right of minimize_crossings_btn_: no click action,
-        // just a hover tooltip explaining the two modes (stays open for as
-        // long as the mouse is over it -- see HelpButton).
+        QToolButton* mode_fast_btn_;
+        QToolButton* mode_slow_btn_;
         HelpButton* minimize_help_btn_;
 
-        // Which mode onMinimizeCrossings() currently runs. Kept in sync with
-        // minimize_mode_group_'s checked action by onMinimizeModeChanged().
+        // Which mode onMinimizeCrossings() currently runs; the panel's switch and
+        // the Esquema menu's mode entries stay in sync with it.
         enum class MinimizeMode { Fast, Slow };
         MinimizeMode minimize_mode_ = MinimizeMode::Fast;
+        void setMinimizeMode(MinimizeMode mode);
+
+        // "Elige la caja..." pill shown over the view while a two-click operation waits.
+        HintBanner* hint_banner_;
+
+        // Status bar: diagram statistics on the left, zoom on the right.
+        QLabel* stats_label_ = nullptr;
+        QLabel* zoom_label_ = nullptr;
 
         // ── Per-tab zoom state ───────────────────────────────────────────────────────
         // zoom_levels_[i] stores the last zoom factor for regular diagram i.
@@ -155,13 +215,15 @@ namespace ui {
         double              joint_zoom_ = 0.0;
 
         // ── Menu actions ──────────────────────────────────────────────────────────
+        QMenu* recent_menu_ = nullptr;
         QAction* action_deshacer_;
         QAction* action_rehacer_;
-        QAction* action_acercar_;
-        QAction* action_alejar_;
-        QAction* action_nuevo_diagrama_;
-        QAction* action_guardar_;
-        QAction* action_guardar_como_;
+        QAction* action_renombrar_;
+        QAction* action_eliminar_esquema_;
+        QAction* action_menu_fast_ = nullptr;
+        QAction* action_menu_slow_ = nullptr;
+        QAction* action_panel_;
+        QAction* action_pantalla_completa_;
     };
 
 } // namespace ui

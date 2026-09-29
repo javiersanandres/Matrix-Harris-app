@@ -303,7 +303,7 @@ namespace hypergraph_logic {
 			}
 		}
 		else {
-			throw std::invalid_argument("New x coordinate does not change the node's position in the layer.");
+			throw std::invalid_argument("La nueva posición no cambia el orden de la caja en su nivel.");
 		}
 	}
 
@@ -312,6 +312,11 @@ namespace hypergraph_logic {
 			throw std::runtime_error(
 				"relocateNodeToLayer(node, y) requires a computed layout; call computeLayout() first.");
 		}
+		Hypergraph::relocateNodeToLayer(node, layerForY(new_y_coordinate), out_altered_layers);
+	}
+
+	int GraphicalHypergraph::layerForY(double new_y_coordinate) const {
+		if (layer_layout_.empty()) return 0;
 
 		// Collect layer indices in ascending order. Layer 0 is shallowest (y = 0);
 		// higher indices are deeper (more negative y).
@@ -359,20 +364,24 @@ namespace hypergraph_logic {
 
 		if (!found) {
 			// Coordinate lies outside every existing layer's span: either above the
-			// shallowest layer (new shallowest layer) or below the deepest layer
-			// (new deepest layer).
+			// shallowest layer (new shallowest layer, once a full LAYER_GAP clear of
+			// it; closer than that it still counts as the shallowest layer) or below
+			// the deepest layer (new deepest layer).
 			const double h_shallowest = layer_layout_.at(shallowest);
 			const double shallowest_upper = h_shallowest + getLayerHeight(shallowest) / 2.0 + LAYER_GAP;
 
 			if (new_y_coordinate > shallowest_upper) {
 				desired_layer = -1;          // brand-new shallowest layer
 			}
+			else if (new_y_coordinate > h_shallowest) {
+				desired_layer = shallowest;
+			}
 			else {
 				desired_layer = deepest + 1; // brand-new deepest layer
 			}
 		}
 
-		Hypergraph::relocateNodeToLayer(node, desired_layer, out_altered_layers);
+		return desired_layer;
 	}
 
 	int GraphicalHypergraph::choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const {

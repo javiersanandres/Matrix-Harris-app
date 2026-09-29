@@ -1,22 +1,31 @@
 #include "DiagramScene.h"
 #include "NodeDialogs.h"
+#include "NodeEditorWidgets.h"
 #include "AddHypergraphDialog.h"
 #include "LayoutTypes.h"
+#include "UiStyle.h"
 
 #include <QGraphicsSceneMouseEvent>
+#include <QKeyEvent>
 #include <QMenu>
 #include <QAction>
-#include <QMessageBox>
-#include <QInputDialog>
-#include <QGraphicsProxyWidget>
-#include <QLineEdit>
+#include "AppDialogs.h"
 #include <QApplication>
 #include <QGraphicsView>
+#include <QTimer>
+
+#include <cmath>
+#include <numbers>
 
 using namespace hypergraph_logic;
 using namespace app_logic;
 
 namespace ui {
+
+    namespace {
+        // One full breath of the candidates' glow, in milliseconds.
+        constexpr double PULSE_PERIOD_MS = 1400.0;
+    }
 
     // ============================================================================
     // Construction
@@ -33,13 +42,13 @@ namespace ui {
                     regular_editor_->relocateNode(node->shared_from_this(), new_x, -new_y);
                 }
                 catch (const std::exception&) {
-                    rebuild(); 
-                    return;                
+                    rebuild();
+                    return;
                 }
                 rebuild();
                 emit graphChanged();
             });
-        rebuild();
+        initialise();
     }
 
     DiagramScene::DiagramScene(JointHypergraphEditor* editor, QObject* parent)
@@ -59,6 +68,18 @@ namespace ui {
                 rebuild();
                 emit graphChanged();
             });
+        initialise();
+    }
+
+    void DiagramScene::initialise() {
+        pulse_timer_ = new QTimer(this);
+        pulse_timer_->setInterval(33);
+        connect(pulse_timer_, &QTimer::timeout, this, [this] {
+            const double t = static_cast<double>(pulse_clock_.elapsed()) / PULSE_PERIOD_MS;
+            pulse_ = 0.5 - 0.5 * std::cos(2.0 * std::numbers::pi * t);
+            for (Node* n : candidates_)
+                if (auto it = node_items_.find(n); it != node_items_.end()) it->second->update();
+        });
         rebuild();
     }
 
@@ -89,46 +110,149 @@ namespace ui {
     }
 
     // ============================================================================
-    // cancelInteraction
+    // Two-step interactions
     // ============================================================================
 
     void DiagramScene::cancelInteraction() {
-        setAllNodesHighlighted(false);
+        const bool was_pending = state_ != InteractionState::Idle;
+        clearSelectionMarks();
         state_ = InteractionState::Idle;
         pending_node_ = nullptr;
         pending_edge_ = nullptr;
+        candidates_.clear();
+        if (pulse_timer_) pulse_timer_->stop();
+        if (was_pending) emit interactionHintChanged(QString());
+    }
+
+    std::unordered_set<Node*> DiagramScene::candidatesFor(InteractionState state,
+        Node* first, Hyperedge* edge) const
+    {
+        const GraphicalHypergraph& g = currentGraph();
+        const NodePtr f = first ? first->shared_from_this() : nullptr;
+        const HyperedgePtr e = edge ? edge->shared_from_this() : nullptr;
+
+        std::unordered_set<Node*> out;
+        for (const auto& [raw, item] : node_items_) {
+            const NodePtr n = raw->shared_from_this();
+            bool ok = false;
+            switch (state) {
+            case InteractionState::WaitingForSecondNode_AddConnectionParent:
+                ok = g.canAddConnection(n, f); break;          // n ends up above first
+            case InteractionState::WaitingForSecondNode_AddConnectionChild:
+                ok = g.canAddConnection(f, n); break;          // n ends up below first
+            case InteractionState::WaitingForSecondNode_RemoveConnection:
+                ok = g.canRemoveConnection(f, n) || g.canRemoveConnection(n, f); break;
+            case InteractionState::WaitingForSecondNode_FuseNodes:
+                ok = g.canFuseNodes(f, n); break;
+            case InteractionState::WaitingForSecondNode_AddSource:
+                ok = g.canAddSourceToEdge(e, n); break;
+            case InteractionState::WaitingForSecondNode_AddTarget:
+                ok = g.canAddTargetToEdge(e, n); break;
+            case InteractionState::WaitingForSecondNode_SimplifyConnection:
+                ok = e && (e->containsSource(n) || e->containsTarget(n)); break;
+            case InteractionState::Idle:
+                break;
+            }
+            if (ok) out.insert(raw);
+        }
+        return out;
+    }
+
+    void DiagramScene::beginSelection(InteractionState state, Node* first, Hyperedge* edge) {
+        cancelInteraction();
+        candidates_ = candidatesFor(state, first, edge);
+        if (candidates_.empty()) return; // The menu entry was disabled; nothing to pick.
+
+        state_ = state;
+        pending_node_ = first;
+        pending_edge_ = edge;
+        applySelectionMarks();
+
+        pulse_clock_.start();
+        pulse_ = 0.0;
+        pulse_timer_->start();
+        emit interactionHintChanged(hintFor(state));
+    }
+
+    void DiagramScene::applySelectionMarks() {
+        for (auto& [raw, item] : node_items_) {
+            if (raw == pending_node_)          item->setSelectionMark(NodeItem::SelectionMark::Origin);
+            else if (candidates_.count(raw))   item->setSelectionMark(NodeItem::SelectionMark::Candidate);
+            else                               item->setSelectionMark(NodeItem::SelectionMark::Unavailable);
+        }
+        for (auto& [raw, item] : edge_items_) {
+            // Keep the connection being worked on, and those of the origin node,
+            // in full view; everything else steps back.
+            if (raw == pending_edge_) {
+                item->setSelectionRole(HyperedgeItem::SelectionRole::Focus);
+                continue;
+            }
+            bool touches_origin = false;
+            if (pending_node_) {
+                for (const auto& s : raw->getSources()) touches_origin |= s.get() == pending_node_;
+                for (const auto& t : raw->getTargets()) touches_origin |= t.get() == pending_node_;
+            }
+            item->setSelectionRole(touches_origin ? HyperedgeItem::SelectionRole::None
+                                                  : HyperedgeItem::SelectionRole::Dimmed);
+        }
+    }
+
+    void DiagramScene::clearSelectionMarks() {
+        for (auto& [raw, item] : node_items_) item->setSelectionMark(NodeItem::SelectionMark::None);
+        for (auto& [raw, item] : edge_items_) item->setSelectionRole(HyperedgeItem::SelectionRole::None);
+    }
+
+    QString DiagramScene::hintFor(InteractionState state) const {
+        const QString name = pending_node_
+            ? QString::fromStdString(pending_node_->getName()) : QString();
+        switch (state) {
+        case InteractionState::WaitingForSecondNode_AddConnectionParent:
+            return QStringLiteral("Elige la caja que quedará por encima de «%1»").arg(name);
+        case InteractionState::WaitingForSecondNode_AddConnectionChild:
+            return QStringLiteral("Elige la caja que quedará por debajo de «%1»").arg(name);
+        case InteractionState::WaitingForSecondNode_RemoveConnection:
+            return QStringLiteral("Elige la caja cuya conexión con «%1» quieres eliminar").arg(name);
+        case InteractionState::WaitingForSecondNode_FuseNodes:
+            return QStringLiteral("Elige la caja que se fusionará con «%1»").arg(name);
+        case InteractionState::WaitingForSecondNode_AddSource:
+            return QStringLiteral("Elige la caja que se unirá a la conexión por arriba");
+        case InteractionState::WaitingForSecondNode_AddTarget:
+            return QStringLiteral("Elige la caja que se unirá a la conexión por abajo");
+        case InteractionState::WaitingForSecondNode_SimplifyConnection:
+            return QStringLiteral("Elige la caja que quieres quitar de la conexión");
+        case InteractionState::Idle:
+            break;
+        }
+        return QString();
     }
 
     // ============================================================================
-    // mousePressEvent — background clicks
+    // Mouse and keyboard
     // ============================================================================
 
     void DiagramScene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
         QGraphicsItem* item = itemAt(event->scenePos(), QTransform());
 
-        if (item) {
-            if (event->button() == Qt::LeftButton &&
-                state_ != InteractionState::Idle) {
-                if (auto* ni = qgraphicsitem_cast<NodeItem*>(item)) {
-                    completeSecondNodeClick(ni->node());
-                    return;
-                }
+        if (state_ != InteractionState::Idle) {
+            if (event->button() == Qt::LeftButton) {
+                auto* ni = qgraphicsitem_cast<NodeItem*>(item);
+                if (ni && candidates_.count(ni->node())) completeSecondNodeClick(ni->node());
+                else if (!item) cancelInteraction();
+                // Anything else (a faded node, an edge) is not part of the operation.
             }
+            else if (event->button() == Qt::RightButton) {
+                cancelInteraction();
+            }
+            return;
+        }
+
+        if (item) {
             QGraphicsScene::mousePressEvent(event);
             return;
         }
 
         // Background click.
-        if (event->button() == Qt::LeftButton) {
-            if (state_ != InteractionState::Idle)
-                cancelInteraction();
-            return;
-        }
         if (event->button() == Qt::RightButton) {
-            if (state_ != InteractionState::Idle) {
-                cancelInteraction();
-                return;
-            }
             if (is_joint_)
                 showJointBackgroundMenu(event->scenePos());
             else
@@ -136,19 +260,20 @@ namespace ui {
         }
     }
 
-    void DiagramScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
-        QGraphicsScene::mouseMoveEvent(event);
-    }
-
-    void DiagramScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
-        QGraphicsScene::mouseReleaseEvent(event);
+    void DiagramScene::keyPressEvent(QKeyEvent* event) {
+        if (event->key() == Qt::Key_Escape && state_ != InteractionState::Idle) {
+            cancelInteraction();
+            event->accept();
+            return;
+        }
+        QGraphicsScene::keyPressEvent(event);
     }
 
     // ============================================================================
     // Context menus
     // ============================================================================
 
-    void DiagramScene::showNodeContextMenu(NodeItem* item, const QPointF& scene_pos) {
+    void DiagramScene::showNodeContextMenu(NodeItem* item, const QPointF&) {
         Node* node = item->node();
         // Right-click on a node while a two-step op is pending cancels it.
         if (state_ != InteractionState::Idle) {
@@ -156,50 +281,133 @@ namespace ui {
             return;
         }
 
-        QMenu menu;
-        QAction* properties = menu.addAction(QStringLiteral("Propiedades…"), [this, item] { showNodeProperties(item); });
+        QMenu* menu = style::createMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->setToolTipsVisible(true);
+
+        const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
+        style::addMenuHeader(menu,
+            renderNodeIcon(node->getAttributes(), QSize(44, 30), dpr),
+            QString::fromStdString(node->getName()),
+            QStringLiteral("%1 por encima · %2 por debajo")
+                .arg(node->getParents().size()).arg(node->getChildren().size()));
+
+        QAction* properties = menu->addAction(style::icon(style::Icon::Properties),
+            QStringLiteral("Propiedades…"), [this, item] { showNodeProperties(item); });
         QFont bold = properties->font();
         bold.setBold(true);
         properties->setFont(bold);
-        menu.addAction(QStringLiteral("Renombrar"), [this, item] { startInlineRename(item); });
-        menu.addSeparator();
-		menu.addAction("Crear nodo arriba", [this, node] { onCreateNodeAbove(node); });
-        menu.addAction("Crear nodo debajo", [this, node] { onCreateNodeBelow(node); });
-        menu.addAction("Crear nodo a la izquierda", [this, node] { onCreateNodeLeft(node); });
-        menu.addAction("Crear nodo a la derecha", [this, node] { onCreateNodeRight(node); });
-        menu.addSeparator();
-        menu.addAction("Añadir conexión arriba", [this, node] { onBeginAddConnectionParent(node); });
-        menu.addAction("Añadir conexión abajo", [this, node] { onBeginAddConnectionChild(node); });
-        menu.addSeparator();
-        menu.addAction("Eliminar conexión", [this, node] { onBeginRemoveConnection(node); });
-        menu.addAction("Eliminar nodo", [this, node] { onRemoveNode(node); });
-        menu.addSeparator();
-        menu.addAction("Fusionar", [this, node] { onBeginFuseNodes(node); });
-        menu.exec(QCursor::pos());
+
+        // Two-step entries are only enabled when some node can complete them.
+        auto addPick = [&](style::Icon icon, const QString& text, InteractionState state,
+            const QString& none_available) {
+            QAction* a = menu->addAction(style::icon(icon), text,
+                [this, state, node] { beginSelection(state, node, nullptr); });
+            if (candidatesFor(state, node, nullptr).empty()) {
+                a->setEnabled(false);
+                a->setToolTip(none_available);
+            }
+        };
+
+        if (!is_joint_) {
+            style::addMenuSection(menu, QStringLiteral("Crear"));
+            menu->addAction(style::icon(style::Icon::BoxAbove), QStringLiteral("Crear caja arriba"),
+                [this, node] { onCreateNodeAbove(node); });
+            menu->addAction(style::icon(style::Icon::BoxBelow), QStringLiteral("Crear caja debajo"),
+                [this, node] { onCreateNodeBelow(node); });
+            menu->addAction(style::icon(style::Icon::BoxLeft), QStringLiteral("Crear caja a la izquierda"),
+                [this, node] { onCreateNodeLeft(node); });
+            menu->addAction(style::icon(style::Icon::BoxRight), QStringLiteral("Crear caja a la derecha"),
+                [this, node] { onCreateNodeRight(node); });
+        }
+
+        style::addMenuSection(menu, QStringLiteral("Conectar"));
+        addPick(style::Icon::CurrentBelow, QStringLiteral("Caja actual por debajo de"),
+            InteractionState::WaitingForSecondNode_AddConnectionParent,
+            QStringLiteral("Ninguna caja puede quedar por encima de esta"));
+        addPick(style::Icon::CurrentAbove, QStringLiteral("Caja actual por encima de"),
+            InteractionState::WaitingForSecondNode_AddConnectionChild,
+            QStringLiteral("Ninguna caja puede quedar por debajo de esta"));
+        addPick(style::Icon::Fuse, QStringLiteral("Fusionar"),
+            InteractionState::WaitingForSecondNode_FuseNodes,
+            QStringLiteral("Ninguna caja puede fusionarse con esta"));
+
+        style::addMenuSection(menu, QStringLiteral("Eliminar"));
+        addPick(style::Icon::RemovePartial, QStringLiteral("Eliminar conexión parcial"),
+            InteractionState::WaitingForSecondNode_RemoveConnection,
+            QStringLiteral("Esta caja no está conectada a ninguna otra"));
+        menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar caja"),
+            [this, node] { onRemoveNode(node); });
+
+        menu->popup(QCursor::pos());
     }
 
     void DiagramScene::showEdgeContextMenu(HyperedgeItem* item, const QPointF&) {
+        if (state_ != InteractionState::Idle) {
+            cancelInteraction();
+            return;
+        }
         Hyperedge* edge = item->edge();
 
-        QMenu menu;
-        menu.addAction("Crear nodo en arista", [this, edge] { onCreateNodeIntoEdge(edge); });
-        menu.addAction("Crear origen", [this, edge] { onCreateSource(edge); });
-        menu.addAction("Crear destino", [this, edge] { onCreateTarget(edge); });
-        menu.addSeparator();
-        menu.addAction("Añadir origen", [this, edge] { onBeginAddSource(edge); });
-        menu.addAction("Añadir destino", [this, edge] { onBeginAddTarget(edge); });
-        menu.addSeparator();
-        menu.addAction("Eliminar origen", [this, edge] { onBeginRemoveSource(edge); });
-        menu.addAction("Eliminar destino", [this, edge] { onBeginRemoveTarget(edge); });
-        menu.addSeparator();
-        menu.addAction("Eliminar arista", [this, edge] { onRemoveHyperedge(edge); });
-        menu.exec(QCursor::pos());
+        QMenu* menu = style::createMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->setToolTipsVisible(true);
+
+        auto names = [](const std::vector<NodePtr>& nodes) {
+            QStringList out;
+            for (const auto& n : nodes) out << QString::fromStdString(n->getName());
+            return out.join(QStringLiteral(", "));
+        };
+        const QString span = names(edge->getSources()) + QStringLiteral("  →  ") + names(edge->getTargets());
+        const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
+        style::addMenuHeader(menu,
+            style::icon(style::Icon::ForkDownExisting).pixmap(QSize(28, 28), dpr),
+            QStringLiteral("Conexión"),
+            QFontMetrics(menu->font()).elidedText(span, Qt::ElideRight, 260));
+
+        auto addPick = [&](style::Icon icon, const QString& text, InteractionState state,
+            const QString& none_available) {
+            QAction* a = menu->addAction(style::icon(icon), text,
+                [this, state, edge] { beginSelection(state, nullptr, edge); });
+            if (candidatesFor(state, nullptr, edge).empty()) {
+                a->setEnabled(false);
+                a->setToolTip(none_available);
+            }
+        };
+
+        if (!is_joint_) {
+            style::addMenuSection(menu, QStringLiteral("Crear"));
+            menu->addAction(style::icon(style::Icon::BoxBetween), QStringLiteral("Crear caja entre"),
+                [this, edge] { onCreateNodeIntoEdge(edge); });
+            menu->addAction(style::icon(style::Icon::ForkUpNew), QStringLiteral("Bifurcar arriba con caja nueva"),
+                [this, edge] { onCreateSource(edge); });
+            menu->addAction(style::icon(style::Icon::ForkDownNew), QStringLiteral("Bifurcar abajo con caja nueva"),
+                [this, edge] { onCreateTarget(edge); });
+        }
+
+        style::addMenuSection(menu, QStringLiteral("Conectar"));
+        addPick(style::Icon::ForkUpExisting, QStringLiteral("Bifurcar arriba con caja existente"),
+            InteractionState::WaitingForSecondNode_AddSource,
+            QStringLiteral("Ninguna caja puede unirse a esta conexión por arriba"));
+        addPick(style::Icon::ForkDownExisting, QStringLiteral("Bifurcar abajo con caja existente"),
+            InteractionState::WaitingForSecondNode_AddTarget,
+            QStringLiteral("Ninguna caja puede unirse a esta conexión por abajo"));
+
+        style::addMenuSection(menu, QStringLiteral("Eliminar"));
+        addPick(style::Icon::Simplify, QStringLiteral("Simplificar conexión"),
+            InteractionState::WaitingForSecondNode_SimplifyConnection, QString());
+        menu->addAction(style::icon(style::Icon::RemoveConnection), QStringLiteral("Eliminar conexión"),
+            [this, edge] { onRemoveHyperedge(edge); });
+
+        menu->popup(QCursor::pos());
     }
 
     void DiagramScene::showBackgroundContextMenu(const QPointF& scene_pos) {
-        QMenu menu;
-        menu.addAction("Nuevo nodo", [this, scene_pos] { onCreateRootNode(scene_pos); });
-        menu.exec(QCursor::pos());
+        QMenu* menu = style::createMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->addAction(style::icon(style::Icon::NewBox), QStringLiteral("Nueva caja"),
+            [this, scene_pos] { onCreateRootNode(scene_pos); });
+        menu->popup(QCursor::pos());
     }
 
     void DiagramScene::showJointBackgroundMenu(const QPointF& scene_pos) {
@@ -207,13 +415,8 @@ namespace ui {
     }
 
     // ============================================================================
-    // Two-step interaction helpers
+    // Completing a two-step operation
     // ============================================================================
-
-    void DiagramScene::setAllNodesHighlighted(bool on) {
-        for (auto& [raw, item] : node_items_)
-            item->setHighlighted(on);
-    }
 
     void DiagramScene::completeSecondNodeClick(Node* second) {
         Node* first = pending_node_;
@@ -251,7 +454,6 @@ namespace ui {
                 }
             }
             else if (st == InteractionState::WaitingForSecondNode_FuseNodes) {
-                if (first_ptr == second_ptr) return; // clicking the same node again cancels
                 FuseNodesDialog dlg(first_ptr->getAttributes(), second_ptr->getAttributes(),
                     recentColours(), dialogParent());
                 if (dlg.exec() != QDialog::Accepted) return;
@@ -268,13 +470,16 @@ namespace ui {
                 if (is_joint_) joint_editor_->addTargetToEdge(edge_ptr, second_ptr);
                 else           regular_editor_->addTargetToEdge(edge_ptr, second_ptr);
             }
-            else if (st == InteractionState::WaitingForSecondNode_RemoveSource) {
-                if (is_joint_) joint_editor_->removeSourceFromHyperedge(edge_ptr, second_ptr);
-                else           regular_editor_->removeSourceFromHyperedge(edge_ptr, second_ptr);
-            }
-            else if (st == InteractionState::WaitingForSecondNode_RemoveTarget) {
-                if (is_joint_) joint_editor_->removeTargetFromHyperedge(edge_ptr, second_ptr);
-                else           regular_editor_->removeTargetFromHyperedge(edge_ptr, second_ptr);
+            else if (st == InteractionState::WaitingForSecondNode_SimplifyConnection) {
+                // The clicked box is either a source or a target of the connection.
+                if (edge_ptr->containsSource(second_ptr)) {
+                    if (is_joint_) joint_editor_->removeSourceFromHyperedge(edge_ptr, second_ptr);
+                    else           regular_editor_->removeSourceFromHyperedge(edge_ptr, second_ptr);
+                }
+                else {
+                    if (is_joint_) joint_editor_->removeTargetFromHyperedge(edge_ptr, second_ptr);
+                    else           regular_editor_->removeTargetFromHyperedge(edge_ptr, second_ptr);
+                }
             }
         }
         catch (const std::exception& e) {
@@ -292,49 +497,49 @@ namespace ui {
 
     void DiagramScene::onCreateNodeAbove(Node* child) {
         NodePtr child_ptr = child ? child->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createParent(a, child_ptr);
         });
     }
 
     void DiagramScene::onCreateNodeBelow(Node* parent) {
         NodePtr parent_ptr = parent ? parent->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
-            regular_editor_->createNode(a, -1, parent_ptr);
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+            regular_editor_->createNode(a, parent_ptr->getLayer() + 1, -1, parent_ptr);
         });
     }
 
     void DiagramScene::onCreateNodeLeft(Node* node) {
         NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNodeNextTo(a, neighbour_ptr, true);
         });
     }
 
     void DiagramScene::onCreateNodeRight(Node* node) {
         NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNodeNextTo(a, neighbour_ptr, false);
         });
     }
 
     void DiagramScene::onCreateNodeIntoEdge(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNodeInEdge(a, edge_ptr);
         });
     }
 
     void DiagramScene::onCreateSource(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        createNodeWithDialog(QStringLiteral("Nuevo origen"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createSource(a, -1, edge_ptr);
         });
     }
 
     void DiagramScene::onCreateTarget(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        createNodeWithDialog(QStringLiteral("Nuevo destino"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createTarget(a, -1, edge_ptr);
         });
     }
@@ -361,79 +566,31 @@ namespace ui {
         catch (const std::exception& e) { showError(e); }
     }
 
-    void DiagramScene::onBeginAddConnectionParent(Node* first) {
-        pending_node_ = first;
-        state_ = InteractionState::WaitingForSecondNode_AddConnectionParent;
-        setAllNodesHighlighted(true);
-        node_items_[first]->setHighlighted(false); // first node not a valid second
-    }
-
-    void DiagramScene::onBeginAddConnectionChild(Node* first) {
-        pending_node_ = first;
-        state_ = InteractionState::WaitingForSecondNode_AddConnectionChild;
-        setAllNodesHighlighted(true);
-        node_items_[first]->setHighlighted(false);
-    }
-
-    void DiagramScene::onBeginRemoveConnection(Node* first) {
-        pending_node_ = first;
-        state_ = InteractionState::WaitingForSecondNode_RemoveConnection;
-        setAllNodesHighlighted(true);
-        node_items_[first]->setHighlighted(false);
-    }
-
-    void DiagramScene::onBeginFuseNodes(Node* first) {
-        pending_node_ = first;
-        state_ = InteractionState::WaitingForSecondNode_FuseNodes;
-        setAllNodesHighlighted(true);
-        node_items_[first]->setHighlighted(false);
-    }
-
-    void DiagramScene::onBeginAddSource(Hyperedge* edge) {
-        pending_edge_ = edge;
-        state_ = InteractionState::WaitingForSecondNode_AddSource;
-        setAllNodesHighlighted(true);
-    }
-
-    void DiagramScene::onBeginAddTarget(Hyperedge* edge) {
-        pending_edge_ = edge;
-        state_ = InteractionState::WaitingForSecondNode_AddTarget;
-        setAllNodesHighlighted(true);
-    }
-
-    void DiagramScene::onBeginRemoveSource(Hyperedge* edge) {
-        pending_edge_ = edge;
-        state_ = InteractionState::WaitingForSecondNode_RemoveSource;
-        setAllNodesHighlighted(true);
-    }
-
-    void DiagramScene::onBeginRemoveTarget(Hyperedge* edge) {
-        pending_edge_ = edge;
-        state_ = InteractionState::WaitingForSecondNode_RemoveTarget;
-        setAllNodesHighlighted(true);
-    }
-
     // ============================================================================
     // Background / root node creation
     // ============================================================================
 
     void DiagramScene::onCreateRootNode(const QPointF& scene_pos) {
-        // Determine layer_position from the click x coordinate.
-        // If there are any layer-0 nodes and the click is to the left of the
-        // leftmost one, insert at position 0; otherwise append (-1).
+        // The layer comes from the click's y, exactly as when a box is dragged to
+        // another layer (scene y grows downwards, layout y upwards): -1 opens a new
+        // top layer, a layer past the deepest a new bottom one.
+        const GraphicalHypergraph& graph = currentGraph();
+        const int layer = graph.layerForY(-scene_pos.y());
+
+        // Within an existing layer, the box goes right after every node (dummies
+        // included, since they hold positions too) whose centre is left of the click.
         int layer_position = -1;
-        if (!currentGraph().getLayers().empty()) {
-            auto nodes_at_0 = currentGraph().getNodesAt(0);
-            if (!nodes_at_0.empty()) {
-                double leftmost_x = currentGraph().getNodeLayout()
-                    .at(nodes_at_0.front().get()).x;
-                if (scene_pos.x() < leftmost_x)
-                    layer_position = 0;
+        const auto layer_it = graph.getLayers().find(layer);
+        if (layer_it != graph.getLayers().end()) {
+            layer_position = 0;
+            for (const auto& n : layer_it->second.nodes) {
+                if (graph.getNodeLayout().at(n.get()).x < scene_pos.x()) ++layer_position;
+                else break;
             }
         }
 
-        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
-            regular_editor_->createNode(a, layer_position, nullptr);
+        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+            regular_editor_->createNode(a, layer, layer_position, nullptr);
         });
     }
 
@@ -513,61 +670,17 @@ namespace ui {
     }
 
     // ============================================================================
-    // Inline rename
-    // ============================================================================
-
-    void DiagramScene::startInlineRename(NodeItem* item) {
-        // Place a QLineEdit as a proxy widget on top of the node box.
-        QLineEdit* edit = new QLineEdit(
-            QString::fromStdString(item->node()->getName()));
-        edit->setAlignment(Qt::AlignCenter);
-        edit->selectAll();
-
-        QGraphicsProxyWidget* proxy = addWidget(edit);
-        proxy->setPos(item->rect().topLeft());
-        proxy->resize(item->rect().size());
-        proxy->setZValue(10.0);
-        edit->setFocus();
-
-        // Commit on Enter or focus loss.
-        auto commit = [this, item, proxy, edit]() {
-            QString new_name = edit->text().trimmed();
-            if (new_name.isEmpty()) new_name = QString::fromStdString(
-                item->node()->getName());
-            removeItem(proxy);
-            proxy->deleteLater();
-            commitInlineRename(item, new_name);
-            };
-
-        connect(edit, &QLineEdit::editingFinished, this, commit);
-    }
-
-    void DiagramScene::commitInlineRename(NodeItem* item, const QString& new_name) {
-        NodePtr node_ptr = item->node()->shared_from_this();
-        try {
-            if (is_joint_) joint_editor_->renameNode(node_ptr, new_name.toStdString());
-            else           regular_editor_->renameNode(node_ptr, new_name.toStdString());
-        }
-        catch (const std::exception& e) { showError(e); return; }
-        item->updateLabel(new_name);
-        emit graphChanged();
-    }
-
-    // ============================================================================
     // Helpers
     // ============================================================================
 
     void DiagramScene::showError(const std::exception& e) {
-        QMessageBox::warning(nullptr, "Error", QString::fromStdString(e.what()));
+        dialogs::showError(dialogParent(), QStringLiteral("No se ha podido completar la operación"),
+            QString::fromStdString(e.what()));
     }
 
     const GraphicalHypergraph& DiagramScene::currentGraph() const {
         if (is_joint_) return joint_editor_->getGraph();
         return regular_editor_->getGraph();
-    }
-
-    void DiagramScene::onRenameNode(Node*, NodeItem* item) {
-        startInlineRename(item);
     }
 
 } // namespace ui

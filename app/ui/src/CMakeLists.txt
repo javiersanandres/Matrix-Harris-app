@@ -30,6 +30,10 @@ target_sources(ui_lib
         MinimizingProgressDialog.cpp
         HelpButton.cpp
         HoverPopup.cpp
+        UiStyle.cpp
+        AppDialogs.cpp
+        DiagramExport.cpp
+        ViewOverlays.cpp
         MainWindow.cpp
     PUBLIC
         FILE_SET HEADERS
@@ -50,6 +54,10 @@ target_sources(ui_lib
             ../include/BusySpinner.h
             ../include/HelpButton.h
             ../include/HoverPopup.h
+            ../include/UiStyle.h
+            ../include/AppDialogs.h
+            ../include/DiagramExport.h
+            ../include/ViewOverlays.h
             ../include/MainWindow.h
 )
 

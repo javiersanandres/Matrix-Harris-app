@@ -13,12 +13,12 @@ namespace app_logic {
 	// just in case some code changes, at leas we are prepared to guarantee that
 	// the undo stack is not corrupted by failed operations.
 	NodePtr HypergraphEditor::createNode(
-		const NodeAttributes& attributes, int layer_position, const NodePtr& parent)
+		const NodeAttributes& attributes, int layer, int layer_position, const NodePtr& parent)
 	{
 		auto saved = takeSnapshot();
 		try {
 			std::set<int> mip_layers;
-			NodePtr result = graph_.createNode(attributes, layer_position, parent, &mip_layers);
+			NodePtr result = graph_.createNode(attributes, layer, layer_position, parent, &mip_layers);
 			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;

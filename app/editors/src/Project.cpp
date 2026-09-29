@@ -37,7 +37,7 @@ namespace app_logic {
 	// ============================================================================
 
 	int Project::addDiagram() {
-		std::string diagram_name("Diagrama nuevo");
+		std::string diagram_name("Esquema nuevo");
 		// unique_ptr: push_back never invalidates existing pointed-to objects,
 		// only the pointers stored inside the vector itself — which we never
 		// hold across a push_back.
@@ -198,7 +198,7 @@ namespace app_logic {
 		std::ofstream out(path);
 		if (!out.is_open())
 			throw std::runtime_error(
-				"Project::save: cannot open file: " + path.string());
+				"No se puede abrir el archivo: " + path.string());
 		out << j.dump(2);
 
 		file_path_ = path;
@@ -219,12 +219,12 @@ namespace app_logic {
 	std::unique_ptr<Project> Project::load(const std::filesystem::path& path) {
 		std::ifstream in(path);
 		if (!in.is_open())
-			throw std::runtime_error("Project::load: cannot open file: " + path.string());
+			throw std::runtime_error("No se puede abrir el archivo: " + path.string());
 
 		json j;
 		try { in >> j; }
 		catch (const json::parse_error& e) {
-			throw std::runtime_error(std::string("Project::load: JSON parse error: ") + e.what());
+			throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
 		}
 
 		auto p = std::make_unique<Project>(j.at("name").get<std::string>());
@@ -246,7 +246,7 @@ namespace app_logic {
 					p->recent_colours_.push_back(colorFromHex(c.get<std::string>()));
 				}
 				catch (const std::invalid_argument& e) {
-					throw std::runtime_error(std::string("Project::load: ") + e.what());
+					throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
 				}
 			}
 		}

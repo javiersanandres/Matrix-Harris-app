@@ -100,7 +100,7 @@ parseBenchmarkCsv(const fs::path& path)
 // Hypergraph builder
 //
 // Only the following three calls are used:
-//   createNode(label, pos, nullptr)
+//   createNode(label, 0, pos, nullptr)
 //   addConnection(source, target)
 //   addSourceToEdge(edge, source)
 //   addTargetToEdge(edge, target)
@@ -132,7 +132,7 @@ static GraphicalHypergraph buildHypergraph(
     auto ensure_node = [&](const std::string& id) -> const NodePtr& {
         auto [it, inserted] = node_map.emplace(id, NodePtr{});
         if (inserted)
-            it->second = g.createNode(id, static_cast<int>(node_map.size() - 1), nullptr);
+            it->second = g.createNode(id, 0, static_cast<int>(node_map.size() - 1), nullptr);
         return it->second;
         };
 

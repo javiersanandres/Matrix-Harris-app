@@ -2,12 +2,14 @@
 #include "DiagramScene.h"
 #include "NodeVisuals.h"
 #include "LayoutTypes.h"
+#include "UiStyle.h"
 
 #include <QFontMetricsF>
 #include <QGraphicsSceneHoverEvent>
 #include <QGraphicsSceneWheelEvent>
 
 #include <QPainter>
+#include <QCursor>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsScene>
 #include <QPen>
@@ -34,27 +36,63 @@ namespace ui {
         return node_visuals::shapePath(node_->getShape(), rect());
     }
 
+    QRectF NodeItem::boundingRect() const {
+        return rect().adjusted(-GLOW_MARGIN, -GLOW_MARGIN, GLOW_MARGIN, GLOW_MARGIN);
+    }
+
     void NodeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) {
         Q_UNUSED(option);
         Q_UNUSED(widget);
+        painter->setRenderHint(QPainter::Antialiasing);
+
+        const bool candidate = mark_ == SelectionMark::Candidate;
+        const bool origin = mark_ == SelectionMark::Origin;
+        const QPainterPath outline = node_visuals::shapePath(node_->getShape(), rect());
+
+        if (candidate || origin) {
+            // Soft glow under the node: a few wide, translucent strokes of its own
+            // outline. Candidates breathe with the scene's pulse and flare up
+            // under the mouse; the origin glows steadily in amber.
+            const QColor base = origin ? style::palette::amber : style::palette::accent;
+            double pulse = 0.0;
+            if (candidate)
+                if (auto* ds = qobject_cast<DiagramScene*>(scene())) pulse = ds->selectionPulse();
+            const double strength = origin ? 0.8 : (hovered_ ? 1.0 : 0.45 + 0.35 * pulse);
+            const double reach = origin ? 7.0 : (hovered_ ? 11.0 : 6.0 + 4.0 * pulse);
+            painter->setBrush(Qt::NoBrush);
+            for (int ring = 3; ring >= 1; --ring) {
+                QColor c = base;
+                c.setAlphaF(static_cast<float>(strength * (0.10 + 0.08 * (3 - ring))));
+                painter->setPen(QPen(c, reach * ring / 1.5, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+                painter->drawPath(outline);
+            }
+        }
+
         node_visuals::PaintOptions opts;
         opts.outline = pen();
         opts.label_scroll = label_scroll_;
         opts.show_scroll_indicator = hovered_;
-        if (dragging_)          opts.fill_override = QColor(180, 180, 180, 160); // grey out
-        else if (highlighted_)  opts.fill_override = QColor(200, 230, 255);
+        if (dragging_) opts.fill_override = QColor(180, 180, 180, 160); // grey out
         node_visuals::paintNode(painter, node_->getAttributes(), rect(), opts);
+
+        if (candidate || origin) {
+            // Crisp ring on top, so the node's own outline reads as selected.
+            const QColor ring = origin ? style::palette::amber : style::palette::accent;
+            painter->setBrush(Qt::NoBrush);
+            painter->setPen(QPen(ring, (hovered_ && candidate) ? 3.2 : 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter->drawPath(outline);
+        }
     }
 
-    void NodeItem::setHighlighted(bool on) {
-        if (highlighted_ == on) return;
-        highlighted_ = on;
-        update();
-    }
-
-    void NodeItem::updateLabel(const QString& text) {
-        setToolTip(text);
-        label_scroll_ = 0.0;
+    void NodeItem::setSelectionMark(SelectionMark mark) {
+        if (mark_ == mark) return;
+        mark_ = mark;
+        setOpacity(mark == SelectionMark::Unavailable ? 0.28 : 1.0);
+        switch (mark) {
+        case SelectionMark::Candidate:   setCursor(Qt::PointingHandCursor); break;
+        case SelectionMark::Unavailable: setCursor(Qt::ForbiddenCursor); break;
+        default:                         unsetCursor(); break;
+        }
         update();
     }
 

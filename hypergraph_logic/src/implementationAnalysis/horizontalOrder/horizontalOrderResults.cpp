@@ -94,9 +94,9 @@ static ResultsGraph generateTwoLayer(
 
     std::vector<NodePtr> upper(upper_nodes), lower(lower_nodes);
     for (int i = 0; i < upper_nodes; ++i)
-        upper[i] = g.createNode("U" + std::to_string(i), i, nullptr);
+        upper[i] = g.createNode("U" + std::to_string(i), 0, i, nullptr);
     for (int j = 0; j < lower_nodes; ++j)
-        lower[j] = g.createNode("L" + std::to_string(j), j, nullptr);
+        lower[j] = g.createNode("L" + std::to_string(j), 0, j, nullptr);
 
     // For each upper node, track which lower indices are already connected to it
     // across all existing hyperedges.

@@ -18,8 +18,8 @@ namespace app_logic {
         // Build a minimal two-node, two-layer GraphicalHypergraph.
         static GraphicalHypergraph makeTwoNodeGraph(const std::string& name) {
             GraphicalHypergraph g(name);
-            NodePtr A = g.createNode("A", 0, nullptr);
-            g.createNode("B", 0, A);
+            NodePtr A = g.createNode("A", 0, 0, nullptr);
+            g.createNode("B", A->getLayer() + 1, 0, A);
             g.computeLayout();
             return g;
         }
@@ -62,30 +62,30 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateNodeWithParentReturnsNonNull) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 ASSERT_NE(A, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 EXPECT_NE(B, nullptr);
             }
 
             TEST(HypergraphEditor, CreateNodeCommitsSnapshotOnSuccess) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 EXPECT_TRUE(ed.canUndo());
             }
 
             TEST(HypergraphEditor, CreateNodeClearsRedoStack) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 ed.undo();
                 EXPECT_TRUE(ed.canRedo());
-                ed.createNode("X", 0, nullptr);
+                ed.createNode("X", 0, 0, nullptr);
                 EXPECT_FALSE(ed.canRedo());
             }
 
             TEST(HypergraphEditor, CreateNodeAppearsInAllNodes) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 auto nodes = ed.getAllNodes();
                 bool found = std::any_of(nodes.begin(), nodes.end(),
                     [&](const NodePtr& n) { return n == A; });
@@ -96,8 +96,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateNodeIntoEdgeReturnsNonNull) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 NodePtr C = ed.createNodeInEdge("C", edge);
@@ -106,9 +106,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateNodeIntoEdgeCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-				NodePtr C = ed.createNode("C", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+				NodePtr C = ed.createNode("C", 0, 0, nullptr);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 ed.undo(); // clear prior snapshots
@@ -122,8 +122,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateSourceReturnsNonNull) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 NodePtr S = ed.createSource("S", 0, edge);
@@ -132,8 +132,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateSourceCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 ed.undo(); ed.undo();
@@ -143,8 +143,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateTargetReturnsNonNull) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 NodePtr T = ed.createTarget("T", 1, edge);
@@ -155,7 +155,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoCreateNodeRemovesIt) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 std::size_t count_after = ed.getAllNodes().size();
                 ed.undo();
                 EXPECT_LT(ed.getAllNodes().size(), count_after);
@@ -163,7 +163,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RedoCreateNodeRestoresIt) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 std::size_t count_before = ed.getAllNodes().size();
                 ed.undo();
                 ed.redo();
@@ -172,14 +172,14 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoEnablesRedo) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 ed.undo();
                 EXPECT_TRUE(ed.canRedo());
             }
 
             TEST(HypergraphEditor, RedoEnablesUndo) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 ed.undo();
                 ed.redo();
                 EXPECT_TRUE(ed.canUndo());
@@ -187,9 +187,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, MultipleUndoStepsWork) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
-                ed.createNode("B", 0, nullptr);
-                ed.createNode("C", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
+                ed.createNode("B", 0, 0, nullptr);
+                ed.createNode("C", 0, 0, nullptr);
                 ed.undo();
                 ed.undo();
                 EXPECT_TRUE(ed.canUndo());
@@ -198,8 +198,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoAllThenRedoAllRestoresState) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 std::size_t full_count = ed.getAllNodes().size();
                 ed.undo();
                 ed.undo();
@@ -213,16 +213,16 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddConnectionReturnsNonNull) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 0, nullptr);
                 HyperedgePtr e = ed.addConnection(A, B);
                 EXPECT_NE(e, nullptr);
             }
 
             TEST(HypergraphEditor, AddConnectionCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 0, nullptr);
                 ed.undo(); ed.undo();
                 EXPECT_FALSE(ed.canUndo());
             }
@@ -236,7 +236,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddConnectionSelfLoopThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 ed.undo(); // clear prior snapshot — stack is now empty
                 EXPECT_THROW(ed.addConnection(A, A), std::invalid_argument);
                 // Snapshot must NOT have been pushed.
@@ -247,8 +247,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddConnectionDuplicateThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 // A->B connection already exists via createNode.
                 // Drain undo stack so we can test the empty-stack invariant.
                 while (ed.canUndo()) ed.undo();
@@ -258,8 +258,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddConnectionCycleThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 // B->A would create a cycle (A is already a parent of B).
                 while (ed.canUndo()) ed.undo();
                 EXPECT_THROW(ed.addConnection(B, A), std::logic_error);
@@ -270,7 +270,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveNodeDecreasesCount) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 std::size_t before = ed.getAllNodes().size();
                 ed.removeNode(A);
                 EXPECT_LT(ed.getAllNodes().size(), before);
@@ -278,9 +278,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveNodeCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 ed.undo();
-                ed.createNode("A", 0, nullptr); // recreate so we have something to remove
+                ed.createNode("A", 0, 0, nullptr); // recreate so we have something to remove
                 ed.undo();
                 ed.redo();
                 ed.removeNode(ed.getAllNodes().front());
@@ -289,7 +289,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoRemoveNodeRestoresIt) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 std::size_t before = ed.getAllNodes().size();
                 ed.removeNode(A);
                 ed.undo();
@@ -303,8 +303,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveConnectionNonExistentThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 0, nullptr);
                 // A and B have no connection between them.
                 EXPECT_THROW(ed.removeConnection(A, B), std::logic_error);
                 EXPECT_TRUE(ed.canUndo());
@@ -316,8 +316,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveHyperedgeDecreasesEdgeCount) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
 				const auto& edges_before = ed.getAllHyperedges();
@@ -334,8 +334,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveHyperedgeCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 while (ed.canUndo()) ed.undo();
@@ -350,9 +350,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveSourceInvalidThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-                NodePtr C = ed.createNode("C", 0, nullptr); // not a source of A->B
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = ed.createNode("C", 0, 0, nullptr); // not a source of A->B
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 EXPECT_THROW(
@@ -370,9 +370,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RemoveTargetInvalidThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-                NodePtr C = ed.createNode("C", 0, nullptr); // not a target of A->B
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = ed.createNode("C", 0, 0, nullptr); // not a target of A->B
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 EXPECT_THROW(
@@ -386,8 +386,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, FuseNodesDecreasesNodeCount) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 1, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
                 std::size_t before = ed.getAllNodes().size();
                 ed.fuseNodes(A, B, "AB");
                 EXPECT_LT(ed.getAllNodes().size(), before);
@@ -395,8 +395,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, FuseNodesCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 1, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
                 while (ed.canUndo()) ed.undo();
                 ed.fuseNodes(A, B, "AB");
                 EXPECT_TRUE(ed.canUndo());
@@ -404,8 +404,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoFuseNodesRestoresCount) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 1, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
                 std::size_t before = ed.getAllNodes().size();
                 ed.fuseNodes(A, B, "AB");
                 ed.undo();
@@ -420,7 +420,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, FuseNodeWithItselfThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 EXPECT_THROW(ed.fuseNodes(A, A, "AA"), std::invalid_argument);
                 EXPECT_TRUE(ed.canUndo());
                 EXPECT_EQ(ed.getAllNodes().size(), 1u);
@@ -431,9 +431,9 @@ namespace app_logic {
                 // that would make C a parent of itself (A's parents become C's parents,
                 // but C is already a descendant of A), creating a cycle.
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-                NodePtr C = ed.createNode("C", 0, B);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = ed.createNode("C", B->getLayer() + 1, 0, B);
                 EXPECT_THROW(ed.fuseNodes(A, C, "AC"), std::logic_error);
                 EXPECT_TRUE(ed.canUndo());
                 // All three nodes must still be present.
@@ -444,14 +444,14 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RenameNodeChangesName) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 ed.renameNode(A, "Z");
                 EXPECT_EQ(A->getName(), "Z");
             }
 
             TEST(HypergraphEditor, RenameNodeCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 while (ed.canUndo()) ed.undo();
                 ed.renameNode(A, "Z");
                 EXPECT_TRUE(ed.canUndo());
@@ -459,7 +459,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoRenameNodeRestoresName) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 ed.renameNode(A, "Z");
                 ed.undo();
                 EXPECT_EQ(ed.getAllNodes()[0]->getName(), "A");
@@ -479,13 +479,13 @@ namespace app_logic {
 
             TEST(HypergraphEditor, CreateNodeWithAttributes) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode(styledAttributes("A"), 0, nullptr);
+                NodePtr A = ed.createNode(styledAttributes("A"), 0, 0, nullptr);
                 EXPECT_EQ(A->getAttributes(), styledAttributes("A"));
             }
 
             TEST(HypergraphEditor, SetNodeAttributesCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 while (ed.canUndo()) ed.undo();
                 ed.setNodeAttributes(A, styledAttributes("Z"));
                 EXPECT_EQ(A->getAttributes(), styledAttributes("Z"));
@@ -494,7 +494,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoRedoSetNodeAttributes) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 ed.setNodeAttributes(ed.getAllNodes()[0], styledAttributes("Z"));
                 ed.undo();
                 EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), NodeAttributes("A"));
@@ -504,8 +504,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoKeepsAttributesOfUntouchedNodes) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode(styledAttributes("A"), 0, nullptr);
-                ed.createNode("B", 1, nullptr);
+                ed.createNode(styledAttributes("A"), 0, 0, nullptr);
+                ed.createNode("B", 0, 1, nullptr);
                 ed.undo();  // undo creating B; A comes from a snapshot clone
                 ASSERT_EQ(ed.getAllNodes().size(), 1u);
                 EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), styledAttributes("A"));
@@ -513,8 +513,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, FuseNodesWithAttributes) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 1, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
                 ed.fuseNodes(A, B, styledAttributes("AB"));
                 ASSERT_EQ(ed.getAllNodes().size(), 1u);
                 EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), styledAttributes("AB"));
@@ -523,8 +523,8 @@ namespace app_logic {
             // A new shape changes the node's size, so the layout must follow.
             TEST(HypergraphEditor, SetNodeAttributesWithNewShapeRecomputesLayout) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                ed.createNode("B", A->getLayer() + 1, 0, A);
                 const double layer1_before = ed.getGraph().getLayerLayout().at(1);
 
                 NodeAttributes circle("A");
@@ -566,9 +566,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddSourceToEdgeCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-                NodePtr C = ed.createNode("C", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = ed.createNode("C", 0, 0, nullptr);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 while (ed.canUndo()) ed.undo();
@@ -578,9 +578,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoAddSourceToEdgeRestoresGraph) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-                NodePtr C = ed.createNode("C", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = ed.createNode("C", 0, 0, nullptr);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 std::size_t node_count = ed.getAllNodes().size();
@@ -596,8 +596,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddSourceAlreadyConnectedThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 // B is a child of A. Adding A again as a source of the A->B edge
                 // is a duplicate connection.
                 HyperedgePtr edge = firstRealEdge(ed);
@@ -611,9 +611,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, AddTargetToEdgeCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
-                NodePtr C = ed.createNode("C", 1, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = ed.createNode("C", 0, 1, nullptr);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
 				EXPECT_NO_THROW(ed.addTargetToEdge(edge, C));
@@ -626,8 +626,8 @@ namespace app_logic {
                 // A node cannot be connected to itself: adding a source of the
                 // edge as a target of the same edge throws std::logic_error.
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 HyperedgePtr edge = firstRealEdge(ed);
                 ASSERT_NE(edge, nullptr);
                 while (ed.canUndo()) ed.undo();
@@ -646,8 +646,8 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RelocateNodeToNewPositionCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 1, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
                 // B is to the right of A. Move A well past B, keeping it in the same layer.
                 double xB = ed.getX(B);
                 double yA = ed.getGraph().getLayerLayout().at(A->getLayer());
@@ -657,7 +657,7 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RelocateNodeSamePositionThrowsAndDoesNotCommitSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 double xA = ed.getX(A);
                 double yA = ed.getGraph().getLayerLayout().at(A->getLayer());
                 // Same x, same layer: neither leg of the move changes anything -- throws.
@@ -675,10 +675,10 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RelocateNodeAcrossLayersMovesToTargetLayer) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);       // layer 0, alongside P
-                NodePtr P = ed.createNode("P", 1, nullptr);       // layer 0
-                NodePtr Q = ed.createNode("Q", 0, P);             // layer 1
-                NodePtr S = ed.createNode("S", 1, P);             // layer 1
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);       // layer 0, alongside P
+                NodePtr P = ed.createNode("P", 0, 1, nullptr);       // layer 0
+                NodePtr Q = ed.createNode("Q", P->getLayer() + 1, 0, P);             // layer 1
+                NodePtr S = ed.createNode("S", P->getLayer() + 1, 1, P);             // layer 1
 
                 double target_y = ed.getGraph().getLayerLayout().at(1);
                 double target_x = (ed.getX(Q) + ed.getX(S)) / 2.0;
@@ -698,10 +698,10 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RelocateNodeAcrossLayersPreservesRelativeOrder) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr P = ed.createNode("P", 1, nullptr);
-                NodePtr Q = ed.createNode("Q", 0, P);
-                NodePtr S = ed.createNode("S", 1, P);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr P = ed.createNode("P", 0, 1, nullptr);
+                NodePtr Q = ed.createNode("Q", P->getLayer() + 1, 0, P);
+                NodePtr S = ed.createNode("S", P->getLayer() + 1, 1, P);
 
                 double target_y = ed.getGraph().getLayerLayout().at(1);
                 double target_x = (ed.getX(Q) + ed.getX(S)) / 2.0; // aim for the midpoint between Q and S.
@@ -716,9 +716,9 @@ namespace app_logic {
 
             TEST(HypergraphEditor, RelocateNodeCreatingNewShallowestLayerRenumbersExistingLayers) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);       // layer 0, alongside P
-                NodePtr P = ed.createNode("P", 1, nullptr);       // layer 0
-                NodePtr Q = ed.createNode("Q", 0, P);             // layer 1
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);       // layer 0, alongside P
+                NodePtr P = ed.createNode("P", 0, 1, nullptr);       // layer 0
+                NodePtr Q = ed.createNode("Q", P->getLayer() + 1, 0, P);             // layer 1
 
                 ASSERT_EQ(ed.getLayerCount(), 2);
 
@@ -746,10 +746,10 @@ namespace app_logic {
 
             TEST(HypergraphEditor, UndoRelocateNodeAcrossLayersRestoresLayerMembership) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr P = ed.createNode("P", 1, nullptr);
-                NodePtr Q = ed.createNode("Q", 0, P);
-                NodePtr S = ed.createNode("S", 1, P);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr P = ed.createNode("P", 0, 1, nullptr);
+                NodePtr Q = ed.createNode("Q", P->getLayer() + 1, 0, P);
+                NodePtr S = ed.createNode("S", P->getLayer() + 1, 1, P);
 
                 std::size_t layer0_before = ed.getNodesAt(0).size();
                 std::size_t layer1_before = ed.getNodesAt(1).size();
@@ -775,16 +775,16 @@ namespace app_logic {
 
             TEST(HypergraphEditor, MinimizeCrossingsDoesNotThrow) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 1, nullptr);
-                NodePtr C = ed.createNode("C", 0, A);
-                NodePtr D = ed.createNode("D", 1, B);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
+                NodePtr C = ed.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = ed.createNode("D", B->getLayer() + 1, 1, B);
                 EXPECT_NO_THROW(ed.minimizeCrossings());
             }
 
             TEST(HypergraphEditor, MinimizeCrossingsCommitsSnapshot) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 while (ed.canUndo()) ed.undo();          
                 EXPECT_THROW(ed.minimizeCrossings(), std::logic_error);
             }
@@ -794,7 +794,7 @@ namespace app_logic {
             TEST(HypergraphEditor, UndoStackCappedAtMaxHistory) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
                 for (int i = 0; i < HypergraphEditor::MAX_HISTORY + 5; ++i)
-                    ed.createNode(std::string("N") + std::to_string(i), 0, nullptr);
+                    ed.createNode(std::string("N") + std::to_string(i), 0, 0, nullptr);
                 int undo_count = 0;
                 while (ed.canUndo()) { ed.undo(); ++undo_count; }
                 EXPECT_LE(undo_count, HypergraphEditor::MAX_HISTORY);
@@ -804,8 +804,8 @@ namespace app_logic {
         
             TEST(HypergraphEditor, FailedMutationLeavesUndoStackDepthUnchanged) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                ed.createNode("X", 0, nullptr);
-                ed.createNode("Y", 0, nullptr);
+                ed.createNode("X", 0, 0, nullptr);
+                ed.createNode("Y", 0, 0, nullptr);
                 const auto& nodes = ed.getAllNodes();
                 // Now cause a failure and check depth is still the same.
                 EXPECT_THROW(ed.addConnection(
@@ -825,14 +825,14 @@ namespace app_logic {
             TEST(HypergraphEditor, GetLayerCountAfterCreateNode) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
                 EXPECT_EQ(ed.getLayerCount(), 0);
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 EXPECT_GT(ed.getLayerCount(), 0);
             }
 
             TEST(HypergraphEditor, GetNodesAtReturnsCorrectLayer) {
                 HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, nullptr);
-                NodePtr B = ed.createNode("B", 0, A);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
                 auto layer0 = ed.getNodesAt(0);
                 bool found = std::any_of(layer0.begin(), layer0.end(),
                     [&](const NodePtr& n) { return n == A; });

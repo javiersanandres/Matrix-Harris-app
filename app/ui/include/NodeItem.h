@@ -28,23 +28,30 @@ namespace ui {
 // ============================================================================
 class NodeItem : public QGraphicsRectItem {
 public:
+    // Role of the node while a two-click operation waits for its second node.
+    enum class SelectionMark {
+        None,         // no operation pending
+        Candidate,    // can be picked: pulsing indigo glow, pointing-hand cursor
+        Unavailable,  // cannot be picked: faded out
+        Origin,       // the node the operation started from: steady amber ring
+    };
+
     explicit NodeItem(hypergraph_logic::Node* node,
                       const QRectF& rect,
                       QGraphicsItem* parent = nullptr);
 
     hypergraph_logic::Node* node() const { return node_; }
 
-    // Highlight this item as a valid selection target during a pending
-    // two-click operation (addConnection, fuseNodes, etc.).
-    void setHighlighted(bool on);
-
-    // Called by DiagramScene after a rename is committed to refresh the label
-    // (the text itself is read from the node when painting).
-    void updateLabel(const QString& text);
+    // Marks this item's role in a pending two-click operation (addConnection,
+    // fuseNodes, etc.). SelectionMark::None restores the normal look.
+    void setSelectionMark(SelectionMark mark);
+    SelectionMark selectionMark() const { return mark_; }
 
     // rect() is the node's bounding box; the node itself is drawn and hit-tested
     // with its own shape (rectangle, circle or rhombus) inscribed in that box.
     QPainterPath shape() const override;
+    // rect() plus room for the selection glow around it.
+    QRectF boundingRect() const override;
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
                QWidget* widget = nullptr) override;
 
@@ -61,7 +68,7 @@ protected:
 private:
     hypergraph_logic::Node* node_;
 
-    bool   highlighted_  = false;  // valid target of a pending two-click operation
+    SelectionMark mark_  = SelectionMark::None;
     double label_scroll_ = 0.0;    // vertical scroll of an overflowing label
     bool   hovered_      = false;  // mouse over the node: show the label's scroll indicator
 
@@ -74,6 +81,7 @@ private:
     QPointF press_pos_;               // scene position at press
 
     static constexpr double DRAG_THRESHOLD = 5.0; // pixels before drag activates
+    static constexpr double GLOW_MARGIN = 16.0;   // room around rect() for the glow
 };
 
 } // namespace ui

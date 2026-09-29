@@ -115,9 +115,9 @@ namespace hypergraph_logic {
             // be linked into a long edge from elsewhere; 'col' just keeps its own
             // little chain out of the way of whatever else the test is building.
             static NodePtr buildRealNodeAtDepth(TestGraph& g, const std::string& base, int depth, int col) {
-                NodePtr n = g.createNode(base + "_r0", col, nullptr);
+                NodePtr n = g.createNode(base + "_r0", 0, col, nullptr);
                 for (int i = 1; i <= depth; ++i)
-                    n = g.createNode(base + "_r" + std::to_string(i), 0, n);
+                    n = g.createNode(base + "_r" + std::to_string(i), n ? n->getLayer() + 1 : 0, 0, n);
                 return n;
             }
 
@@ -152,8 +152,8 @@ namespace hypergraph_logic {
 
             TEST(SingleEdge, EachNodeGetsExactlyOnePort) {
                 TestGraph g("single_edge");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
                 runPipeline(g);
 
                 EXPECT_EQ(g.nodeLayout().at(A.get()).source_ports.size(), 1u);
@@ -162,8 +162,8 @@ namespace hypergraph_logic {
 
             TEST(SingleEdge, PortsAreInsideNodeBounds) {
                 TestGraph g("single_edge_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
                 runPipeline(g);
                 checkAllInvariants(g);
             }
@@ -171,8 +171,8 @@ namespace hypergraph_logic {
             TEST(SingleEdge, SinglePortSitsAtNodeCentre) {
                 // With one port, spacing = NODE_WIDTH / 2, so port x = node_x - hw + hw = node_x.
                 TestGraph g("single_edge_centre");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
                 runPipeline(g);
 
                 double xA = g.getX(A);
@@ -188,18 +188,18 @@ namespace hypergraph_logic {
 
             TEST(TwoEdgesSameSource, SourceHasTwoPorts) {
                 TestGraph g("two_edges_src");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
                 runPipeline(g);
                 EXPECT_EQ(g.nodeLayout().at(A.get()).source_ports.size(), 2u);
             }
 
             TEST(TwoEdgesSameSource, PortsOrderedAndInBounds) {
                 TestGraph g("two_edges_src_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                g.createNode("B", 0, A);
-                g.createNode("C", 1, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", A->getLayer() + 1, 0, A);
+                g.createNode("C", A->getLayer() + 1, 1, A);
                 runPipeline(g);
                 checkAllInvariants(g);
             }
@@ -208,9 +208,9 @@ namespace hypergraph_logic {
                 // With 2 ports, spacing = NODE_WIDTH/3.
                 // Ports sit at node_x - NODE_WIDTH/6  and  node_x + NODE_WIDTH/6.
                 TestGraph g("two_src_symmetric");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                g.createNode("B", 0, A);
-                g.createNode("C", 1, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", A->getLayer() + 1, 0, A);
+                g.createNode("C", A->getLayer() + 1, 1, A);
                 runPipeline(g);
 
                 const auto& ports = g.nodeLayout().at(A.get()).source_ports;
@@ -225,9 +225,9 @@ namespace hypergraph_logic {
 
             TEST(TwoEdgesSameTarget, TargetHasTwoPorts) {
                 TestGraph g("two_edges_tgt");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
                 g.addConnection(B, C);
                 runPipeline(g);
                 EXPECT_EQ(g.nodeLayout().at(C.get()).target_ports.size(), 2u);
@@ -235,9 +235,9 @@ namespace hypergraph_logic {
 
             TEST(TwoEdgesSameTarget, PortsOrderedAndInBounds) {
                 TestGraph g("two_edges_tgt_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
                 g.addConnection(B, C);
                 runPipeline(g);
                 checkAllInvariants(g);
@@ -246,10 +246,10 @@ namespace hypergraph_logic {
 
             TEST(ABCD, GraphBuildsAndCoordinatesAssigned) {
                 TestGraph g("ABCD");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 runPipeline(g);
 
                 // Basic ordering in each layer.
@@ -259,10 +259,10 @@ namespace hypergraph_logic {
 
             TEST(ABCD, EachNodeGetsExactlyOnePort) {
                 TestGraph g("ABCD_ports");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 runPipeline(g);
 
                 EXPECT_EQ(g.nodeLayout().at(A.get()).source_ports.size(), 1u);
@@ -273,10 +273,10 @@ namespace hypergraph_logic {
 
             TEST(ABCD, PortsAreInsideNodeBounds) {
                 TestGraph g("ABCD_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 runPipeline(g);
                 checkAllInvariants(g);
             }
@@ -285,10 +285,10 @@ namespace hypergraph_logic {
                 // The single source port of A must belong to the edge A->C,
                 // and the single source port of B must belong to the edge B->D.
                 TestGraph g("ABCD_edge");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 runPipeline(g);
 
                 HyperedgePtr eAC = findEdge(g, A, C);
@@ -318,10 +318,10 @@ namespace hypergraph_logic {
 
             TEST(CrossingSegments, PortsAssignedWithoutCrash) {
                 TestGraph g("crossing_seg");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, nullptr); // will be connected below
-                NodePtr D = g.createNode("D", 1, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 0, nullptr); // will be connected below
+                NodePtr D = g.createNode("D", 0, 1, nullptr);
                 // e1: A->D, e2: B->C
                 HyperedgePtr e1 = g.addConnection({ A }, { D });
                 HyperedgePtr e2 = g.addConnection({ B }, { C });
@@ -330,10 +330,10 @@ namespace hypergraph_logic {
 
             TEST(CrossingSegments, AllPortsInBoundsAfterResolution) {
                 TestGraph g("crossing_seg_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, nullptr);
-                NodePtr D = g.createNode("D", 1, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 0, nullptr);
+                NodePtr D = g.createNode("D", 0, 1, nullptr);
                 g.addConnection({ A }, { D });
                 g.addConnection({ B }, { C });
                 runPipeline(g);
@@ -351,10 +351,10 @@ namespace hypergraph_logic {
 
             TEST(FanHyperedge, SourcesAndTargetsEachGetOnePort) {
                 TestGraph g("fan");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 HyperedgePtr e = findEdge(g, A, C);
                 g.addSourceToEdge(e, B);
                 g.addTargetToEdge(e, D);
@@ -368,10 +368,10 @@ namespace hypergraph_logic {
 
             TEST(FanHyperedge, PortsInBounds) {
                 TestGraph g("fan_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 HyperedgePtr e = findEdge(g, A, C);
                 g.addSourceToEdge(e, B);
                 g.addTargetToEdge(e, D);
@@ -383,10 +383,10 @@ namespace hypergraph_logic {
                 // A is the leftmost node of the edge. pos(A, e) = 0, so its port
                 // should sit to the right of A's centre (cluster right policy).
                 TestGraph g("fan_pos");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 HyperedgePtr e = findEdge(g, A, C);
                 g.addSourceToEdge(e, B);
                 g.addTargetToEdge(e, D);
@@ -411,10 +411,10 @@ namespace hypergraph_logic {
 
             TEST(ThreeTargetFan, SourceHasThreePorts) {
                 TestGraph g("three_fan");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                g.createNode("B", 0, A);
-                g.createNode("C", 1, A);
-                g.createNode("D", 2, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", A->getLayer() + 1, 0, A);
+                g.createNode("C", A->getLayer() + 1, 1, A);
+                g.createNode("D", A->getLayer() + 1, 2, A);
                 runPipeline(g);
                 EXPECT_EQ(g.nodeLayout().at(A.get()).source_ports.size(), 3u);
             }
@@ -424,10 +424,10 @@ namespace hypergraph_logic {
                 // Ports at node_x - NODE_WIDTH/8, node_x, node_x + NODE_WIDTH/8.
                 // (i.e. min_x + spacing, min_x + 2*spacing, min_x + 3*spacing)
                 TestGraph g("three_fan_spacing");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                g.createNode("B", 0, A);
-                g.createNode("C", 1, A);
-                g.createNode("D", 2, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", A->getLayer() + 1, 0, A);
+                g.createNode("C", A->getLayer() + 1, 1, A);
+                g.createNode("D", A->getLayer() + 1, 2, A);
                 runPipeline(g);
 
                 const auto& ports = g.nodeLayout().at(A.get()).source_ports;
@@ -441,10 +441,10 @@ namespace hypergraph_logic {
 
             TEST(ThreeTargetFan, AllPortsInBounds) {
                 TestGraph g("three_fan_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                g.createNode("B", 0, A);
-                g.createNode("C", 1, A);
-                g.createNode("D", 2, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", A->getLayer() + 1, 0, A);
+                g.createNode("C", A->getLayer() + 1, 1, A);
+                g.createNode("D", A->getLayer() + 1, 2, A);
                 runPipeline(g);
                 checkAllInvariants(g);
             }
@@ -461,7 +461,7 @@ namespace hypergraph_logic {
 
             TEST(DummyNode, DummyGetsOneTargetAndOneSourcePort) {
                 TestGraph g("dummy_chain");
-                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
                 NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
                 g.addConnection(A, B);
                 runPipeline(g);
@@ -475,7 +475,7 @@ namespace hypergraph_logic {
 
             TEST(DummyNode, DummyPortsInsideDummyBounds) {
                 TestGraph g("dummy_bounds");
-                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
                 NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
                 g.addConnection(A, B);
                 runPipeline(g);
@@ -487,7 +487,7 @@ namespace hypergraph_logic {
                 // own x, by construction -- this holds regardless of whatever
                 // position the surrounding conflict/alignment logic settles it at.
                 TestGraph g("dummy_aligned");
-                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
                 NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
                 g.addConnection(A, B);
                 runPipeline(g);
@@ -509,20 +509,20 @@ namespace hypergraph_logic {
 
             TEST(MultiLayer, AllLayersProcessed) {
                 TestGraph g("multi_layer");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 0, B);
-                g.createNode("D", 0, C);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
+                g.createNode("D", C->getLayer() + 1, 0, C);
                 runPipeline(g);
                 checkAllInvariants(g);
             }
 
             TEST(MultiLayer, EveryNodeWithEdgesHasAtLeastOnePort) {
                 TestGraph g("multi_layer_ports");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 0, B);
-                g.createNode("D", 0, C);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
+                g.createNode("D", C->getLayer() + 1, 0, C);
                 runPipeline(g);
 
                 for (const auto& node : g.getAllNodes()) {
@@ -548,10 +548,10 @@ namespace hypergraph_logic {
 
             TEST(ParallelEdges, NoConflictRaisedAndPortsCorrect) {
                 TestGraph g("parallel");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 runPipeline(g);
 
                 // Each node has exactly one port pointing to the correct edge.
@@ -565,10 +565,10 @@ namespace hypergraph_logic {
             TEST(ParallelEdges, PortXMatchesNodeXForSinglePort) {
                 // With one port per node, the port sits at the node centre.
                 TestGraph g("parallel_centre");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 runPipeline(g);
 
                 EXPECT_NEAR(g.nodeLayout().at(A.get()).source_ports[0].x, g.getX(A), 1e-9);
@@ -588,10 +588,10 @@ namespace hypergraph_logic {
 
             TEST(Diamond, AllPortsAssignedAndOrdered) {
                 TestGraph g("diamond");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 runPipeline(g);
                 checkAllInvariants(g);
@@ -599,10 +599,10 @@ namespace hypergraph_logic {
 
             TEST(Diamond, NodeAHasTwoSourcePorts) {
                 TestGraph g("diamond_src");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 runPipeline(g);
                 EXPECT_EQ(g.nodeLayout().at(A.get()).source_ports.size(), 2u);
@@ -610,10 +610,10 @@ namespace hypergraph_logic {
 
             TEST(Diamond, NodeDHasTwoTargetPorts) {
                 TestGraph g("diamond_tgt");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 runPipeline(g);
                 EXPECT_EQ(g.nodeLayout().at(D.get()).target_ports.size(), 2u);
@@ -621,10 +621,10 @@ namespace hypergraph_logic {
 
             TEST(Diamond, NodeDTargetPortsAreOrderedLeftToRight) {
                 TestGraph g("diamond_ordered");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 runPipeline(g);
                 checkPortsOrdered(g.nodeLayout().at(D.get()).target_ports);
@@ -639,8 +639,8 @@ namespace hypergraph_logic {
 
             TEST(Idempotency, PortCountStableAfterTwoCalls) {
                 TestGraph g("idempotent");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
                 g.assignXCoordinates();
                 g.assignPorts();
                 std::size_t count_src = g.nodeLayout().at(A.get()).source_ports.size();
@@ -666,11 +666,11 @@ namespace hypergraph_logic {
                 TestGraph g("ladder");
                 std::vector<std::vector<NodePtr>> grid(3, std::vector<NodePtr>(4));
                 for (int col = 0; col < 4; ++col)
-                    grid[0][col] = g.createNode("R0C" + std::to_string(col), col, nullptr);
+                    grid[0][col] = g.createNode("R0C" + std::to_string(col), 0, col, nullptr);
                 for (int row = 1; row < 3; ++row)
                     for (int col = 0; col < 4; ++col)
                         grid[row][col] = g.createNode(
-                            "R" + std::to_string(row) + "C" + std::to_string(col),
+                            "R" + std::to_string(row) + "C" + std::to_string(col), grid[row - 1][col]->getLayer() + 1,
                             col, grid[row - 1][col]);
                 runPipeline(g);
                 checkAllInvariants(g);
@@ -680,11 +680,11 @@ namespace hypergraph_logic {
                 TestGraph g("ladder_ports");
                 std::vector<std::vector<NodePtr>> grid(3, std::vector<NodePtr>(4));
                 for (int col = 0; col < 4; ++col)
-                    grid[0][col] = g.createNode("R0C" + std::to_string(col), col, nullptr);
+                    grid[0][col] = g.createNode("R0C" + std::to_string(col), 0, col, nullptr);
                 for (int row = 1; row < 3; ++row)
                     for (int col = 0; col < 4; ++col)
                         grid[row][col] = g.createNode(
-                            "R" + std::to_string(row) + "C" + std::to_string(col),
+                            "R" + std::to_string(row) + "C" + std::to_string(col), grid[row - 1][col]->getLayer() + 1,
                             col, grid[row - 1][col]);
                 runPipeline(g);
 
@@ -706,10 +706,10 @@ namespace hypergraph_logic {
 
             TEST(NodePosition, LeftmostIsZeroRightmostIsTwo) {
                 TestGraph g("node_pos");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 HyperedgePtr e = findEdge(g, A, C);
                 g.addSourceToEdge(e, B);
                 g.addTargetToEdge(e, D);
@@ -779,12 +779,12 @@ namespace hypergraph_logic {
                 // topology isn't something the test controls directly -- but if the
                 // two do end up close, the fallback must have fully aligned them.
                 TestGraph g("jogs_fanout_src");
-                NodePtr R = g.createNode("R", 0, nullptr);
-                NodePtr S = g.createNode("S", 0, R);
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                NodePtr S = g.createNode("S", R->getLayer() + 1, 0, R);
                 HyperedgePtr e = findEdge(g, R, S);
                 ASSERT_NE(e, nullptr);
-                NodePtr FarAnchor = g.createNode("FarAnchor", 1, nullptr);
-                NodePtr Far = g.createNode("Far", 5, FarAnchor);
+                NodePtr FarAnchor = g.createNode("FarAnchor", 0, 1, nullptr);
+                NodePtr Far = g.createNode("Far", FarAnchor->getLayer() + 1, 5, FarAnchor);
                 g.addTargetToEdge(e, Far);
                 runPipeline(g);
                 checkAllInvariants(g);
@@ -802,12 +802,12 @@ namespace hypergraph_logic {
                 // every ordinary invariant (bounds, ordering, separation) still holds
                 // regardless of whether the fallback actually triggered.
                 TestGraph g("jogs_fanout_invariants");
-                NodePtr R = g.createNode("R", 0, nullptr);
-                NodePtr S = g.createNode("S", 0, R);
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                NodePtr S = g.createNode("S", R->getLayer() + 1, 0, R);
                 HyperedgePtr e = findEdge(g, R, S);
                 ASSERT_NE(e, nullptr);
-                NodePtr FarAnchor = g.createNode("FarAnchor", 1, nullptr);
-                NodePtr Far = g.createNode("Far", 5, FarAnchor);
+                NodePtr FarAnchor = g.createNode("FarAnchor", 0, 1, nullptr);
+                NodePtr Far = g.createNode("Far", FarAnchor->getLayer() + 1, 5, FarAnchor);
                 g.addTargetToEdge(e, Far);
                 EXPECT_NO_THROW(runPipeline(g));
                 checkAllInvariants(g);
@@ -817,11 +817,11 @@ namespace hypergraph_logic {
                 // Mirror of the source case: T has a single hyperedge with multiple
                 // sources, one of which (S) is likely to end up close to it.
                 TestGraph g("jogs_fanin_tgt");
-                NodePtr S = g.createNode("S", 0, nullptr);
-                NodePtr T = g.createNode("T", 0, S);
+                NodePtr S = g.createNode("S", 0, 0, nullptr);
+                NodePtr T = g.createNode("T", S->getLayer() + 1, 0, S);
                 HyperedgePtr e = findEdge(g, S, T);
                 ASSERT_NE(e, nullptr);
-                NodePtr FarSrc = g.createNode("FarSrc", 5, nullptr);
+                NodePtr FarSrc = g.createNode("FarSrc", 0, 5, nullptr);
                 g.addSourceToEdge(e, FarSrc);
                 runPipeline(g);
                 checkAllInvariants(g);
@@ -857,7 +857,7 @@ namespace hypergraph_logic {
                 // exactly at its own x (chain rigidity), and every ordinary
                 // invariant must hold.
                 TestGraph g("chain_single");
-                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
                 NodePtr B = buildRealNodeAtDepth(g, "B", 2, 5);
                 g.addConnection(A, B);
                 EXPECT_NO_THROW(runPipeline(g));
@@ -874,7 +874,7 @@ namespace hypergraph_logic {
                 // chain. Every member must share the exact same x and matching
                 // ports, regardless of how the surrounding graph resolves.
                 TestGraph g("chain_long");
-                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
                 NodePtr B = buildRealNodeAtDepth(g, "B", 4, 5);
                 g.addConnection(A, B);
                 EXPECT_NO_THROW(runPipeline(g));
@@ -893,8 +893,8 @@ namespace hypergraph_logic {
                 // resolution settles on, each chain must still be rigid and every
                 // ordinary structural invariant must still hold.
                 TestGraph g("chain_crossing");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
                 NodePtr D = buildRealNodeAtDepth(g, "D", 2, 5);
                 NodePtr C = buildRealNodeAtDepth(g, "C", 2, 6);
                 g.addConnection(A, D);
@@ -923,8 +923,8 @@ namespace hypergraph_logic {
                 // R's only hyperedge has one target C: the "span" collapses to a
                 // single point (C's port), so R must end up exactly above it.
                 TestGraph g("center_single_target");
-                NodePtr R = g.createNode("R", 0, nullptr);
-                NodePtr C = g.createNode("C", 0, R);
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                NodePtr C = g.createNode("C", R->getLayer() + 1, 0, R);
                 runPipeline(g);
                 checkAllInvariants(g);
 
@@ -941,9 +941,9 @@ namespace hypergraph_logic {
                 // reimplementing the whole pipeline, so this only checks that the
                 // pass runs cleanly and every ordinary invariant still holds.
                 TestGraph g("center_skips_non_roots");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr Mid = g.createNode("Mid", 0, A);
-                g.createNode("Leaf", 0, Mid);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr Mid = g.createNode("Mid", A->getLayer() + 1, 0, A);
+                g.createNode("Leaf", Mid->getLayer() + 1, 0, Mid);
                 EXPECT_NO_THROW(runPipeline(g));
                 checkAllInvariants(g);
             }
@@ -953,8 +953,8 @@ namespace hypergraph_logic {
                 // test above), running the pipeline again must be a no-op on R's
                 // position: it's already aligned, so nothing should move it.
                 TestGraph g("center_already_aligned");
-                NodePtr R = g.createNode("R", 0, nullptr);
-                g.createNode("C", 0, R);
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                g.createNode("C", R->getLayer() + 1, 0, R);
                 runPipeline(g);
                 double before = g.nodeLayout().at(R.get()).x;
                 g.assignXCoordinates();
@@ -968,9 +968,9 @@ namespace hypergraph_logic {
                 // more than one hyperedge and must be skipped entirely regardless
                 // of having no parents.
                 TestGraph g("center_multi_edge_root_skipped");
-                NodePtr R = g.createNode("R", 0, nullptr);
-                g.createNode("C1", 0, R);
-                g.createNode("C2", 1, R);
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                g.createNode("C1", R->getLayer() + 1, 0, R);
+                g.createNode("C2", R->getLayer() + 1, 1, R);
                 runPipeline(g);
                 checkAllInvariants(g);
                 EXPECT_EQ(g.nodeLayout().at(R.get()).source_ports.size(), 2u);

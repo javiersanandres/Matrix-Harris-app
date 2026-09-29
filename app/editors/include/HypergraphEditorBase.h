@@ -74,7 +74,7 @@ namespace app_logic {
 		// Throws std::logic_error if the undo stack is empty.
 		void undo() {
 			if (derived().past_.empty())
-				throw std::logic_error("HypergraphEditorBase::undo: nothing to undo.");
+				throw std::logic_error("No hay nada que deshacer.");
 			derived().restoreSnapshot(derived().past_, derived().future_);
 		}
 
@@ -85,7 +85,7 @@ namespace app_logic {
 		// Throws std::logic_error if the redo stack is empty.
 		void redo() {
 			if (derived().future_.empty())
-				throw std::logic_error("HypergraphEditorBase::redo: nothing to redo.");
+				throw std::logic_error("No hay nada que rehacer.");
 			derived().restoreSnapshot(derived().future_, derived().past_);
 		}
 

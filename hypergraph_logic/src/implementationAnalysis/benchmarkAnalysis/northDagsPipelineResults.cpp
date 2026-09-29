@@ -405,7 +405,7 @@ static PreparedInstance prepareInstance(const std::string& name, const DirectedG
 // Hypergraph builder
 //
 // Same construction strategy as fullPipelineResults.cpp:
-//   createNode(label, pos, nullptr)   — every node, at layer 0
+//   createNode(label, 0, pos, nullptr)   — every node, at layer 0
 //   addConnection(source, target)     — anchors each hyperedge
 //   addSourceToEdge / addTargetToEdge — remaining endpoints
 // Nodes are created in topological order and hyperedges are added in the
@@ -430,7 +430,7 @@ static GraphicalHypergraph buildHypergraph(const PreparedInstance& inst,
 
     int position = 0;
     for (const auto& label : inst.nodes_topo)
-        node_map.emplace(label, g.createNode(label, position++, nullptr));
+        node_map.emplace(label, g.createNode(label, 0, position++, nullptr));
 
     auto report = [&](int he_id, const std::string& what, const std::exception& ex) {
         if (verbose)

@@ -85,8 +85,7 @@ namespace hypergraph_logic {
 	void JointGraphicalHypergraph::addHypergraph(GraphicalHypergraph& g, bool left) {
 		if (incorporated_ids_.count(g.getId()))
 			throw std::invalid_argument(
-				"JointGraphicalHypergraph::addHypergraph: graph with id '"
-				+ g.getId() + "' has already been incorporated.");
+				"El esquema «" + g.getName() + "» ya forma parte del esquema conjunto.");
 
 		mergeFrom(g.clone(), left);
 		incorporated_ids_.insert(g.getId());

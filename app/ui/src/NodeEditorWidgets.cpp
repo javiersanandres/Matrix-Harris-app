@@ -874,7 +874,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         switch (field) {
         case Name: {
             name_ = new QLineEdit;
-            name_->setPlaceholderText(QStringLiteral("Nombre del nodo"));
+            name_->setPlaceholderText(QStringLiteral("Nombre de la caja"));
             name_->setClearButtonEnabled(true);
             name_->setMinimumWidth(220);
             connect(name_, &QLineEdit::textEdited, this, [this](const QString& text) {
@@ -1189,7 +1189,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         font_colour_->setColour(nv::toQColor(current_.font_colour), font_auto_ && !fire);
         colour_->setEnabled(!fire);
         font_colour_->setEnabled(!fire);
-        const QString locked = QStringLiteral("Bloqueado mientras el nodo sea un fuego");
+        const QString locked = QStringLiteral("Bloqueado mientras la caja sea un fuego");
         if (fire) {
             colour_->setToolTip(locked);
             font_colour_->setToolTip(locked);

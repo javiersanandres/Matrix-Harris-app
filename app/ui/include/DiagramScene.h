@@ -7,12 +7,16 @@
 #include "HyperedgeItem.h"
 
 #include <QColor>
+#include <QElapsedTimer>
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
 #include <QList>
 
 #include <functional>
 #include <unordered_map>
+#include <unordered_set>
+
+class QTimer;
 
 namespace ui {
 
@@ -20,20 +24,19 @@ namespace ui {
     // InteractionState
     //
     // Tracks the current multi-step interaction. When state != Idle, the next
-    // node click completes the pending operation instead of showing a context menu.
-    // Clicking the background cancels and returns to Idle.
+    // click on a candidate node completes the pending operation instead of
+    // showing a context menu. Esc, a click on the background or a right click
+    // cancels and returns to Idle.
     // ============================================================================
     enum class InteractionState {
         Idle,
-        WaitingForSecondNode_AddConnectionParent,   // "Añadir nodo arriba"
-        WaitingForSecondNode_AddConnectionChild,    // "Añadir nodo debajo"
-        WaitingForSecondNode_RemoveConnection,      // "Eliminar conexión"
+        WaitingForSecondNode_AddConnectionParent,   // "Caja actual por debajo de"
+        WaitingForSecondNode_AddConnectionChild,    // "Caja actual por encima de"
+        WaitingForSecondNode_RemoveConnection,      // "Eliminar conexión parcial"
         WaitingForSecondNode_FuseNodes,             // "Fusionar"
-        WaitingForSecondNode_AddSource,             // "Añadir origen"
-        WaitingForSecondNode_AddTarget,             // "Añadir destino"
-        WaitingForSecondNode_RemoveSource,          // "Eliminar origen"
-        WaitingForSecondNode_RemoveTarget,          // "Eliminar destino"
-        DraggingNode,
+        WaitingForSecondNode_AddSource,             // "Bifurcar arriba con caja existente"
+        WaitingForSecondNode_AddTarget,             // "Bifurcar abajo con caja existente"
+        WaitingForSecondNode_SimplifyConnection,    // "Simplificar conexión"
     };
 
     // ============================================================================
@@ -47,15 +50,18 @@ namespace ui {
     // ─────────────────
     // Single-step operations (removeNode, removeHyperedge) execute immediately
     // on the first click. Two-step operations (addConnection, fuseNodes, etc.)
-    // set the state to one of the WaitingFor… values and highlight all valid
-    // second-click targets. The first node clicked is stored in pending_node_.
-    // The pending edge (for addSource/addTarget/removeSource/removeTarget) is
-    // stored in pending_edge_.
+    // set the state to one of the WaitingFor… values. The first node clicked is
+    // stored in pending_node_ and the connection an operation works on in
+    // pending_edge_.
     //
-    // Background click: if state == Idle, shows "Nuevo nodo" (regular) or the
+    // While waiting, only the nodes the operation can actually take (as told by
+    // the graph's can* queries) are candidates: they glow and pulse, every other
+    // node fades out, the origin node gets an amber ring, and edges not involved
+    // are dimmed. Clicks on anything that is not a candidate are ignored. A menu
+    // entry whose operation has no candidate at all is disabled.
+    //
+    // Background click: if state == Idle, shows "Nueva caja" (regular) or the
     // AddHypergraphDialog (joint). If state != Idle, cancels the operation.
-    //
-    // Pan: holding left button on the background and moving pans the view.
     // ============================================================================
     class DiagramScene : public QGraphicsScene {
         Q_OBJECT
@@ -77,6 +83,11 @@ namespace ui {
         // Cancel any pending two-step interaction and return to Idle.
         void cancelInteraction();
 
+        bool isInteractionPending() const { return state_ != InteractionState::Idle; }
+
+        // Current value, in [0, 1], of the breathing animation of candidate nodes.
+        double selectionPulse() const { return pulse_; }
+
         // Where the node dialogs read the project's recently used colours from,
         // and where they report every colour the user picks. Set by MainWindow.
         void setColourStore(std::function<QList<QColor>()> recent,
@@ -88,9 +99,6 @@ namespace ui {
         // and refresh the tab bar thumbnail.
         void graphChanged();
 
-        // Emitted when a rename is committed so the tab bar label updates.
-        void diagramRenamed(const QString& new_name);
-
         // Emitted by NodeItem after a horizontal drag is released.
         // DiagramScene connects this to call relocateNodeInLayer on the editor.
         void nodeRelocated(hypergraph_logic::Node* node, double new_scene_x, double new_scene_y);
@@ -99,10 +107,13 @@ namespace ui {
         // MainWindow handles this because it has access to the full diagram list.
         void addHypergraphRequested(double click_x);
 
+        // Tells the user what the pending operation expects next; an empty hint
+        // means no operation is pending any more.
+        void interactionHintChanged(const QString& hint);
+
     protected:
         void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
-        void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
-        void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
+        void keyPressEvent(QKeyEvent* event) override;
 
     private:
         // ── Editor access (exactly one is non-null) ───────────────────────────────
@@ -120,24 +131,43 @@ namespace ui {
         // First node selected in a two-step operation.
         hypergraph_logic::Node* pending_node_ = nullptr;
 
-        // Edge selected in addSource/addTarget/removeSource/removeTarget.
+        // Edge selected in addSource/addTarget/simplifyConnection.
         hypergraph_logic::Hyperedge* pending_edge_ = nullptr;
+
+        // Nodes the pending operation can take as its second node.
+        std::unordered_set<hypergraph_logic::Node*> candidates_;
+
+        // Breathing animation of the candidates (running only while pending).
+        QTimer* pulse_timer_ = nullptr;
+        QElapsedTimer pulse_clock_;
+        double pulse_ = 0.0;
 
         // ── Project colour store (see setColourStore) ─────────────────────────────
         std::function<QList<QColor>()> recent_colours_;
         std::function<void(const QColor&)> remember_colour_;
 
-        // ── Pan state ─────────────────────────────────────────────────────────────
-        bool    panning_ = false;
-        QPointF pan_start_;
-
         // ── Helpers ───────────────────────────────────────────────────────────────
+
+        void initialise();
 
         // Show error message from a caught exception.
         void showError(const std::exception& e);
 
-        // Highlight / un-highlight all node items as valid second-click targets.
-        void setAllNodesHighlighted(bool on);
+        // The nodes that operation `state` could take as its second node, given
+        // its first node and/or connection.
+        std::unordered_set<hypergraph_logic::Node*> candidatesFor(InteractionState state,
+            hypergraph_logic::Node* first, hypergraph_logic::Hyperedge* edge) const;
+
+        // Enters a two-step operation: marks candidates, starts the pulse and
+        // publishes the hint.
+        void beginSelection(InteractionState state, hypergraph_logic::Node* first,
+            hypergraph_logic::Hyperedge* edge);
+
+        // Applies (or clears) the selection look of every node and edge item.
+        void applySelectionMarks();
+        void clearSelectionMarks();
+
+        QString hintFor(InteractionState state) const;
 
         // Complete a two-step operation given the second node.
         void completeSecondNodeClick(hypergraph_logic::Node* second);
@@ -153,22 +183,13 @@ namespace ui {
         // Node operations
 		void onCreateNodeAbove(hypergraph_logic::Node* parent);
         void onCreateNodeBelow(hypergraph_logic::Node* child);
-        void onCreateNodeLeft(Node* node);
-        void onCreateNodeRight(Node* node);
+        void onCreateNodeLeft(hypergraph_logic::Node* node);
+        void onCreateNodeRight(hypergraph_logic::Node* node);
         void onCreateNodeIntoEdge(hypergraph_logic::Hyperedge* edge);
         void onCreateSource(hypergraph_logic::Hyperedge* edge);
         void onCreateTarget(hypergraph_logic::Hyperedge* edge);
         void onRemoveNode(hypergraph_logic::Node* node);
         void onRemoveHyperedge(hypergraph_logic::Hyperedge* edge);
-        void onRenameNode(hypergraph_logic::Node* node, NodeItem* item);
-        void onBeginAddConnectionParent(hypergraph_logic::Node* first);
-        void onBeginAddConnectionChild(hypergraph_logic::Node* first);
-        void onBeginRemoveConnection(hypergraph_logic::Node* first);
-        void onBeginFuseNodes(hypergraph_logic::Node* first);
-        void onBeginAddSource(hypergraph_logic::Hyperedge* edge);
-        void onBeginAddTarget(hypergraph_logic::Hyperedge* edge);
-        void onBeginRemoveSource(hypergraph_logic::Hyperedge* edge);
-        void onBeginRemoveTarget(hypergraph_logic::Hyperedge* edge);
 
         // Background / joint operations
         void onCreateRootNode(const QPointF& scene_pos);
@@ -183,10 +204,6 @@ namespace ui {
         QList<QColor> recentColours() const;
         void rememberColours(const QList<QColor>& colours);
         QWidget* dialogParent() const;
-
-        // Inline rename helpers
-        void startInlineRename(NodeItem* item);
-        void commitInlineRename(NodeItem* item, const QString& new_name);
 
         // Convenience: get the graph from whichever editor is active.
         const hypergraph_logic::GraphicalHypergraph& currentGraph() const;

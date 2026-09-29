@@ -155,16 +155,16 @@ namespace hypergraph_logic {
 
             TEST(EdgeCases, NoEdgesDoesNotCrash) {
                 TestGraph g("no_edges");
-                g.createNode("A", 0, nullptr);
-                g.createNode("B", 1, nullptr);
+                g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", 0, 1, nullptr);
                 EXPECT_NO_THROW(runPipeline(g));
             }
 
             TEST(EdgeCases, SingleEdgeIsUnchanged) {
                 // Layer 0: [A]   Layer 1: [B]   one edge A->B
                 TestGraph g("single_edge");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
                 g.assignXCoordinates();
                 HyperedgePtr e = findEdge(g, A, B);
                 ASSERT_NE(e, nullptr);
@@ -175,7 +175,7 @@ namespace hypergraph_logic {
 
             TEST(EdgeCases, InvalidLayerDoesNotCrash) {
                 TestGraph g("invalid_layer");
-                g.createNode("A", 0, nullptr);
+                g.createNode("A", 0, 0, nullptr);
                 EXPECT_NO_THROW(g.orderHyperedges(999));
             }
 
@@ -190,10 +190,10 @@ namespace hypergraph_logic {
 
             TEST(ParallelNonOverlapping, EdgeSetPreserved) {
                 TestGraph g("parallel_set");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -201,30 +201,30 @@ namespace hypergraph_logic {
 
             TEST(ParallelNonOverlapping, ZeroCrossings) {
                 TestGraph g("parallel_zero");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                g.createNode("C", 0, A);
-                g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", A->getLayer() + 1, 0, A);
+                g.createNode("D", B->getLayer() + 1, 1, B);
                 runPipeline(g);
                 EXPECT_EQ(totalCrossings(g, 0), 0);
             }
 
             TEST(ParallelNonOverlapping, TransitivityHolds) {
                 TestGraph g("parallel_transit");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                g.createNode("C", 0, A);
-                g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", A->getLayer() + 1, 0, A);
+                g.createNode("D", B->getLayer() + 1, 1, B);
                 runPipeline(g);
                 checkTransitivity(g, 0);
             }
 
             TEST(ParallelNonOverlapping, SolveDoesNotCrash) {
                 TestGraph g("parallel_crash");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                g.createNode("C", 0, A);
-                g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", A->getLayer() + 1, 0, A);
+                g.createNode("D", B->getLayer() + 1, 1, B);
                 EXPECT_NO_THROW(runPipeline(g));
             }
 
@@ -242,21 +242,21 @@ namespace hypergraph_logic {
 
             TEST(CrossingPair, SolveDoesNotCrash) {
                 TestGraph g("cross_crash");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
                 // A->D: D is in position 1 of layer 1 (same x as B)
-                NodePtr D = g.createNode("D", 1, A);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);
                 // B->C: C is in position 0 of layer 1 (same x as A)
-                NodePtr C = g.createNode("C", 0, B);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
                 EXPECT_NO_THROW(runPipeline(g));
             }
 
             TEST(CrossingPair, EdgeSetPreserved) {
                 TestGraph g("cross_set");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr D = g.createNode("D", 1, A);
-                NodePtr C = g.createNode("C", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -264,10 +264,10 @@ namespace hypergraph_logic {
 
             TEST(CrossingPair, CrossingsMatchBruteForce) {
                 TestGraph g("cross_bf");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr D = g.createNode("D", 1, A);
-                NodePtr C = g.createNode("C", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
@@ -290,16 +290,16 @@ namespace hypergraph_logic {
             TEST(ThreeEdgeInterior, OptimalMatchesBruteForce) {
                 TestGraph g("three_interior");
                 // Layer 0 sources
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr M = g.createNode("M", 1, nullptr);
-                NodePtr B = g.createNode("B", 2, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr M = g.createNode("M", 0, 1, nullptr);
+                NodePtr B = g.createNode("B", 0, 2, nullptr);
                 // Layer 1 targets — use addConnection to create the crossing edges.
                 // e1: A->D  (D at position 2 in layer 1)
-                NodePtr D = g.createNode("D", 2, A);   // creates e1: A->D
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 2, A);   // creates e1: A->D
                 // e2: B->C  (C at position 0 in layer 1)
-                NodePtr C = g.createNode("C", 0, B);   // creates e2: B->C
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);   // creates e2: B->C
                 // e3: M->N  (N at position 1 in layer 1)
-                NodePtr N = g.createNode("N", 1, M);   // creates e3: M->N
+                NodePtr N = g.createNode("N", M->getLayer() + 1, 1, M);   // creates e3: M->N
 
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
@@ -311,12 +311,12 @@ namespace hypergraph_logic {
 
             TEST(ThreeEdgeInterior, EdgeSetPreserved) {
                 TestGraph g("three_interior_set");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr M = g.createNode("M", 1, nullptr);
-                NodePtr B = g.createNode("B", 2, nullptr);
-                g.createNode("D", 2, A);
-                g.createNode("C", 0, B);
-                g.createNode("N", 1, M);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr M = g.createNode("M", 0, 1, nullptr);
+                NodePtr B = g.createNode("B", 0, 2, nullptr);
+                g.createNode("D", A->getLayer() + 1, 2, A);
+                g.createNode("C", B->getLayer() + 1, 0, B);
+                g.createNode("N", M->getLayer() + 1, 1, M);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -324,12 +324,12 @@ namespace hypergraph_logic {
 
             TEST(ThreeEdgeInterior, TransitivityHolds) {
                 TestGraph g("three_interior_transit");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr M = g.createNode("M", 1, nullptr);
-                NodePtr B = g.createNode("B", 2, nullptr);
-                g.createNode("D", 2, A);
-                g.createNode("C", 0, B);
-                g.createNode("N", 1, M);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr M = g.createNode("M", 0, 1, nullptr);
+                NodePtr B = g.createNode("B", 0, 2, nullptr);
+                g.createNode("D", A->getLayer() + 1, 2, A);
+                g.createNode("C", B->getLayer() + 1, 0, B);
+                g.createNode("N", M->getLayer() + 1, 1, M);
                 runPipeline(g);
                 checkTransitivity(g, 0);
             }
@@ -349,17 +349,17 @@ namespace hypergraph_logic {
 
             TEST(WideContainsNarrow, OptimalMatchesBruteForce) {
                 TestGraph g("wide_narrow");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
                 // e1: A->D and C->F combined into one hyperedge via addSourceToEdge/addTargetToEdge
-                NodePtr D = g.createNode("D", 0, A);   // creates e1: A->D
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);   // creates e1: A->D
                 HyperedgePtr e1 = findEdge(g, A, D);
                 ASSERT_NE(e1, nullptr);
                 g.addSourceToEdge(e1, C);
                 NodePtr F = g.createTarget("F", 2, e1);
                 // e2: B->E
-                NodePtr E = g.createNode("E", 1, B);   // creates e2: B->E
+                NodePtr E = g.createNode("E", B->getLayer() + 1, 1, B);   // creates e2: B->E
 
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
@@ -371,15 +371,15 @@ namespace hypergraph_logic {
                 // Because B and E are strictly inside span(e1), putting e2 above e1
                 // yields CT(e2,e1) = acs(e2,e1) + act(e1,e2) = 0 + 0 = 0.
                 TestGraph g("wide_narrow_zero");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                NodePtr D = g.createNode("D", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);
                 HyperedgePtr e1 = findEdge(g, A, D);
                 ASSERT_NE(e1, nullptr);
                 g.addSourceToEdge(e1, C);
                 g.createTarget("F", 2, e1);
-                g.createNode("E", 1, B);
+                g.createNode("E", B->getLayer() + 1, 1, B);
 
                 runPipeline(g);
                 EXPECT_EQ(totalCrossings(g, 0), 1);
@@ -387,15 +387,15 @@ namespace hypergraph_logic {
 
             TEST(WideContainsNarrow, EdgeSetPreserved) {
                 TestGraph g("wide_narrow_set");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                NodePtr D = g.createNode("D", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);
                 HyperedgePtr e1 = findEdge(g, A, D);
                 ASSERT_NE(e1, nullptr);
                 g.addSourceToEdge(e1, C);
                 g.createTarget("F", 2, e1);
-                g.createNode("E", 1, B);
+                g.createNode("E", B->getLayer() + 1, 1, B);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -417,12 +417,12 @@ namespace hypergraph_logic {
                 TestGraph g("four_dense");
                 std::vector<NodePtr> src(4), tgt(4);
                 for (int i = 0; i < 4; ++i)
-                    src[i] = g.createNode("S" + std::to_string(i), i, nullptr);
+                    src[i] = g.createNode("S" + std::to_string(i), 0, i, nullptr);
                 // Crossing connections: Si -> T(3-i)
-                tgt[3] = g.createNode("T3", 0, src[0]);  // e0: S0->T3
-                tgt[2] = g.createNode("T2", 0, src[1]);  // e1: S1->T2
-                tgt[1] = g.createNode("T1", 0, src[2]);  // e2: S2->T1
-                tgt[0] = g.createNode("T0", 0, src[3]);  // e3: S3->T0
+                tgt[3] = g.createNode("T3", src[0]->getLayer() + 1, 0, src[0]);  // e0: S0->T3
+                tgt[2] = g.createNode("T2", src[1]->getLayer() + 1, 0, src[1]);  // e1: S1->T2
+                tgt[1] = g.createNode("T1", src[2]->getLayer() + 1, 0, src[2]);  // e2: S2->T1
+                tgt[0] = g.createNode("T0", src[3]->getLayer() + 1, 0, src[3]);  // e3: S3->T0
 
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
@@ -434,11 +434,11 @@ namespace hypergraph_logic {
                 TestGraph g("four_dense_set");
                 std::vector<NodePtr> src(4);
                 for (int i = 0; i < 4; ++i)
-                    src[i] = g.createNode("S" + std::to_string(i), i, nullptr);
-                g.createNode("T3", 3, src[0]);
-                g.createNode("T2", 2, src[1]);
-                g.createNode("T1", 1, src[2]);
-                g.createNode("T0", 0, src[3]);
+                    src[i] = g.createNode("S" + std::to_string(i), 0, i, nullptr);
+                g.createNode("T3", src[0]->getLayer() + 1, 3, src[0]);
+                g.createNode("T2", src[1]->getLayer() + 1, 2, src[1]);
+                g.createNode("T1", src[2]->getLayer() + 1, 1, src[2]);
+                g.createNode("T0", src[3]->getLayer() + 1, 0, src[3]);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -448,11 +448,11 @@ namespace hypergraph_logic {
                 TestGraph g("four_dense_transit");
                 std::vector<NodePtr> src(4);
                 for (int i = 0; i < 4; ++i)
-                    src[i] = g.createNode("S" + std::to_string(i), i, nullptr);
-                g.createNode("T3", 3, src[0]);
-                g.createNode("T2", 2, src[1]);
-                g.createNode("T1", 1, src[2]);
-                g.createNode("T0", 0, src[3]);
+                    src[i] = g.createNode("S" + std::to_string(i), 0, i, nullptr);
+                g.createNode("T3", src[0]->getLayer() + 1, 3, src[0]);
+                g.createNode("T2", src[1]->getLayer() + 1, 2, src[1]);
+                g.createNode("T1", src[2]->getLayer() + 1, 1, src[2]);
+                g.createNode("T0", src[3]->getLayer() + 1, 0, src[3]);
                 runPipeline(g);
                 checkTransitivity(g, 0);
             }
@@ -470,16 +470,16 @@ namespace hypergraph_logic {
 
             TEST(MultiSourceHyperedge, OptimalMatchesBruteForce) {
                 TestGraph g("multi_src");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
                 // e1: A->D, then add C as source
-                NodePtr D = g.createNode("D", 0, A);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);
                 HyperedgePtr e1 = findEdge(g, A, D);
                 ASSERT_NE(e1, nullptr);
                 g.addSourceToEdge(e1, C);
                 // e2: B->E
-                NodePtr E = g.createNode("E", 1, B);
+                NodePtr E = g.createNode("E", B->getLayer() + 1, 1, B);
 
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
@@ -489,17 +489,17 @@ namespace hypergraph_logic {
 
             TEST(MultiSourceHyperedge, NarrowAboveWidePreferred) {
                 TestGraph g("multi_src_order");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                NodePtr D = g.createNode("D", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);
                 HyperedgePtr e1 = findEdge(g, A, D);
                 ASSERT_NE(e1, nullptr);
                 g.addSourceToEdge(e1, C);
                 g.createTarget("F", 2, e1);
                 HyperedgePtr e2_edge = nullptr;
                 {
-                    NodePtr E = g.createNode("E", 1, B);
+                    NodePtr E = g.createNode("E", B->getLayer() + 1, 1, B);
                     e2_edge = findEdge(g, B, E);
                 }
                 runPipeline(g);
@@ -516,14 +516,14 @@ namespace hypergraph_logic {
 
             TEST(MultiSourceHyperedge, EdgeSetPreserved) {
                 TestGraph g("multi_src_set");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                NodePtr D = g.createNode("D", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);
                 HyperedgePtr e1 = findEdge(g, A, D);
                 ASSERT_NE(e1, nullptr);
                 g.addSourceToEdge(e1, C);
-                g.createNode("E", 1, B);
+                g.createNode("E", B->getLayer() + 1, 1, B);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -539,13 +539,13 @@ namespace hypergraph_logic {
 
             TEST(MultiLayer, EachLayerOptimal) {
                 TestGraph g("multi_layer");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr D = g.createNode("D", 1, A);  // e0: A->D (layer 0->1)
-                NodePtr C = g.createNode("C", 0, B);  // e1: B->C (layer 0->1)
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);  // e0: A->D (layer 0->1)
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);  // e1: B->C (layer 0->1)
                 // Layer 1->2
-                NodePtr E = g.createNode("E", 1, D);  // e2: D->E (layer 1->2)
-                NodePtr F = g.createNode("F", 0, C);  // e3: C->F (layer 1->2)
+                NodePtr E = g.createNode("E", D->getLayer() + 1, 1, D);  // e2: D->E (layer 1->2)
+                NodePtr F = g.createNode("F", C->getLayer() + 1, 0, C);  // e3: C->F (layer 1->2)
 
                 g.assignXCoordinates();
                 int bf0 = bruteForceMin(g, 0);
@@ -558,12 +558,12 @@ namespace hypergraph_logic {
 
             TEST(MultiLayer, AllEdgeSetsPreserved) {
                 TestGraph g("multi_layer_sets");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr D = g.createNode("D", 1, A);
-                NodePtr C = g.createNode("C", 0, B);
-                NodePtr E = g.createNode("E", 1, D);
-                NodePtr F = g.createNode("F", 0, C);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
+                NodePtr E = g.createNode("E", D->getLayer() + 1, 1, D);
+                NodePtr F = g.createNode("F", C->getLayer() + 1, 0, C);
                 auto orig0 = g.layers().at(0).outgoing_edges;
                 auto orig1 = g.layers().at(1).outgoing_edges;
                 runPipeline(g);
@@ -585,20 +585,20 @@ namespace hypergraph_logic {
 
             TEST(Diamond, SolveDoesNotCrash) {
                 TestGraph g("diamond");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 EXPECT_NO_THROW(runPipeline(g));
             }
 
             TEST(Diamond, AllEdgeSetsPreserved) {
                 TestGraph g("diamond_sets");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 auto orig0 = g.layers().at(0).outgoing_edges;
                 auto orig1 = g.layers().at(1).outgoing_edges;
@@ -609,10 +609,10 @@ namespace hypergraph_logic {
 
             TEST(Diamond, CrossingsOptimalBothLayers) {
                 TestGraph g("diamond_opt");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 g.assignXCoordinates();
                 int bf0 = bruteForceMin(g, 0);
@@ -635,20 +635,20 @@ namespace hypergraph_logic {
             TEST(BoundaryNodes, BoundaryNotCountedGivesZeroCrossings) {
                 TestGraph g("boundary");
                 // A and B share position 0 in layer 0 → same x after coordinates.
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, nullptr); // same position as A
-                NodePtr C = g.createNode("C", 1, A);       // e1: A->C
-                NodePtr D = g.createNode("D", 1, B);       // e2: B->D, same x as C
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 0, nullptr); // same position as A
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);       // e1: A->C
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);       // e2: B->D, same x as C
                 runPipeline(g);
                 EXPECT_EQ(totalCrossings(g, 0), 0);
             }
 
             TEST(BoundaryNodes, BruteForceMatchesMIP) {
                 TestGraph g("boundary_bf");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, nullptr);
-                g.createNode("C", 1, A);
-                g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 0, nullptr);
+                g.createNode("C", A->getLayer() + 1, 1, A);
+                g.createNode("D", B->getLayer() + 1, 1, B);
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);
                 g.orderHyperedges(0);
@@ -667,10 +667,10 @@ namespace hypergraph_logic {
                 TestGraph g("five_stress");
                 std::vector<NodePtr> src(5);
                 for (int i = 0; i < 5; ++i)
-                    src[i] = g.createNode("S" + std::to_string(i), i, nullptr);
+                    src[i] = g.createNode("S" + std::to_string(i), 0, i, nullptr);
                 // Si -> T(4-i)
                 for (int i = 0; i < 5; ++i)
-                    g.createNode("T" + std::to_string(4 - i), 0, src[i]);
+                    g.createNode("T" + std::to_string(4 - i), src[i]->getLayer() + 1, 0, src[i]);
 
                 g.assignXCoordinates();
                 int bf = bruteForceMin(g, 0);   // 5! = 120 permutations
@@ -682,9 +682,9 @@ namespace hypergraph_logic {
                 TestGraph g("five_stress_set");
                 std::vector<NodePtr> src(5);
                 for (int i = 0; i < 5; ++i)
-                    src[i] = g.createNode("S" + std::to_string(i), i, nullptr);
+                    src[i] = g.createNode("S" + std::to_string(i), 0, i, nullptr);
                 for (int i = 0; i < 5; ++i)
-                    g.createNode("T" + std::to_string(4 - i), 4 - i, src[i]);
+                    g.createNode("T" + std::to_string(4 - i), src[i]->getLayer() + 1, 4 - i, src[i]);
                 auto original = g.layers().at(0).outgoing_edges;
                 runPipeline(g);
                 checkEdgeSetPreserved(g, 0, original);
@@ -694,9 +694,9 @@ namespace hypergraph_logic {
                 TestGraph g("five_stress_transit");
                 std::vector<NodePtr> src(5);
                 for (int i = 0; i < 5; ++i)
-                    src[i] = g.createNode("S" + std::to_string(i), i, nullptr);
+                    src[i] = g.createNode("S" + std::to_string(i), 0, i, nullptr);
                 for (int i = 0; i < 5; ++i)
-                    g.createNode("T" + std::to_string(4 - i), 4 - i, src[i]);
+                    g.createNode("T" + std::to_string(4 - i), src[i]->getLayer() + 1, 4 - i, src[i]);
                 runPipeline(g);
                 checkTransitivity(g, 0);
             }

@@ -92,8 +92,8 @@ namespace hypergraph_logic {
         // Builds a simple two-node graph A->B.
         static GraphicalHypergraph makeSimpleGraph(const std::string& name) {
             GraphicalHypergraph g(name);
-            auto A = g.createNode("A", -1, nullptr);
-            g.createNode("B", -1, A);
+            auto A = g.createNode("A", 0, -1, nullptr);
+            g.createNode("B", A->getLayer() + 1, -1, A);
             g.computeLayout();
             return g;
         }
@@ -101,10 +101,10 @@ namespace hypergraph_logic {
         // Builds a three-layer chain P->Q->R with a long edge S->R (skips layer 1).
         static GraphicalHypergraph makeGraphWithLongEdge(const std::string& name) {
             GraphicalHypergraph g(name);
-            auto P = g.createNode("P", -1, nullptr);
-            auto Q = g.createNode("Q", -1, P);
-            auto R = g.createNode("R", -1, Q);
-            auto S = g.createNode("S", -1, nullptr);
+            auto P = g.createNode("P", 0, -1, nullptr);
+            auto Q = g.createNode("Q", P->getLayer() + 1, -1, P);
+            auto R = g.createNode("R", Q->getLayer() + 1, -1, Q);
+            auto S = g.createNode("S", 0, -1, nullptr);
             g.addConnection(S, R);
             g.computeLayout();
             return g;
@@ -115,7 +115,7 @@ namespace hypergraph_logic {
             const std::string& name, const std::string& node_name)
         {
             GraphicalHypergraph g(name);
-            g.createNode(node_name, -1, nullptr);
+            g.createNode(node_name, 0, -1, nullptr);
             g.computeLayout();
             return g;
         }
@@ -178,7 +178,7 @@ namespace hypergraph_logic {
         // =============================================================================
 
         TEST_F(JointTest, CreateNode_WithParent_Throws) {
-            EXPECT_THROW(joint->createNode("X", -1, nullptr), std::logic_error);
+            EXPECT_THROW(joint->createNode("X", 0, -1, nullptr), std::logic_error);
         }
 
         TEST_F(JointTest, CreateNode_IntoEdge_Throws) {
@@ -295,8 +295,8 @@ namespace hypergraph_logic {
 
             // Rename nodes to distinguish them
             GraphicalHypergraph gX("gX");
-            auto X0 = gX.createNode("X0", -1, nullptr);
-            gX.createNode("X1", -1, X0);
+            auto X0 = gX.createNode("X0", 0, -1, nullptr);
+            gX.createNode("X1", X0->getLayer() + 1, -1, X0);
             gX.computeLayout();
 
             joint->addHypergraph(g1, false);
@@ -315,13 +315,13 @@ namespace hypergraph_logic {
 
         TEST_F(JointTest, AddHypergraph_Left_MultiLayer_AllLayersPrepended) {
             GraphicalHypergraph g1("g1");
-            auto a = g1.createNode("A", -1, nullptr);
-            g1.createNode("B", -1, a);
+            auto a = g1.createNode("A", 0, -1, nullptr);
+            g1.createNode("B", a->getLayer() + 1, -1, a);
             g1.computeLayout();
 
             GraphicalHypergraph g2("g2");
-            auto x = g2.createNode("X", -1, nullptr);
-            g2.createNode("Y", -1, x);
+            auto x = g2.createNode("X", 0, -1, nullptr);
+            g2.createNode("Y", x->getLayer() + 1, -1, x);
             g2.computeLayout();
 
             joint->addHypergraph(g1, false); // A(0), B(1)
@@ -384,7 +384,7 @@ namespace hypergraph_logic {
             int node_count_before = countRealNodes(*joint);
 
             // Mutate the original — add a new node
-            g.createNode("Extra", -1, nullptr);
+            g.createNode("Extra", 0, -1, nullptr);
 
             EXPECT_EQ(countRealNodes(*joint), node_count_before)
                 << "Joint was affected by a mutation on the original graph";
@@ -610,9 +610,9 @@ namespace hypergraph_logic {
         TEST_F(JointTest, RemoveSourcesFromHyperedge_Succeeds) {
             // Build a graph where an edge has two sources, then remove one.
             GraphicalHypergraph g("g");
-            auto s1 = g.createNode("S1", -1, nullptr);
-            auto s2 = g.createNode("S2", -1, nullptr);
-            auto t = g.createNode("T", -1, s1);
+            auto s1 = g.createNode("S1", 0, -1, nullptr);
+            auto s2 = g.createNode("S2", 0, -1, nullptr);
+            auto t = g.createNode("T", s1->getLayer() + 1, -1, s1);
             g.addSourceToEdge(g.getLayerData(0).outgoing_edges.front(), s2);
             g.computeLayout();
 
@@ -636,9 +636,9 @@ namespace hypergraph_logic {
 
         TEST_F(JointTest, RemoveTargetsFromHyperedge_Succeeds) {
             GraphicalHypergraph g("g");
-            auto s = g.createNode("S", -1, nullptr);
-            auto t1 = g.createNode("T1", -1, s);
-            auto t2 = g.createNode("T2", -1, nullptr);
+            auto s = g.createNode("S", 0, -1, nullptr);
+            auto t1 = g.createNode("T1", s->getLayer() + 1, -1, s);
+            auto t2 = g.createNode("T2", 0, -1, nullptr);
             g.addTargetToEdge(g.getLayerData(0).outgoing_edges.front(), t2);
             g.computeLayout();
 

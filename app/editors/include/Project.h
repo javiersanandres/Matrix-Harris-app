@@ -29,8 +29,8 @@ namespace app_logic {
 	//   - An active index: which editor is currently displayed in the central
 	//     editing area. -1 means the joint editor is active.
 	//
-	// New diagrams are named "Diagrama nuevo", "Diagrama nuevo (1)",
-	// "Diagrama nuevo (2)", etc., with the suffix incremented to avoid
+	// New diagrams are named "Esquema nuevo", "Esquema nuevo (1)",
+	// "Esquema nuevo (2)", etc., with the suffix incremented to avoid
 	// duplicates within the current project.
 	// ============================================================================
 	class Project {

@@ -20,8 +20,8 @@ namespace app_logic {
         // ready to be moved into a HypergraphEditor.
         static GraphicalHypergraph makeTwoNodeGraph(const std::string& name) {
             GraphicalHypergraph g(name);
-            NodePtr A = g.createNode("A", 0, nullptr);
-            g.createNode("B", 0, A);
+            NodePtr A = g.createNode("A", 0, 0, nullptr);
+            g.createNode("B", A->getLayer() + 1, 0, A);
             g.computeLayout();
             return g;
         }
@@ -248,7 +248,7 @@ namespace app_logic {
                     Project p("RoundTrip");
                     p.addDiagram();
                     HypergraphEditor& ed = p.getActiveEditor();
-                    ed.createNode("A", 0, nullptr);
+                    ed.createNode("A", 0, 0, nullptr);
                     p.save(tmp);
                 }
 
@@ -325,7 +325,7 @@ namespace app_logic {
             TEST(Project, ActiveEditorCreateNodeWorks) {
                 Project p("p");
                 HypergraphEditor& ed = p.getActiveEditor();
-                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
                 EXPECT_NE(A, nullptr);
                 EXPECT_FALSE(ed.getAllNodes().empty());
             }
@@ -333,7 +333,7 @@ namespace app_logic {
             TEST(Project, ActiveEditorUndoRedoWorks) {
                 Project p("p");
                 HypergraphEditor& ed = p.getActiveEditor();
-                ed.createNode("A", 0, nullptr);
+                ed.createNode("A", 0, 0, nullptr);
                 EXPECT_TRUE(ed.canUndo());
                 ed.undo();
                 EXPECT_TRUE(ed.canRedo());
@@ -354,7 +354,7 @@ namespace app_logic {
                 HypergraphEditor& ed0 = p.getEditor(0);
 				EXPECT_FALSE(ed0.canUndo());
                 HypergraphEditor& ed1 = p.getEditor(1);
-                ed0.createNode("A", 0, nullptr);
+                ed0.createNode("A", 0, 0, nullptr);
                 // ed1's undo stack must be independent.
                 EXPECT_FALSE(ed1.canUndo());
             }

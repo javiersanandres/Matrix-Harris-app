@@ -238,43 +238,43 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, AddNodeToLayer_OutOfBoundsPositionAppendsToEnd) {
-        g.createNode("a", 0, nullptr, nullptr);
+        g.createNode("a", 0, 0, nullptr, nullptr);
         auto m = std::make_shared<Node>("m");
         g.pub_addNodeToLayer(0, 9999, m);
         EXPECT_EQ(g.getNodesAt(0).back(), m);
     }
 
     TEST_F(HypergraphInternalsTest, AddNodeToLayer_NegativePositionAppendsToEnd) {
-        g.createNode("a", 0, nullptr, nullptr);
+        g.createNode("a", 0, 0, nullptr, nullptr);
         auto m = std::make_shared<Node>("m");
         g.pub_addNodeToLayer(0, -1, m);
         EXPECT_EQ(g.getNodesAt(0).back(), m);
     }
 
     TEST_F(HypergraphInternalsTest, AddNodeToLayer_DuplicateIgnored) {
-        auto n = g.createNode("n", 0, nullptr, nullptr);
+        auto n = g.createNode("n", 0, 0, nullptr, nullptr);
         int count_before = static_cast<int>(g.getNodesAt(0).size());
         g.pub_addNodeToLayer(0, 0, n);  // already there
         EXPECT_EQ(static_cast<int>(g.getNodesAt(0).size()), count_before);
     }
 
     TEST_F(HypergraphInternalsTest, RemoveNodeFromLayer_Ptr_RemovesCorrectNode) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
         g.pub_removeNodeFromLayer(0, a);
         EXPECT_FALSE(layerContainsNode(g, 0, a));
         EXPECT_TRUE(layerContainsNode(g, 0, b));
     }
 
     TEST_F(HypergraphInternalsTest, RemoveNodeFromLayer_Ptr_NonexistentLayerNoThrow) {
-        auto n = g.createNode("n", 0, nullptr, nullptr);
+        auto n = g.createNode("n", 0, 0, nullptr, nullptr);
         EXPECT_NO_THROW(g.pub_removeNodeFromLayer(99, n));
     }
 
     TEST_F(HypergraphInternalsTest, RemoveNodeFromLayer_Set_RemovesAll) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", 0, 0, nullptr, nullptr);
         std::unordered_set<Node*> to_remove{ a.get(), b.get() };
         g.pub_removeNodeFromLayer(0, to_remove);
         EXPECT_FALSE(layerContainsNode(g, 0, a));
@@ -283,7 +283,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RemoveNodeFromLayer_Set_EmptySetNoOp) {
-        auto n = g.createNode("n", 0, nullptr, nullptr);
+        auto n = g.createNode("n", 0, 0, nullptr, nullptr);
         int count_before = static_cast<int>(g.getNodesAt(0).size());
         g.pub_removeNodeFromLayer(0, std::unordered_set<Node*>{});
         EXPECT_EQ(static_cast<int>(g.getNodesAt(0).size()), count_before);
@@ -294,8 +294,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, AddHyperedgeToLayer_CreatesLayerOnDemand) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.pub_createHyperedge({ p }, { c }, -1);
         g.pub_addHyperedgeToLayer(7, edge);
         EXPECT_EQ(edge->getLayer(), 7);
@@ -303,8 +303,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, AddHyperedgeToLayer_DuplicateIgnored) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         int count_before = countEdgesInLayer(g, 0);
         auto edge = g.getLayerData(0).outgoing_edges.front();
         g.pub_addHyperedgeToLayer(0, edge);  // already in layer 0
@@ -312,8 +312,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RemoveHyperedgeFromLayer_Ptr_SetsLayerToMinusOne) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.getLayerData(0).outgoing_edges.front();
         g.pub_removeHyperedgeFromLayer(0, edge);
         EXPECT_EQ(countEdgesInLayer(g, 0), 0);
@@ -321,9 +321,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RemoveHyperedgeFromLayer_Set_RemovesAll) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        g.createNode("a", 0, r);
-        g.createNode("b", 0, r);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        g.createNode("a", r->getLayer() + 1, 0, r);
+        g.createNode("b", r->getLayer() + 1, 0, r);
         ASSERT_GE(countEdgesInLayer(g, 0), 2);
         std::unordered_set<Hyperedge*> to_remove;
         for (const auto& e : g.getLayerData(0).outgoing_edges)
@@ -333,8 +333,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RemoveHyperedgeFromLayer_NonexistentLayerNoThrow) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.getLayerData(0).outgoing_edges.front();
         EXPECT_NO_THROW(g.pub_removeHyperedgeFromLayer(99, edge));
     }
@@ -344,8 +344,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, CreateHyperedge_NonSegment_RegisteredAsOriginal) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", 0, 0, nullptr, nullptr);
         auto edge = g.pub_createHyperedge({ p }, { c }, -1);
         EXPECT_FALSE(edge->isSegment());
         bool found = false;
@@ -354,8 +354,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CreateHyperedge_WithLayer_RegisteredInLayerData) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", 0, 0, nullptr, nullptr);
         auto edge = g.pub_createHyperedge({ p }, { c }, 0);
         EXPECT_EQ(edge->getLayer(), 0);
         auto& edges = g.getLayerData(0).outgoing_edges;
@@ -363,7 +363,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CreateHyperedge_WiresParentChildLinks) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto c = std::make_shared<Node>("c");
         g.rawNodes().push_back(c);
         g.pub_addNodeToLayer(1, -1, c);
@@ -375,10 +375,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, GetAllHyperedges_IncludesSegments) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n2);  // creates segments
         auto all = g.getAllHyperedges();
         bool has_segment = false;
@@ -392,14 +392,14 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, EdgeIsShort_AdjacentLayers_ReturnsSourceLayer) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.getLayerData(0).outgoing_edges.front();
         EXPECT_EQ(g.pub_edgeIsShort(edge), 0);
     }
 
     TEST_F(HypergraphInternalsTest, EdgeIsShort_LongEdge_ReturnsMinusOne) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto c = std::make_shared<Node>("c");
         g.rawNodes().push_back(c);
         g.pub_addNodeToLayer(2, -1, c);
@@ -417,16 +417,16 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, GetLayerCount_CorrectAfterNodeCreation) {
         EXPECT_EQ(g.getLayerCount(), 0);
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         EXPECT_EQ(g.getLayerCount(), 1);
-        auto c = g.createNode("c", 0, p);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         EXPECT_EQ(g.getLayerCount(), 2);
     }
 
     TEST_F(HypergraphInternalsTest, GetNodesAt_ReturnsCorrectNodes) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
         auto layer0 = g.getNodesAt(0);
         EXPECT_NE(std::find(layer0.begin(), layer0.end(), a), layer0.end());
         EXPECT_NE(std::find(layer0.begin(), layer0.end(), b), layer0.end());
@@ -439,8 +439,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, GetAllNodes_ReturnsEveryNode) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
         auto all = g.getAllNodes();
         EXPECT_EQ(all.size(), 2u);
         EXPECT_NE(std::find(all.begin(), all.end(), a), all.end());
@@ -454,8 +454,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, GetLayers_ReturnsAllLayers) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         const auto& layers = g.getLayers();
         EXPECT_EQ(layers.size(), 2u);
         EXPECT_NE(layers.find(0), layers.end());
@@ -467,10 +467,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_TwoLayerGap_CreatesDummies) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         auto edge = g.pub_createHyperedge({ r2 }, { n2 }, -1);
         r2->addChild(n2); n2->addParent(r2);
         g.pub_splitLongEdge(edge);
@@ -480,10 +480,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_AlreadySplit_ReSplitsCleanly) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n2);  // first split
         int seg_before = countSegmentEdges(g);
         auto edge = findOriginalEdgeWithSource(g, r2);
@@ -495,10 +495,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_SegmentsLinkedToOriginal) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         auto edge = g.pub_createHyperedge({ r2 }, { n2 }, -1);
         r2->addChild(n2); n2->addParent(r2);
         g.pub_splitLongEdge(edge);
@@ -509,8 +509,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_ShortEdge_NoChange) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.getLayerData(0).outgoing_edges.front();
         int segs_before = countSegmentEdges(g);
         g.pub_splitLongEdge(edge);  // should do nothing
@@ -526,11 +526,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // dissolving and rebuilding the whole chain from scratch every time.
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_ReSplitWithNoStructuralChange_PreservesAllIdentities) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n3); // splits into segments at layers 0,1,2 with dummies at 1,2
 
         auto edge = findOriginalEdgeWithSource(g, r2);
@@ -557,11 +557,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_ResplitAfterRelocationDeepens_ReusesUnaffectedShallowChain) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n3); // r2 -> n3, segments at layers 0,1,2; dummies at 1,2
 
         auto edge = findOriginalEdgeWithSource(g, r2);
@@ -607,13 +607,13 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_ResplitAfterShrink_RemovesOnlyStaleSegmentsAndDummies) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto n4 = g.createNode("n4", 0, n3);
-        auto n5 = g.createNode("n5", 0, n4);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto n4 = g.createNode("n4", n3->getLayer() + 1, 0, n3);
+        auto n5 = g.createNode("n5", n4->getLayer() + 1, 0, n4);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
 
         auto edge = g.pub_createHyperedge({ r2 }, { n5 }, -1);
         r2->addChild(n5); n5->addParent(r2);
@@ -729,10 +729,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, DissolveSegments_CleansUpDummiesAndSegments) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n2);
         ASSERT_GT(countSegmentEdges(g), 0);
         ASSERT_GT(countDummyNodesInLayer(g, 1), 0);
@@ -745,10 +745,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, DissolveSegments_EmptySetNoOp) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n2);
         int seg_before = countSegmentEdges(g);
         g.pub_dissolveSegments({});
@@ -756,10 +756,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, DissolveSegments_OriginalEdgeSurvives) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n2);
         auto orig = findOriginalEdgeWithSource(g, r2);
         ASSERT_NE(orig, nullptr);
@@ -774,10 +774,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, RelocationPropagates_DescendantsFollowNode) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, root);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", root->getLayer() + 1, 0, root);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
         g.pub_applyRelocationAndPropagate(n1, 2);
         EXPECT_EQ(n1->getLayer(), 2);
         EXPECT_EQ(n2->getLayer(), 3);
@@ -786,8 +786,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RelocationSplitsEdgeIfNecessary) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, root);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", root->getLayer() + 1, 0, root);
         g.pub_applyRelocationAndPropagate(n1, 3);
         EXPECT_GE(countDummyNodesInLayer(g, 1), 1);
         EXPECT_GE(countDummyNodesInLayer(g, 2), 1);
@@ -796,8 +796,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RelocationCleansUpEmptyLayers) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, root);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", root->getLayer() + 1, 0, root);
         g.pub_applyRelocationAndPropagate(n1, 2);
         // Layer 1 should only contain dummies (from re-split) or be absent
         for (const auto& n : g.getNodesAt(1))
@@ -805,10 +805,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, BatchRelocation_MultipleNodesAtOnce) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto ac = g.createNode("ac", 0, a);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
-        auto bc = g.createNode("bc", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto ac = g.createNode("ac", a->getLayer() + 1, 0, a);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
+        auto bc = g.createNode("bc", b->getLayer() + 1, 0, b);
         g.pub_applyRelocationAndPropagate({ {ac, 3}, {bc, 3} });
         EXPECT_EQ(ac->getLayer(), 3);
         EXPECT_EQ(bc->getLayer(), 3);
@@ -825,15 +825,15 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RelocateNodes_CorrectLayer_ReturnsFalse) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         // c is already at correct layer
         EXPECT_FALSE(g.pub_relocateNodes({ c }));
     }
 
     TEST_F(HypergraphInternalsTest, RelocateNodes_WrongLayer_ReturnsTrue_AndMoves) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         // manually push c to wrong layer
         g.pub_removeNodeFromLayer(1, c);
         g.pub_addNodeToLayer(3, -1, c);
@@ -846,45 +846,45 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, ParentIsInAncestors_DirectParent) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         EXPECT_TRUE(g.pub_parentIsInAncestors(c, p));
     }
 
     TEST_F(HypergraphInternalsTest, ParentIsInAncestors_IndirectAncestor) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
         EXPECT_TRUE(g.pub_parentIsInAncestors(c, a));
     }
 
     TEST_F(HypergraphInternalsTest, ParentIsInAncestors_UnrelatedNode) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
         EXPECT_FALSE(g.pub_parentIsInAncestors(b, a));
     }
 
     TEST_F(HypergraphInternalsTest, ParentIsInAncestors_NullInputs) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         EXPECT_FALSE(g.pub_parentIsInAncestors(nullptr, a));
         EXPECT_FALSE(g.pub_parentIsInAncestors(a, nullptr));
     }
 
     TEST_F(HypergraphInternalsTest, ParentIsInAncestors_DeepChain) {
-        NodePtr prev = g.createNode("n0", 0, nullptr, nullptr);
+        NodePtr prev = g.createNode("n0", 0, 0, nullptr, nullptr);
         NodePtr root = prev;
         for (int i = 1; i < 10; ++i)
-            prev = g.createNode("n" + std::to_string(i), 0, prev);
+            prev = g.createNode("n" + std::to_string(i), prev ? prev->getLayer() + 1 : 0, 0, prev);
         EXPECT_TRUE(g.pub_parentIsInAncestors(prev, root));
     }
 
     TEST_F(HypergraphInternalsTest, ParentIsInAncestors_VectorShortCircuits) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c1 = g.createNode("c1", 0, p);
-        auto c2 = g.createNode("c2", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c1 = g.createNode("c1", p->getLayer() + 1, 0, p);
+        auto c2 = g.createNode("c2", 0, 0, nullptr, nullptr);
         EXPECT_TRUE(g.pub_parentIsInAncestors({ c1, c2 }, p));
-        auto x = g.createNode("x", 0, nullptr, nullptr);
-        auto y = g.createNode("y", 0, nullptr, nullptr);
+        auto x = g.createNode("x", 0, 0, nullptr, nullptr);
+        auto y = g.createNode("y", 0, 0, nullptr, nullptr);
         EXPECT_FALSE(g.pub_parentIsInAncestors({ x, y }, p));
     }
 
@@ -893,34 +893,34 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, ChildIsInDescendants_DirectChild) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         EXPECT_TRUE(g.pub_childIsInDescendants({ p }, c));
     }
 
     TEST_F(HypergraphInternalsTest, ChildIsInDescendants_IndirectDescendant) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
         EXPECT_TRUE(g.pub_childIsInDescendants({ a }, c));
     }
 
     TEST_F(HypergraphInternalsTest, ChildIsInDescendants_UnrelatedNode) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
         EXPECT_FALSE(g.pub_childIsInDescendants({ a }, b));
     }
 
     TEST_F(HypergraphInternalsTest, ChildIsInDescendants_NullInputs) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         EXPECT_FALSE(g.pub_childIsInDescendants({ a }, nullptr));
         EXPECT_FALSE(g.pub_childIsInDescendants({}, a));
     }
 
     TEST_F(HypergraphInternalsTest, ChildIsInDescendants_Symmetry_WithParentIsInAncestors) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
         EXPECT_EQ(g.pub_parentIsInAncestors(c, a), g.pub_childIsInDescendants({ a }, c));
         EXPECT_EQ(g.pub_parentIsInAncestors(a, c), g.pub_childIsInDescendants({ c }, a));
     }
@@ -930,40 +930,40 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, CheckCycles_NoCycle_SimpleDAG) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
         EXPECT_FALSE(g.pub_checkCycles(a));
         EXPECT_FALSE(g.pub_checkCycles(b));
     }
 
     TEST_F(HypergraphInternalsTest, CheckCycles_DirectCycleDetected) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
         b->addChild(a);
         a->addParent(b);
         EXPECT_TRUE(g.pub_checkCycles(a));
     }
 
     TEST_F(HypergraphInternalsTest, CheckCycles_LongCycleDetected) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
-        auto d = g.createNode("d", 0, c);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
+        auto d = g.createNode("d", c->getLayer() + 1, 0, c);
         d->addChild(a);
         a->addParent(d);
         EXPECT_TRUE(g.pub_checkCycles(a));
     }
 
     TEST_F(HypergraphInternalsTest, CheckCycles_IsolatedNode_NoCycle) {
-        auto n = g.createNode("n", 0, nullptr, nullptr);
+        auto n = g.createNode("n", 0, 0, nullptr, nullptr);
         EXPECT_FALSE(g.pub_checkCycles(n));
     }
 
     TEST_F(HypergraphInternalsTest, CheckCycles_DiamondDAG_NoCycle) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, a);
-        auto d = g.createNode("d", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
+        auto d = g.createNode("d", b->getLayer() + 1, 0, b);
         g.addConnection(c, d);
         EXPECT_FALSE(g.pub_checkCycles(a));
     }
@@ -973,17 +973,17 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, GetAllAncestors_SingleNode_DirectParent) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto ancestors = g.pub_getAllAncestors({ c });
         EXPECT_TRUE(ancestors.count(p.get()));
         EXPECT_FALSE(ancestors.count(c.get())) << "Node should not be its own ancestor";
     }
 
     TEST_F(HypergraphInternalsTest, GetAllAncestors_DeepChain) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
         auto ancestors = g.pub_getAllAncestors({ c });
         EXPECT_TRUE(ancestors.count(a.get()));
         EXPECT_TRUE(ancestors.count(b.get()));
@@ -995,9 +995,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, GetAllAncestors_MultipleStartNodes_Union) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto a = g.createNode("a", 0, r);
-        auto b = g.createNode("b", 0, r);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto a = g.createNode("a", r->getLayer() + 1, 0, r);
+        auto b = g.createNode("b", r->getLayer() + 1, 0, r);
         // Both a and b share ancestor r
         auto ancestors = g.pub_getAllAncestors({ a, b });
         EXPECT_TRUE(ancestors.count(r.get()));
@@ -1006,17 +1006,17 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, GetAllDescendants_SingleNode_DirectChild) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto desc = g.pub_getAllDescendants({ p });
         EXPECT_TRUE(desc.count(c.get()));
         EXPECT_FALSE(desc.count(p.get())) << "Node should not be its own descendant";
     }
 
     TEST_F(HypergraphInternalsTest, GetAllDescendants_DeepChain) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
         auto desc = g.pub_getAllDescendants({ a });
         EXPECT_TRUE(desc.count(b.get()));
         EXPECT_TRUE(desc.count(c.get()));
@@ -1032,9 +1032,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, RemoveTransitiveConnections_RemovesRedundantEdge) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, a);  // a->c
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);  // a->c
         g.addConnection(a, b);             // a->b (b moves to layer 1)
         g.addConnection(b, c);             // b->c; now a->c is transitive
         // The transitive removal should have happened inside addConnection,
@@ -1048,9 +1048,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RemoveTransitiveConnections_PreservesNonRedundantEdge) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
         g.addConnection(b, c);
         bool ab_exists = false;
         for (const auto& e : g.getAllHyperedges())
@@ -1064,21 +1064,21 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, ResolveTargetLayer_NoParentsNoOverride_ReturnsZero) {
-        auto n = g.createNode("n", 0, nullptr, nullptr);
+        auto n = g.createNode("n", 0, 0, nullptr, nullptr);
         EXPECT_EQ(g.pub_resolveTargetLayer(n), 0);
         EXPECT_EQ(n->getDesiredLayer(), -1);
     }
 
     TEST_F(HypergraphInternalsTest, ResolveTargetLayer_WithParent_ReturnsParentLayerPlusOne) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         EXPECT_EQ(g.pub_resolveTargetLayer(c), 1);
     }
 
     TEST_F(HypergraphInternalsTest, ResolveTargetLayer_MultipleParents_UsesDeepest) {
-        auto p1 = g.createNode("p1", 0, nullptr, nullptr);
-        auto p2 = g.createNode("p2", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p1);
+        auto p1 = g.createNode("p1", 0, 0, nullptr, nullptr);
+        auto p2 = g.createNode("p2", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p1->getLayer() + 1, 0, p1);
         g.addConnection(p2, c);
         // Push p2 deeper so it becomes the binding parent for c's depth rule.
         g.relocateNodeToLayer(p2, 4);
@@ -1086,8 +1086,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResolveTargetLayer_ActiveOverrideDeeperThanDepthRule_Honoured) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         g.relocateNodeToLayer(c, 3);
         ASSERT_EQ(c->getDesiredLayer(), 2);
         EXPECT_EQ(g.pub_resolveTargetLayer(c), 2);
@@ -1095,8 +1095,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResolveTargetLayer_OverrideCaughtUpByDeepenedParent_ClearsOverride) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p); // depth rule 1
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p); // depth rule 1
         g.relocateNodeToLayer(c, 3);      // override = 3
         // Manually deepen p to exactly the layer that makes the natural depth rule equal 3.
         g.pub_removeNodeFromLayer(p->getLayer(), p);
@@ -1106,8 +1106,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResolveTargetLayer_OverrideInvalidatedByDeeperParent_ClearsAndReturnsNewDepthRule) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p); // depth rule 1
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p); // depth rule 1
         g.relocateNodeToLayer(c, 3);      // override = 3
         // Manually push p past the override, so the depth rule now exceeds it.
         g.pub_removeNodeFromLayer(p->getLayer(), p);
@@ -1126,8 +1126,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RenumberLayersFrom_ShiftsLayersAtOrAfterUpByOne) {
-        auto a = g.createNode("a", 0, nullptr, nullptr); // layer 0
-        auto b = g.createNode("b", 0, a);       // layer 1
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr); // layer 0
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);       // layer 1
         g.pub_renumberLayersFrom(0);
         EXPECT_EQ(a->getLayer(), 1);
         EXPECT_EQ(b->getLayer(), 2);
@@ -1137,9 +1137,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RenumberLayersFrom_LeavesLayersBelowFromLayerUntouched) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
         g.pub_renumberLayersFrom(1); // shift everything >= 1
         EXPECT_EQ(a->getLayer(), 0); // untouched
         EXPECT_EQ(b->getLayer(), 2);
@@ -1150,15 +1150,15 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         // Documents the current contract: renumberLayersFrom shifts existing content out of
         // the way but does not, by itself, guarantee from_layer exists afterward if nothing
         // was already at or below it to leave behind.
-        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         g.pub_renumberLayersFrom(0);
         EXPECT_EQ(g.getLayerCount(), 1); // only the shifted layer (1) exists
         EXPECT_TRUE(g.getNodesAt(0).empty());
     }
 
     TEST_F(HypergraphInternalsTest, RenumberLayersFrom_UpdatesOutgoingEdgeLayer) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
         auto edge = findOriginalEdgeWithSource(g, a);
         ASSERT_NE(edge, nullptr);
         ASSERT_EQ(edge->getLayer(), 0);
@@ -1167,8 +1167,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RenumberLayersFrom_PreservesActiveOverrideValue) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         g.relocateNodeToLayer(c, 3);
         g.relocateNodeToLayer(c, 3);
         ASSERT_EQ(c->getDesiredLayer(), 3);
@@ -1187,15 +1187,15 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CompactLayerNumbers_AlreadyDense_NoOp) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
         g.pub_compactLayerNumbers();
         EXPECT_EQ(a->getLayer(), 0);
         EXPECT_EQ(b->getLayer(), 1);
     }
 
     TEST_F(HypergraphInternalsTest, CompactLayerNumbers_ClosesGap_RelabelsToZeroBasedRank) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         g.pub_removeNodeFromLayer(0, a);
         g.pub_addNodeToLayer(5, -1, a); // a now sits alone at layer 5, a gap from 0
         ASSERT_EQ(g.getLayerCount(), 2);
@@ -1206,7 +1206,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CompactLayerNumbers_MultipleGaps_PreservesRelativeOrder) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         g.pub_removeNodeFromLayer(0, a);
         g.pub_addNodeToLayer(3, -1, a);
         auto b = std::make_shared<Node>("b");
@@ -1218,8 +1218,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CompactLayerNumbers_LeavesAlreadyDensePrefixUntouched) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         g.relocateNodeToLayer(c, 3); // dense range {0,1,2,3} after the dummy-chain split
         g.relocateNodeToLayer(c, 3); // dense range {0,1,2,3} after the dummy-chain split
         ASSERT_EQ(c->getLayer(), 3);
@@ -1242,8 +1242,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, ChoosePositionForRelocatedNode_BaseClassDefault_AlwaysAppends) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
         EXPECT_EQ(g.pub_choosePositionForRelocatedNode(0, a), -1);
         EXPECT_EQ(g.pub_choosePositionForRelocatedNode(7, b), -1);
     }
@@ -1257,7 +1257,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CleanUp_ErasesEmptyLayerAndRecompacts) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         g.pub_removeNodeFromLayer(0, a);
         g.pub_addNodeToLayer(5, -1, a); // layer 0 now empty of nodes and edges; gap to 5
         g.pub_cleanUp();
@@ -1266,8 +1266,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CleanUp_DoesNotEraseNonEmptyLayer) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
         g.pub_cleanUp();
         EXPECT_EQ(g.getLayerCount(), 2);
         EXPECT_TRUE(layerContainsNode(g, 0, a));
@@ -1299,7 +1299,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, AddNodeToLayer_DuplicateInSameLayer_DoesNotReport) {
-        auto n = g.createNode("n", 0, nullptr, nullptr);
+        auto n = g.createNode("n", 0, 0, nullptr, nullptr);
         int min_new_layer = INT_MAX;
         g.pub_addNodeToLayer(0, -1, n, &min_new_layer); // already there; early-return dedup
         EXPECT_EQ(min_new_layer, INT_MAX);
@@ -1316,7 +1316,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, CreateHyperedge_PlacedAtRealLayer_Reports) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto c = std::make_shared<Node>("c");
         g.rawNodes().push_back(c);
         g.pub_addNodeToLayer(1, -1, c);
@@ -1326,7 +1326,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CreateHyperedge_UnplacedLayerNegative_DoesNotReport) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto c = std::make_shared<Node>("c");
         g.rawNodes().push_back(c);
         std::set<int> altered;
@@ -1347,8 +1347,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, AddHyperedgeToLayer_NewPlacement_Reports) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.pub_createHyperedge({ p }, { c }, -1); // not placed yet
         std::set<int> altered;
         g.pub_addHyperedgeToLayer(0, edge, &altered);
@@ -1356,8 +1356,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, AddHyperedgeToLayer_AlreadyThere_DedupDoesNotReport) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = findOriginalEdgeWithSource(g, p);
         ASSERT_NE(edge, nullptr);
         ASSERT_EQ(edge->getLayer(), 0);
@@ -1431,7 +1431,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_FreshSplit_ReportsAllNewDummyAndSegmentLayers) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
         auto n = std::make_shared<Node>("n");
         g.rawNodes().push_back(n);
         g.pub_addNodeToLayer(4, -1, n); // r at 0, n at 4: needs dummies at 1,2,3
@@ -1444,7 +1444,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_IdenticalResplit_ReusesEverythingAndReportsNothing) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
         auto n = std::make_shared<Node>("n");
         g.rawNodes().push_back(n);
         g.pub_addNodeToLayer(3, -1, n);
@@ -1460,7 +1460,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SplitLongEdge_ShrinkingIntoShort_DoesNotReportStaleTeardown) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
         auto n = std::make_shared<Node>("n");
         g.rawNodes().push_back(n);
         g.pub_addNodeToLayer(4, -1, n);
@@ -1482,8 +1482,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, SettleEdgePlacement_ShortEdge_ReportsItsLayerOnly) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = g.pub_createHyperedge({ p }, { c }, -1);
         int min_new_layer = INT_MAX;
         std::set<int> altered;
@@ -1494,7 +1494,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, SettleEdgePlacement_LongEdge_ReportsBothOutParams) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto n = std::make_shared<Node>("n");
         g.rawNodes().push_back(n);
         g.pub_addNodeToLayer(3, -1, n);
@@ -1508,7 +1508,7 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, CollapseToShortLayer_Reports) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto n = std::make_shared<Node>("n");
         g.rawNodes().push_back(n);
         g.pub_addNodeToLayer(3, -1, n);
@@ -1522,8 +1522,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResettleEdge_NothingChanged_DoesNotReport) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = findOriginalEdgeWithSource(g, p);
         ASSERT_NE(edge, nullptr);
         ASSERT_EQ(edge->getLayer(), 0);
@@ -1533,8 +1533,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResettleEdge_BecomesLong_ReportsBothOutParams) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
-        auto c = g.createNode("c", 0, p);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
+        auto c = g.createNode("c", p->getLayer() + 1, 0, p);
         auto edge = findOriginalEdgeWithSource(g, p);
         ASSERT_NE(edge, nullptr);
         // Manually push c deeper, as if some relocation elsewhere already moved it.
@@ -1553,8 +1553,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // =============================================================================
 
     TEST_F(HypergraphInternalsTest, RelocateNodes_ReportsShallowestTouchedLayer) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, root);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", root->getLayer() + 1, 0, root);
         g.pub_removeNodeFromLayer(1, n1);
         g.pub_addNodeToLayer(4, -1, n1); // wrong layer w.r.t. the depth rule; forces relocation
         int min_new_layer = INT_MAX;
@@ -1565,8 +1565,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RelocateNodes_NoMoveNeeded_DoesNotReport) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, root);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", root->getLayer() + 1, 0, root);
         int min_new_layer = INT_MAX;
         std::set<int> altered;
         bool moved = g.pub_relocateNodes({ n1 }, &min_new_layer, &altered);
@@ -1576,9 +1576,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ApplyRelocationAndPropagate_CascadeReportsThroughDescendants) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, root);
-        auto n2 = g.createNode("n2", 0, n1);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", root->getLayer() + 1, 0, root);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
         int min_new_layer = INT_MAX;
         std::set<int> altered;
         g.pub_applyRelocationAndPropagate(n1, 4, &min_new_layer, &altered); // forces n2 to cascade to 5
@@ -1588,9 +1588,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, RemoveTransitiveConnections_IsVoidAndReportsSplitOfTrimmedEdge) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);   // a->b, b at layer 1
-        auto c = g.createNode("c", 0, b);   // b->c, c at layer 2; a->c would be transitively redundant
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);   // a->b, b at layer 1
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);   // b->c, c at layer 2; a->c would be transitively redundant
         auto d = std::make_shared<Node>("d");
         g.rawNodes().push_back(d);
         g.pub_addNodeToLayer(5, -1, d);      // unrelated, deep, non-redundant target
@@ -1611,11 +1611,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // Exactly the connections in A u B must go, every other one must survive exactly once, and
     // no trimmed edge may reintroduce a connection of either block.
     TEST_F(HypergraphInternalsTest, RemoveConnectionPairs_OverlappingBlocksOnOneHyperedge) {
-        auto s1 = g.createNode("s1", 0, nullptr, nullptr);
-        auto s2 = g.createNode("s2", 1, nullptr, nullptr);
-        auto t2 = g.createNode("t2", 2, nullptr, nullptr);
-        auto t3 = g.createNode("t3", 3, nullptr, nullptr);
-        auto t1 = g.createNode("t1", 0, s1);
+        auto s1 = g.createNode("s1", 0, 0, nullptr, nullptr);
+        auto s2 = g.createNode("s2", 0, 1, nullptr, nullptr);
+        auto t2 = g.createNode("t2", 0, 2, nullptr, nullptr);
+        auto t3 = g.createNode("t3", 0, 3, nullptr, nullptr);
+        auto t1 = g.createNode("t1", s1->getLayer() + 1, 0, s1);
         auto find = [&](const NodePtr& s, const NodePtr& t) -> HyperedgePtr {
             for (const auto& e : g.getAllHyperedges())
                 if (!e->isSegment() && edgeHasSource(e, s) && edgeHasTarget(e, t)) return e;
@@ -1660,19 +1660,19 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResolveOwnRedundantTargets_PointerSignature_ReportsOnDissolveAndReplace) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto target = std::make_shared<Node>("target");
         g.rawNodes().push_back(target);
         g.pub_addNodeToLayer(5, -1, target);
-        auto b = g.createNode("b", 0, target); // b is target's child, placed at layer 6
+        auto b = g.createNode("b", target->getLayer() + 1, 0, target); // b is target's child, placed at layer 6
 
         auto edge = g.pub_createHyperedge({ p }, { b }, -1); // p->b; b entirely redundant once target reaches it
 
-        auto n0 = g.createNode("n0", -1, nullptr);
-        auto n1 = g.createNode("n1", -1, n0);
-        auto n2 = g.createNode("n1", -1, n1);
-        auto n3 = g.createNode("n1", -1, n2);
-        auto n4 = g.createNode("n1", -1, n3);
+        auto n0 = g.createNode("n0", 0, -1, nullptr);
+        auto n1 = g.createNode("n1", n0->getLayer() + 1, -1, n0);
+        auto n2 = g.createNode("n1", n1->getLayer() + 1, -1, n1);
+        auto n3 = g.createNode("n1", n2->getLayer() + 1, -1, n2);
+        auto n4 = g.createNode("n1", n3->getLayer() + 1, -1, n3);
         g.addConnection(n4, target);
 
         int min_new_layer = INT_MAX;
@@ -1687,12 +1687,12 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, ResolveOwnRedundantTargets_PartialSurvival_ReturnsNullptr) {
-        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, 0, nullptr, nullptr);
         auto target = std::make_shared<Node>("target");
         g.rawNodes().push_back(target);
         g.pub_addNodeToLayer(5, -1, target);
-        auto b = g.createNode("b", 0, target);   // redundant given target
-        auto e = g.createNode("e", 0, p);        // unrelated to target, survives
+        auto b = g.createNode("b", target->getLayer() + 1, 0, target);   // redundant given target
+        auto e = g.createNode("e", p->getLayer() + 1, 0, p);        // unrelated to target, survives
 
         auto edge = g.pub_createHyperedge({ p }, { b, e }, -1);
 
@@ -1707,13 +1707,13 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // ---- splitLongEdge extreme cases ----------------------------------------------
 
     TEST_F(HypergraphInternalsTest, Stress_SplitLongEdge_FiveLayerGap) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto n4 = g.createNode("n4", 0, n3);
-        auto n5 = g.createNode("n5", 0, n4);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto n4 = g.createNode("n4", n3->getLayer() + 1, 0, n3);
+        auto n5 = g.createNode("n5", n4->getLayer() + 1, 0, n4);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
 
         // Create a long edge spanning 5 layers
         auto edge = g.pub_createHyperedge({ r2 }, { n5 }, -1);
@@ -1729,13 +1729,13 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, Stress_SplitLongEdge_MultipleSourcesMultipleTargets) {
         // Two sources at layer 0, two targets at layer 3
-        auto s1 = g.createNode("s1", 0, nullptr, nullptr);
-        auto s2 = g.createNode("s2", 0, nullptr, nullptr);
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto m1 = g.createNode("m1", 0, r);
-        auto m2 = g.createNode("m2", 0, m1);
-        auto t1 = g.createNode("t1", 0, m2);
-        auto t2 = g.createNode("t2", 0, m2);
+        auto s1 = g.createNode("s1", 0, 0, nullptr, nullptr);
+        auto s2 = g.createNode("s2", 0, 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto m1 = g.createNode("m1", r->getLayer() + 1, 0, r);
+        auto m2 = g.createNode("m2", m1->getLayer() + 1, 0, m1);
+        auto t1 = g.createNode("t1", m2->getLayer() + 1, 0, m2);
+        auto t2 = g.createNode("t2", m2->getLayer() + 1, 0, m2);
 
         auto edge = g.pub_createHyperedge({ s1, s2 }, { t1, t2 }, -1);
         s1->addChild(t1); s1->addChild(t2);
@@ -1756,11 +1756,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_SplitAndReSplit_DummiesCleaned) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n3);
 
         int dummies_before = 0;
@@ -1783,11 +1783,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // ---- dissolveSegments extreme cases -------------------------------------------
 
     TEST_F(HypergraphInternalsTest, Stress_DissolveSegments_MultipleLongEdgesAtOnce) {
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
-        auto r3 = g.createNode("r3", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
+        auto r3 = g.createNode("r3", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n2);
         g.addConnection(r3, n2);
 
@@ -1809,10 +1809,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, Stress_BatchRelocation_DiamondDAG) {
         // a->b, a->c, b->d, c->d; batch-relocate b and c simultaneously
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, a);
-        auto d = g.createNode("d", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
+        auto d = g.createNode("d", b->getLayer() + 1, 0, b);
         g.addConnection(c, d);
 
         // Force b and c to relocate to layer 3
@@ -1828,13 +1828,13 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, Stress_RelocationPropagates_WideBranchingTree) {
         // root -> a, b, c, d each with two children; relocate root's direct children
-        auto root = g.createNode("root", 0, nullptr, nullptr);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
         std::vector<NodePtr> mids, leaves;
         for (int i = 0; i < 4; i++) {
-            auto m = g.createNode("m" + std::to_string(i), 0, root);
+            auto m = g.createNode("m" + std::to_string(i), root->getLayer() + 1, 0, root);
             mids.push_back(m);
-            leaves.push_back(g.createNode("l" + std::to_string(i * 2), 0, m));
-            leaves.push_back(g.createNode("l" + std::to_string(i * 2 + 1), 0, m));
+            leaves.push_back(g.createNode("l" + std::to_string(i * 2), m->getLayer() + 1, 0, m));
+            leaves.push_back(g.createNode("l" + std::to_string(i * 2 + 1), m->getLayer() + 1, 0, m));
         }
 
         // Relocate all mids to layer 3 (normally at layer 1)
@@ -1854,11 +1854,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, Stress_RelocationAfterLongEdge_AllInvariants) {
         // Build r->n1->n2->n3; add long edge r2->n3; then relocate n1
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
         g.addConnection(r2, n3);
 
         // Now relocate n1 deeper (to layer 3)
@@ -1875,21 +1875,21 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // ---- parentIsInAncestors / childIsInDescendants: extreme cases ----------------
 
     TEST_F(HypergraphInternalsTest, Stress_ParentIsInAncestors_VeryDeepChain_RootFound) {
-        NodePtr prev = g.createNode("n0", 0, nullptr, nullptr);
+        NodePtr prev = g.createNode("n0", 0, 0, nullptr, nullptr);
         NodePtr root = prev;
         for (int i = 1; i < 50; i++)
-            prev = g.createNode("n" + std::to_string(i), 0, prev);
+            prev = g.createNode("n" + std::to_string(i), prev ? prev->getLayer() + 1 : 0, 0, prev);
         EXPECT_TRUE(g.pub_parentIsInAncestors(prev, root));
         EXPECT_FALSE(g.pub_parentIsInAncestors(root, prev));
     }
 
     TEST_F(HypergraphInternalsTest, Stress_ParentIsInAncestors_WideDiamond) {
         // one root -> 10 mid nodes -> one sink; root should be ancestor of sink
-        auto root = g.createNode("root", 0, nullptr, nullptr);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
         std::vector<NodePtr> mids;
         for (int i = 0; i < 10; i++)
-            mids.push_back(g.createNode("m" + std::to_string(i), 0, root));
-        auto sink = g.createNode("sink", 0, mids[0]);
+            mids.push_back(g.createNode("m" + std::to_string(i), root->getLayer() + 1, 0, root));
+        auto sink = g.createNode("sink", mids[0]->getLayer() + 1, 0, mids[0]);
         for (int i = 1; i < 10; i++) g.addConnection(mids[i], sink);
 
         EXPECT_TRUE(g.pub_parentIsInAncestors(sink, root));
@@ -1897,14 +1897,14 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_ChildIsInDescendants_BranchingTree_AllLeaves) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
         std::vector<NodePtr> leaves;
         std::vector<NodePtr> current{ root };
         for (int depth = 0; depth < 3; depth++) {
             std::vector<NodePtr> next;
             for (const auto& p : current) {
                 for (int i = 0; i < 3; i++) {
-                    auto c = g.createNode("n", 0, p);
+                    auto c = g.createNode("n", p->getLayer() + 1, 0, p);
                     next.push_back(c);
                     if (depth == 2) leaves.push_back(c);
                 }
@@ -1919,10 +1919,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // ---- getAllAncestors / getAllDescendants extreme cases -------------------------
 
     TEST_F(HypergraphInternalsTest, Stress_GetAllAncestors_DiamondDAG_NoDuplicates) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, a);
-        auto d = g.createNode("d", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
+        auto d = g.createNode("d", b->getLayer() + 1, 0, b);
         g.addConnection(c, d);  // d has two parents
 
         auto ancestors = g.pub_getAllAncestors({ d });
@@ -1934,10 +1934,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_GetAllDescendants_DiamondDAG_NoDuplicates) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, a);
-        auto d = g.createNode("d", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
+        auto d = g.createNode("d", b->getLayer() + 1, 0, b);
         g.addConnection(c, d);
 
         auto desc = g.pub_getAllDescendants({ a });
@@ -1948,10 +1948,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_GetAllAncestors_MultipleStartNodes_SharedAncestorOnce) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto mid = g.createNode("mid", 0, root);
-        auto a = g.createNode("a", 0, mid);
-        auto b = g.createNode("b", 0, mid);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto mid = g.createNode("mid", root->getLayer() + 1, 0, root);
+        auto a = g.createNode("a", mid->getLayer() + 1, 0, mid);
+        auto b = g.createNode("b", mid->getLayer() + 1, 0, mid);
 
         auto ancestors = g.pub_getAllAncestors({ a, b });
         // root and mid should each appear exactly once
@@ -1962,11 +1962,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_GetAllDescendants_MultipleStartNodes_SharedDescendantOnce) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, nullptr, nullptr);
-        auto mid = g.createNode("mid", 0, a);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, 0, nullptr, nullptr);
+        auto mid = g.createNode("mid", a->getLayer() + 1, 0, a);
         g.addConnection(b, mid);
-        auto leaf = g.createNode("leaf", 0, mid);
+        auto leaf = g.createNode("leaf", mid->getLayer() + 1, 0, mid);
 
         auto desc = g.pub_getAllDescendants({ a, b });
         EXPECT_EQ(desc.count(mid.get()), 1u);
@@ -1978,12 +1978,12 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     // ---- checkCycles: complex DAG cases -------------------------------------------
 
     TEST_F(HypergraphInternalsTest, Stress_CheckCycles_ComplexDAG_NoCycle) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, a);
-        auto d = g.createNode("d", 0, b);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", a->getLayer() + 1, 0, a);
+        auto d = g.createNode("d", b->getLayer() + 1, 0, b);
         g.addConnection(c, d);
-        auto e = g.createNode("e", 0, d);
+        auto e = g.createNode("e", d->getLayer() + 1, 0, d);
 
         EXPECT_FALSE(g.pub_checkCycles(a));
         EXPECT_FALSE(g.pub_checkCycles(b));
@@ -1991,10 +1991,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_CheckCycles_ManualCycleInComplexGraph) {
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
-        auto d = g.createNode("d", 0, c);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
+        auto d = g.createNode("d", c->getLayer() + 1, 0, c);
         // Manually wire d -> b (creating a cycle b->c->d->b)
         d->addChild(b);
         b->addParent(d);
@@ -2006,11 +2006,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, Stress_RemoveTransitiveConnections_LongChain) {
         // a->b->c->d->e; add direct a->e (transitive); then call removeTransitiveConnections
-        auto a = g.createNode("a", 0, nullptr, nullptr);
-        auto b = g.createNode("b", 0, a);
-        auto c = g.createNode("c", 0, b);
-        auto d = g.createNode("d", 0, c);
-        auto e = g.createNode("e", 0, d);
+        auto a = g.createNode("a", 0, 0, nullptr, nullptr);
+        auto b = g.createNode("b", a->getLayer() + 1, 0, a);
+        auto c = g.createNode("c", b->getLayer() + 1, 0, b);
+        auto d = g.createNode("d", c->getLayer() + 1, 0, c);
+        auto e = g.createNode("e", d->getLayer() + 1, 0, d);
 
         // Create direct a->e (bypassing validation for test purposes)
         auto direct_ae = g.pub_createHyperedge({ a }, { e }, -1);
@@ -2040,12 +2040,12 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     TEST_F(HypergraphInternalsTest, Stress_RemoveTransitiveConnections_MultipleParentsMultipleChildren) {
         // Two parents p1, p2; two children c1, c2; direct edges p1->c1, p2->c2 are transitive
         // after adding p1->m->c1 and p2->m->c2 (shared middle m)
-        auto p1 = g.createNode("p1", 0, nullptr, nullptr);
-        auto p2 = g.createNode("p2", 0, nullptr, nullptr);
-        auto m = g.createNode("m", 0, p1);
+        auto p1 = g.createNode("p1", 0, 0, nullptr, nullptr);
+        auto p2 = g.createNode("p2", 0, 0, nullptr, nullptr);
+        auto m = g.createNode("m", p1->getLayer() + 1, 0, p1);
         g.addConnection(p2, m);
-        auto c1 = g.createNode("c1", 0, m);
-        auto c2 = g.createNode("c2", 0, m);
+        auto c1 = g.createNode("c1", m->getLayer() + 1, 0, m);
+        auto c2 = g.createNode("c2", m->getLayer() + 1, 0, m);
 
         // Create direct (now transitive) edges p1->c1 and p2->c2
         g.pub_createHyperedge({ p1 }, { c1 }, -1);
@@ -2066,11 +2066,11 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
     TEST_F(HypergraphInternalsTest, Stress_SequenceOfProtectedCalls_AllInvariants) {
         // Build a graph, split a long edge, relocate some nodes, then verify everything
-        auto r = g.createNode("r", 0, nullptr, nullptr);
-        auto n1 = g.createNode("n1", 0, r);
-        auto n2 = g.createNode("n2", 0, n1);
-        auto n3 = g.createNode("n3", 0, n2);
-        auto r2 = g.createNode("r2", 0, nullptr, nullptr);
+        auto r = g.createNode("r", 0, 0, nullptr, nullptr);
+        auto n1 = g.createNode("n1", r->getLayer() + 1, 0, r);
+        auto n2 = g.createNode("n2", n1->getLayer() + 1, 0, n1);
+        auto n3 = g.createNode("n3", n2->getLayer() + 1, 0, n2);
+        auto r2 = g.createNode("r2", 0, 0, nullptr, nullptr);
 
         // Create a long edge and split it
         auto long_edge = g.pub_createHyperedge({ r2 }, { n3 }, -1);
@@ -2091,8 +2091,8 @@ namespace hypergraph_logic::hypergraph_tests::internals {
     }
 
     TEST_F(HypergraphInternalsTest, Stress_DesiredLayerOverride_SurvivesOrphaningWithoutLeavingGaps) {
-        auto root = g.createNode("root", 0, nullptr, nullptr);
-        auto child = g.createNode("child", 0, root);
+        auto root = g.createNode("root", 0, 0, nullptr, nullptr);
+        auto child = g.createNode("child", root->getLayer() + 1, 0, root);
         g.relocateNodeToLayer(child, 4); // valid override; creates a dummy chain through 1-3
         g.relocateNodeToLayer(child, 4); // valid override; creates a dummy chain through 1-3
         g.relocateNodeToLayer(child, 4); // valid override; creates a dummy chain through 1-3

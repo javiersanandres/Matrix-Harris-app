@@ -1,10 +1,12 @@
 #pragma once
 
-#include <QDialog>
+#include "AppDialogs.h"
+
 #include <QListWidget>
-#include <QDialogButtonBox>
 #include <vector>
 #include <string>
+
+class QPushButton;
 
 namespace ui {
 
@@ -12,11 +14,11 @@ namespace ui {
 // AddHypergraphDialog
 //
 // Modal dialog shown when the user clicks the background of the joint diagram.
-// Displays all regular diagrams in the project as a list. Diagrams already
-// incorporated into the joint are shown greyed out and non-selectable.
-// The user selects one and clicks Aceptar to incorporate it.
+// Lists every regular diagram in the project; those already incorporated into
+// the joint are shown as such and cannot be picked. The user selects one and
+// clicks "Añadir" (or double-clicks it) to incorporate it.
 // ============================================================================
-class AddHypergraphDialog : public QDialog {
+class AddHypergraphDialog : public StyledDialog {
     Q_OBJECT
 
 public:
@@ -33,12 +35,9 @@ public:
     // or no selectable item was chosen.
     std::string selectedId() const;
 
-private slots:
-    void onItemDoubleClicked(QListWidgetItem* item);
-
 private:
-    QListWidget*      list_;
-    QDialogButtonBox* buttons_;
+    QListWidget* list_;
+    QPushButton* add_button_ = nullptr;
 
     // Parallel to list_ rows — maps row index to diagram ID.
     std::vector<std::string> ids_;

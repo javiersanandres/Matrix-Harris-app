@@ -364,39 +364,39 @@ namespace hypergraph_logic {
 
                 // Helper: build a simple two-layer chain A->B and call computeLayout().
                 void buildSimpleGraph() {
-                    g.createNode("A", -1, nullptr);
-                    g.createNode("B", -1, g.getNodesAt(0).front());
+                    g.createNode("A", 0, -1, nullptr);
+                    g.createNode("B", g.getNodesAt(0).front()->getLayer() + 1, -1, g.getNodesAt(0).front());
                     g.computeLayout();
                 }
 
                 // Helper: build a three-layer chain A->B->C with an additional root R->C
                 // (long edge, triggers splitting) and call computeLayout().
                 void buildGraphWithLongEdge() {
-                    auto A = g.createNode("A", -1, nullptr);
-                    auto B = g.createNode("B", -1, A);
-                    auto C = g.createNode("C", -1, B);
-                    auto R = g.createNode("R", -1, nullptr);
+                    auto A = g.createNode("A", 0, -1, nullptr);
+                    auto B = g.createNode("B", A->getLayer() + 1, -1, A);
+                    auto C = g.createNode("C", B->getLayer() + 1, -1, B);
+                    auto R = g.createNode("R", 0, -1, nullptr);
                     g.addConnection(R, C);  // long edge R->C, skips layer 1
                     g.computeLayout();
                 }
 
                 // Helper: build a hyperedge with multiple sources and targets.
                 void buildHyperedgeGraph() {
-                    auto S1 = g.createNode("S1", -1, nullptr);
-                    auto S2 = g.createNode("S2", -1, nullptr);
-                    auto T1 = g.createNode("T1", -1, S1);
+                    auto S1 = g.createNode("S1", 0, -1, nullptr);
+                    auto S2 = g.createNode("S2", 0, -1, nullptr);
+                    auto T1 = g.createNode("T1", S1->getLayer() + 1, -1, S1);
                     g.addSourceToEdge(g.getLayerData(0).outgoing_edges.front(), S2);
-                    auto T2 = g.createNode("T2", -1, nullptr);
+                    auto T2 = g.createNode("T2", 0, -1, nullptr);
                     g.addTargetToEdge(g.getLayerData(0).outgoing_edges.front(), T2);
                     g.computeLayout();
                 }
 
                 // Helper: build a diamond DAG: root->L, root->R, L->leaf, R->leaf.
                 void buildDiamondGraph() {
-                    auto root = g.createNode("root", -1, nullptr);
-                    auto L = g.createNode("L", -1, root);
-                    auto R = g.createNode("R", -1, root);
-                    auto leaf = g.createNode("leaf", -1, L);
+                    auto root = g.createNode("root", 0, -1, nullptr);
+                    auto L = g.createNode("L", root->getLayer() + 1, -1, root);
+                    auto R = g.createNode("R", root->getLayer() + 1, -1, root);
+                    auto leaf = g.createNode("leaf", L->getLayer() + 1, -1, L);
                     g.addConnection(R, leaf);
                     g.computeLayout();
                 }
@@ -474,7 +474,7 @@ namespace hypergraph_logic {
                 auto copy = TestableGraphicalHypergraph(g.clone());
 
                 int orig_node_count = static_cast<int>(g.rawNodes().size());
-                copy.createNode("extra", -1, nullptr);
+                copy.createNode("extra", 0, -1, nullptr);
                 EXPECT_EQ(static_cast<int>(g.rawNodes().size()), orig_node_count)
                     << "Adding a node to the clone affected the original";
             }
@@ -997,9 +997,9 @@ namespace hypergraph_logic {
 
             // Builds A->B plus a root C pushed down to layer 1 by an explicit override.
             static void buildGraphWithAttributesAndOverride(TestableGraphicalHypergraph& g) {
-                auto A = g.createNode(customAttributes("A"), -1, nullptr);
-                g.createNode("B", -1, A);
-                auto C = g.createNode("C", -1, nullptr);
+                auto A = g.createNode(customAttributes("A"), 0, -1, nullptr);
+                g.createNode("B", A->getLayer() + 1, -1, A);
+                auto C = g.createNode("C", 0, -1, nullptr);
                 g.Hypergraph::relocateNodeToLayer(C, 1);
                 g.computeLayout();
                 ASSERT_EQ(C->getDesiredLayer(), 1);

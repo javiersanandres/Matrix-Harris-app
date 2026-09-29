@@ -29,7 +29,7 @@ namespace app_logic {
 		//
 		// Clones the graph, attempts createNode + computeLayout(), and commits the
 		// snapshot to past_ only if both succeed.
-		NodePtr createNode(const NodeAttributes& attributes, int layer_position,
+		NodePtr createNode(const NodeAttributes& attributes, int layer, int layer_position,
 			const NodePtr& parent);
 
 		// ── createParent  ─────────────────────────────────────────────────────────

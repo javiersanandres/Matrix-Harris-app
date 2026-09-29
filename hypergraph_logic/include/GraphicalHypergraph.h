@@ -121,10 +121,22 @@ namespace hypergraph_logic {
 		//				h(layer) + (H(layer) + LAYER_GAP) / 2
 		// where H(layer) is the height of the layer's tallest node. A coordinate
 		// above h(shallowest) + H(shallowest) / 2 + LAYER_GAP requests a new
-		// shallowest layer; anything else outside every span, a new deepest one.
+		// shallowest layer (closer than that, above h(shallowest), it still maps
+		// to the shallowest layer); anything else outside every span, a new
+		// deepest one.
+		// The layer is chosen by layerForY.
 		//
 		void relocateNodeToLayer(const NodePtr& node, double new_y_coordinate, 
 									std::set<int>* out_altered_layers = nullptr);
+
+		// ── layerForY ─────────────────────────────────────────────────────────────
+		//
+		// Returns the layer whose span (see relocateNodeToLayer) contains y: -1 when
+		// y asks for a new shallowest layer, deepest + 1 when it asks for a new
+		// deepest one, and 0 when no layout has been computed yet (empty graph).
+		// The result is exactly what relocateNodeToLayer and createNode expect.
+		//
+		int layerForY(double y) const;
 
 		// ── getX ──────────────────────────────────────────────────────────────────
 		//

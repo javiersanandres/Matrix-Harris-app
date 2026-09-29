@@ -76,7 +76,7 @@ namespace hypergraph_logic {
 
 	void Node::setAttributes(NodeAttributes attributes) {
 		if (isDummy()) {
-			throw std::logic_error("Cannot set attributes on a dummy node.");
+			throw std::logic_error("No se pueden asignar atributos a una caja auxiliar.");
 		}
 		attributes_ = std::move(attributes);
 	}
@@ -87,7 +87,7 @@ namespace hypergraph_logic {
 
 	void Node::setName(const std::string& name) {
 		if (isDummy()) {
-			throw std::logic_error("Cannot rename a dummy node.");
+			throw std::logic_error("No se puede renombrar una caja auxiliar.");
 		}
 		attributes_->name = name;
 	}

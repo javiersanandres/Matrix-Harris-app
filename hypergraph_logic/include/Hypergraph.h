@@ -126,18 +126,29 @@ namespace hypergraph_logic {
 
 		// ── createNode (with parent) ──────────────────────────────────────────────────────────────────
 		//
-		// Creates a new real node with the given attributes and inserts it into the graph.
-		// If no parent is provided, the node is placed at layer 0 in position layer_position.
-		// If a parent is provided, the node is placed at layer parent->layer + 1 and a new
-		// short hyperedge from parent to the new node is created automatically.
+		// Creates a new real node with the given attributes and inserts it into the graph at `layer`:
+		//   - layer == -1: every existing layer number is incremented by 1 (as relocateNodeToLayer
+		//     does) and the node is placed in the new layer 0. The former roots keep their place at
+		//     layer 1 through a desired layer. Requires no parent.
+		//   - layer is deeper than every existing layer: the node opens a new deepest layer
+		//     (deepest + 1, so no gap is ever left, whatever value was passed). An empty graph gets
+		//     layer 0.
+		//   - layer is an existing layer: the node is inserted there.
+		// Anything other than the depth-rule layer (0 without a parent, parent->layer + 1 with one) is
+		// recorded as the node's desired layer. Throws std::logic_error if a parent is provided and
+		// layer is not deeper than it, and std::invalid_argument if layer < -1.
+		//
+		// If a parent is provided, a hyperedge from parent to the new node is created automatically
+		// (long, with dummy nodes, if layer is deeper than parent->layer + 1).
 		// layer_position controls where within the target layer the node is inserted;
 		// out-of-bounds values cause the node to be appended at the end of the layer.
 		//
 		// When layer_position is -1 (i.e. no specific position is requested), crossing
 		// minimization is applied to find the least disruptive position for the new node
-		// within its layer, regardless of whether it has a parent or not.
+		// within its layer (globally from the parent's layer, 3 rounds, if the new hyperedge
+		// is long), regardless of whether it has a parent or not.
 		//
-		NodePtr createNode(const NodeAttributes& attributes, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers = nullptr);
+		NodePtr createNode(const NodeAttributes& attributes, int layer, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers = nullptr);
 
 		// ── createParent  ────────────────────────────────────────────────────────────────────────
 		//
@@ -418,6 +429,32 @@ namespace hypergraph_logic {
 		// ultimately funnels through.
 		//
 		void relocateNodeToLayer(const NodePtr& node, int desired_layer, std::set<int>* out_altered_layers = nullptr);
+
+		// ============================================================================
+		// Operation feasibility queries
+		// ============================================================================
+		//
+		// Each query answers, without modifying anything, whether the operation of the same name
+		// would succeed on the graph as it is: it returns false exactly when that operation would
+		// throw (self-connections, connections that already exist or are already implied, cycles).
+		// The editor UI uses them to offer only the nodes an operation can actually take.
+		// Null arguments, and segments where an original hyperedge is expected, give false.
+
+		// addConnection(parent, child).
+		bool canAddConnection(const NodePtr& parent, const NodePtr& child) const;
+
+		// addSourceToEdge(edge, source).
+		bool canAddSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) const;
+
+		// addTargetToEdge(edge, target).
+		bool canAddTargetToEdge(const HyperedgePtr& edge, const NodePtr& target) const;
+
+		// removeConnection(parent, child): parent must be a direct parent of child.
+		bool canRemoveConnection(const NodePtr& parent, const NodePtr& child) const;
+
+		// fuseNodes(node1, node2, ...): neither node may reach the other (fusing them would
+		// otherwise close a cycle, a direct connection included).
+		bool canFuseNodes(const NodePtr& node1, const NodePtr& node2) const;
 
 	protected:
 		std::string name_;

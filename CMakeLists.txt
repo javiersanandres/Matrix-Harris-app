@@ -17,7 +17,11 @@ set(CMAKE_CXX_EXTENSIONS OFF)
 
 
 if(MSVC)
-    add_compile_options(/W4)
+    # /utf-8: read every source as UTF-8 (with or without BOM) and keep string
+    # literals in UTF-8, which is what QString::fromStdString / QString(const char*)
+    # expect. Without it, a BOM file's "ó" is re-encoded to Windows-1252 and shows
+    # up garbled in the UI.
+    add_compile_options(/W4 /utf-8)
 else()
     add_compile_options(-Wall -Wextra -Wpedantic)
 endif()

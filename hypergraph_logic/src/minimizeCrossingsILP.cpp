@@ -642,7 +642,7 @@ namespace hypergraph_logic {
 	// either way -- it just falls back to the heuristic baseline.
 	int Hypergraph::minimizeCrossingsILP() {
 		if (getLayers().empty() || getAllHyperedges().size() < 2) {
-			throw std::logic_error("There is nothing to minimize.");
+			throw std::logic_error("No hay cruces que minimizar.");
 		}
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 

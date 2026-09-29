@@ -149,10 +149,10 @@ namespace hypergraph_logic {
             // Matches the buildTwoLayerFan() example from the task description.
             static TestGraph buildTwoLayerFan() {
                 TestGraph g("fan");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 HyperedgePtr edge = findEdgeWithSourceAndTarget(g, A, C);
                 g.addSourceToEdge(edge, B);
                 g.addTargetToEdge(edge, D);
@@ -163,10 +163,10 @@ namespace hypergraph_logic {
             // where d1 and d2 are dummy bend-points.
             static TestGraph buildLongChain() {
                 TestGraph g("long_chain");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
-                NodePtr d2 = g.createNode("d2", 0, d1);
-                g.createNode("B", 0, d2);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
+                NodePtr d2 = g.createNode("d2", d1->getLayer() + 1, 0, d1);
+                g.createNode("B", d2->getLayer() + 1, 0, d2);
                 return g;
             }
 
@@ -216,9 +216,9 @@ namespace hypergraph_logic {
 
             TEST(BuildG2, LayerCountMatchesHypergraph) {
                 TestGraph g("g2_layers");
-                g.createNode("A", 0, nullptr);
-                g.createNode("B", 1, nullptr);
-                g.createNode("C", 0, g.getAllNodes()[0]);
+                g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", g.getAllNodes()[0]->getLayer() + 1, 0, g.getAllNodes()[0]);
 
                 G2 g2 = buildG2(g.layers());
                 EXPECT_EQ(g2.num_layers, static_cast<int>(g.layers().size()));
@@ -227,9 +227,9 @@ namespace hypergraph_logic {
 
             TEST(BuildG2, PositionIndicesAreConsistent) {
                 TestGraph g("g2_pos");
-                g.createNode("A", 0, nullptr);
-                g.createNode("B", 1, nullptr);
-                g.createNode("C", 2, nullptr);
+                g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", 0, 2, nullptr);
 
                 G2 g2 = buildG2(g.layers());
                 for (int id = 0; id < static_cast<int>(g2.nodes.size()); ++id) {
@@ -242,8 +242,8 @@ namespace hypergraph_logic {
 
             TEST(BuildG2, UpperAndLowerNeighboursAreSymmetric) {
                 TestGraph g("g2_sym");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
 
                 G2 g2 = buildG2(g.layers());
                 int idA = findG2Id(g2, A);
@@ -258,9 +258,9 @@ namespace hypergraph_logic {
 
             TEST(BuildG2, NeighboursAreSortedByPosition) {
                 TestGraph g("g2_sorted");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
                 g.addConnection(B, C);
 
                 G2 g2 = buildG2(g.layers());
@@ -279,11 +279,11 @@ namespace hypergraph_logic {
 
             TEST(IsInnerSegment, DummyDummyExclusiveIsInner) {
                 TestGraph g("inner_seg");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
-                NodePtr d2 = g.createNode("d2", 0, d1);
-                NodePtr d3 = g.createNode("d3", 0, d2);
-                NodePtr B = g.createNode("B", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
+                NodePtr d2 = g.createNode("d2", d1->getLayer() + 1, 0, d1);
+                NodePtr d3 = g.createNode("d3", d2->getLayer() + 1, 0, d2);
+                NodePtr B = g.createNode("B", 0, 0, nullptr);
                 g.addConnection(B, d3);
 
                 G2 g2 = buildG2(g.layers());
@@ -294,9 +294,9 @@ namespace hypergraph_logic {
 
             TEST(IsInnerSegment, RealDummyEdgeIsNotInner) {
                 TestGraph g("inner_real_dummy");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
-                g.createNode("B", 0, d1);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
+                g.createNode("B", d1->getLayer() + 1, 0, d1);
 
                 G2 g2 = buildG2(g.layers());
                 int idA = findG2Id(g2, A);
@@ -309,9 +309,9 @@ namespace hypergraph_logic {
 
             TEST(IsInnerSegment, DummyRealEdgeIsNotInner) {
                 TestGraph g("inner_dummy_real");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
-                NodePtr B = g.createNode("B", 0, d1);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
+                NodePtr B = g.createNode("B", d1->getLayer() + 1, 0, d1);
 
                 G2 g2 = buildG2(g.layers());
                 int idd1 = findG2Id(g2, d1);
@@ -324,11 +324,11 @@ namespace hypergraph_logic {
 
             TEST(IsInnerSegment, DummyWithMultipleParentsIsNotInner) {
                 TestGraph g("inner_multi_parent");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
                 g.addConnection(B, d1);
-                g.createNode("C", 0, d1);
+                g.createNode("C", d1->getLayer() + 1, 0, d1);
 
                 G2 g2 = buildG2(g.layers());
                 int idA = findG2Id(g2, A);
@@ -341,12 +341,12 @@ namespace hypergraph_logic {
 
             TEST(IsInnerSegment, DummyWithMultipleChildrenIsNotInner) {
                 TestGraph g("inner_multi_child");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
-                NodePtr d2 = g.createNode("d2", 0, d1);
-                NodePtr d3 = g.createNode("d3", 1, d1);
-                g.createNode("C", 0, d2);
-                g.createNode("D", 0, d3);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
+                NodePtr d2 = g.createNode("d2", d1->getLayer() + 1, 0, d1);
+                NodePtr d3 = g.createNode("d3", d1->getLayer() + 1, 1, d1);
+                g.createNode("C", d2->getLayer() + 1, 0, d2);
+                g.createNode("D", d3->getLayer() + 1, 0, d3);
 
                 G2 g2 = buildG2(g.layers());
                 int idd1 = findG2Id(g2, d1);
@@ -363,9 +363,9 @@ namespace hypergraph_logic {
 
             TEST(MarkType1Conflicts, StraightChainProducesNoMarks) {
                 TestGraph g("no_conflicts");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                g.createNode("C", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                g.createNode("C", B->getLayer() + 1, 0, B);
 
                 G2 g2 = buildG2(g.layers());
                 markType1Conflicts(g2);
@@ -375,10 +375,10 @@ namespace hypergraph_logic {
 
             TEST(MarkType1Conflicts, ParallelChainsProduceNoMarks) {
                 TestGraph g("parallel_no_conflicts");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                g.createNode("C", 0, A);
-                g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", A->getLayer() + 1, 0, A);
+                g.createNode("D", B->getLayer() + 1, 1, B);
 
                 G2 g2 = buildG2(g.layers());
                 markType1Conflicts(g2);
@@ -394,8 +394,8 @@ namespace hypergraph_logic {
                 // Layer 0: [A]
                 // Layer 1: [B]   child of A -> single vertical edge -> one block
                 TestGraph g("chain");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
                 g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(A), g.getX(B), 1e-9);
             }
@@ -404,10 +404,10 @@ namespace hypergraph_logic {
                 // Layer 0: [A] [B]
                 // Layer 1: [C] [D]   A->C, B->D
                 TestGraph g("parallel");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 g.assignXCoordinates();
                 EXPECT_NEAR(g.getX(A), g.getX(C), 1e-9);
                 EXPECT_NEAR(g.getX(B), g.getX(D), 1e-9);
@@ -428,10 +428,10 @@ namespace hypergraph_logic {
                 // Layer 0: [A] [B] [C]
                 // Layer 1:     [D]       parents: A, B, C  ->  median = B
                 TestGraph g("median");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
                 g.addConnection(A, D);
                 g.addConnection(C, D);
                 g.assignXCoordinates();
@@ -443,12 +443,12 @@ namespace hypergraph_logic {
                 // Layer 0: [A] [B] [C]
                 // Layer 1: [D] [E] [F]   A->D, B->E, C->F
                 TestGraph g("symmetric");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                NodePtr D = g.createNode("D", 0, A);
-                NodePtr E = g.createNode("E", 1, B);
-                NodePtr F = g.createNode("F", 2, C);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 0, A);
+                NodePtr E = g.createNode("E", B->getLayer() + 1, 1, B);
+                NodePtr F = g.createNode("F", C->getLayer() + 1, 2, C);
                 g.assignXCoordinates();
 
                 EXPECT_NEAR(g.getX(A), g.getX(D), 1e-9);
@@ -700,16 +700,16 @@ namespace hypergraph_logic {
 
             TEST(AssignCoordinates, SingleNodeGivesFiniteCoordinate) {
                 TestGraph g("single");
-                NodePtr A = g.createNode("A", 0, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
                 g.assignXCoordinates();
                 EXPECT_TRUE(std::isfinite(g.getX(A)));
             }
 
             TEST(AssignCoordinates, IsIdempotent) {
                 TestGraph g("idempotent");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
 
                 g.assignXCoordinates();
                 double xA1 = g.getX(A), xB1 = g.getX(B), xC1 = g.getX(C);
@@ -730,11 +730,11 @@ namespace hypergraph_logic {
 
             TEST(AssignCoordinates, GetXThrowsForNodeNotInGraph) {
                 TestGraph g("unknown");
-                g.createNode("A", 0, nullptr);
+                g.createNode("A", 0, 0, nullptr);
                 g.assignXCoordinates();
 
                 TestGraph other("other");
-                NodePtr orphan = other.createNode("orphan", 0, nullptr);
+                NodePtr orphan = other.createNode("orphan", 0, 0, nullptr);
                 EXPECT_THROW(g.getX(orphan), std::out_of_range);
             }
 
@@ -744,8 +744,8 @@ namespace hypergraph_logic {
 
             TEST(Separation, TwoIsolatedRealNodesAreAtLeast96Apart) {
                 TestGraph g("sep_real_real");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
                 g.assignXCoordinates();
                 EXPECT_GE(g.getX(B) - g.getX(A), 96.0 - 1e-9);
             }
@@ -755,10 +755,10 @@ namespace hypergraph_logic {
                 // Layer 1: [d1] (pos 0)  [B] (real pos 1)
                 // Layer 2: [C]  (real)
                 TestGraph g("sep_dummy_real");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr d1 = g.createNode("d1", 0, A);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                g.createNode("C", 0, d1);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr d1 = g.createNode("d1", A->getLayer() + 1, 0, A);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", d1->getLayer() + 1, 0, d1);
 
                 g.assignXCoordinates();
                 double xd1 = g.getX(d1), xB = g.getX(B);
@@ -769,9 +769,9 @@ namespace hypergraph_logic {
 
             TEST(Separation, ThreeRealNodesEachPairAtLeast96Apart) {
                 TestGraph g("sep_three");
-                g.createNode("A", 0, nullptr);
-                g.createNode("B", 1, nullptr);
-                g.createNode("C", 2, nullptr);
+                g.createNode("A", 0, 0, nullptr);
+                g.createNode("B", 0, 1, nullptr);
+                g.createNode("C", 0, 2, nullptr);
                 g.assignXCoordinates();
 
                 auto nodes = g.getAllNodes();
@@ -789,9 +789,9 @@ namespace hypergraph_logic {
                 // Layer 0: [A]
                 // Layer 1: [C] [D]   A->C, A->D
                 TestGraph g("fan_out");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);
                 g.assignXCoordinates();
 
                 double xC = g.getX(C), xD = g.getX(D), xA = g.getX(A);
@@ -804,9 +804,9 @@ namespace hypergraph_logic {
                 // Layer 0: [A] [B]
                 // Layer 1: [C]        parents: A, B
                 TestGraph g("fan_in");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
                 g.addConnection(B, C);
                 g.assignXCoordinates();
 
@@ -839,10 +839,10 @@ namespace hypergraph_logic {
                 // Layer 1: [B]  [C]    A->B, A->C
                 // Layer 2:    [D]      B->D, C->D
                 TestGraph g("diamond");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 g.assignXCoordinates();
 
@@ -854,10 +854,10 @@ namespace hypergraph_logic {
 
             TEST(Diamond, SourceNodeSitsBetweenItsChildren) {
                 TestGraph g("diamond_src");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
-                NodePtr C = g.createNode("C", 1, A);
-                NodePtr D = g.createNode("D", 0, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 1, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 0, B);
                 g.addConnection(C, D);
                 g.assignXCoordinates();
 
@@ -874,10 +874,10 @@ namespace hypergraph_logic {
                 // Layer 0: [A] [B]
                 // Layer 1: [C] [D]   A->D (crossing), B->C (crossing)
                 TestGraph g("crossing");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, B);
-                NodePtr D = g.createNode("D", 1, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", B->getLayer() + 1, 0, B);
+                NodePtr D = g.createNode("D", A->getLayer() + 1, 1, A);
                 g.assignXCoordinates();
 
                 EXPECT_GE(g.getX(B) - g.getX(A), 96.0 - 1e-9);
@@ -890,12 +890,12 @@ namespace hypergraph_logic {
 
             TEST(LayerOrder, XCoordinatesMonotonicallyIncreaseWithPosition) {
                 TestGraph g("order");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 2, nullptr);
-                g.createNode("D", 0, A);
-                g.createNode("E", 1, B);
-                g.createNode("F", 2, C);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", 0, 2, nullptr);
+                g.createNode("D", A->getLayer() + 1, 0, A);
+                g.createNode("E", B->getLayer() + 1, 1, B);
+                g.createNode("F", C->getLayer() + 1, 2, C);
                 g.assignXCoordinates();
 
                 for (const auto& [layer, data] : g.getLayers())
@@ -914,12 +914,12 @@ namespace hypergraph_logic {
                 std::vector<std::vector<NodePtr>> grid(4, std::vector<NodePtr>(4));
 
                 for (int col = 0; col < 4; ++col)
-                    grid[0][col] = g.createNode("R0C" + std::to_string(col), col, nullptr);
+                    grid[0][col] = g.createNode("R0C" + std::to_string(col), 0, col, nullptr);
 
                 for (int row = 1; row < 4; ++row)
                     for (int col = 0; col < 4; ++col)
                         grid[row][col] = g.createNode(
-                            "R" + std::to_string(row) + "C" + std::to_string(col),
+                            "R" + std::to_string(row) + "C" + std::to_string(col), grid[row - 1][col]->getLayer() + 1,
                             col, grid[row - 1][col]);
 
                 g.assignXCoordinates();
@@ -942,10 +942,10 @@ namespace hypergraph_logic {
 
             TEST(HyperedgeAPI, AddSourceAndTargetToEdge) {
                 TestGraph g("he_api");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
 
                 HyperedgePtr e = findEdgeWithSourceAndTarget(g, A, C);
                 ASSERT_NE(e, nullptr);
@@ -962,8 +962,8 @@ namespace hypergraph_logic {
 
             TEST(HyperedgeAPI, CreateSourceAndTargetHelpers) {
                 TestGraph g("src_tgt");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 0, A);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", A->getLayer() + 1, 0, A);
 
                 HyperedgePtr e = findEdgeWithSourceAndTarget(g, A, B);
                 ASSERT_NE(e, nullptr);
@@ -978,12 +978,12 @@ namespace hypergraph_logic {
 
             TEST(HyperedgeAPI, ThreeLayerGraphHasNoOverlap) {
                 TestGraph g("three_layer");
-                NodePtr A = g.createNode("A", 0, nullptr);
-                NodePtr B = g.createNode("B", 1, nullptr);
-                NodePtr C = g.createNode("C", 0, A);
-                NodePtr D = g.createNode("D", 1, B);
-                g.createNode("E", 0, C);
-                g.createNode("F", 1, D);
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr B = g.createNode("B", 0, 1, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                NodePtr D = g.createNode("D", B->getLayer() + 1, 1, B);
+                g.createNode("E", C->getLayer() + 1, 0, C);
+                g.createNode("F", D->getLayer() + 1, 1, D);
                 checkNoOverlap(g);
             }
 

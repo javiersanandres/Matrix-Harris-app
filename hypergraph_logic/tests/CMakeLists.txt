@@ -15,6 +15,7 @@ add_executable(hypergraph_logic_tests
     test_graphicalhypergraph_persistence.cpp
     test_graphicalhypergraph.cpp
     test_jointgraphicalhypergraph.cpp
+    test_operation_feasibility.cpp
 )
 
 target_include_directories(hypergraph_logic_tests
