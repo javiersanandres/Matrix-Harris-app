@@ -1,7 +1,9 @@
 #include "NodeItem.h"
 #include "DiagramScene.h"
+#include "HypergraphRenderer.h"
 #include "LayoutTypes.h"
 
+#include <QPainter>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsScene>
 #include <QPen>
@@ -28,6 +30,18 @@ namespace ui {
         label_->setPos(
             rect.left() + (rect.width() - lb.width()) / 2.0,
             rect.top() + (rect.height() - lb.height()) / 2.0);
+    }
+
+    QPainterPath NodeItem::shape() const {
+        return HypergraphRenderer::nodeShapePath(node_, rect());
+    }
+
+    void NodeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) {
+        Q_UNUSED(option);
+        Q_UNUSED(widget);
+        painter->setPen(pen());
+        painter->setBrush(brush());
+        painter->drawPath(HypergraphRenderer::nodeShapePath(node_, rect()));
     }
 
     void NodeItem::setHighlighted(bool on) {

@@ -126,7 +126,7 @@ namespace hypergraph_logic {
 
 		// ── createNode (with parent) ──────────────────────────────────────────────────────────────────
 		//
-		// Creates a new real node with the given label and inserts it into the graph.
+		// Creates a new real node with the given attributes and inserts it into the graph.
 		// If no parent is provided, the node is placed at layer 0 in position layer_position.
 		// If a parent is provided, the node is placed at layer parent->layer + 1 and a new
 		// short hyperedge from parent to the new node is created automatically.
@@ -137,17 +137,17 @@ namespace hypergraph_logic {
 		// minimization is applied to find the least disruptive position for the new node
 		// within its layer, regardless of whether it has a parent or not.
 		//
-		NodePtr createNode(const std::string& label, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers = nullptr);
+		NodePtr createNode(const NodeAttributes& attributes, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers = nullptr);
 
 		// ── createParent  ────────────────────────────────────────────────────────────────────────
 		//
-		// Creates a new real node with the given label and inserts it as a parent of the specified
+		// Creates a new real node with the given attributes and inserts it as a parent of the specified
 		// child node. If child is currently at layer 0 it must relocate (the new parent needs
 		// layer 0 for itself); otherwise the new parent is placed directly one layer above the
 		// child, carrying an explicit desired_layer override if that's deeper than its own natural
 		// depth rule of 0 (i.e. whenever child->getLayer() > 1).
 		//
-		NodePtr createParent(const std::string& label, const NodePtr& child, std::set<int>* out_altered_layers = nullptr);
+		NodePtr createParent(const NodeAttributes& attributes, const NodePtr& child, std::set<int>* out_altered_layers = nullptr);
 
 		// ── createNodeInEdge ────────────────────────────────────────────────────────────────────────
 		//
@@ -161,14 +161,14 @@ namespace hypergraph_logic {
 		// The number of sifting rounds is intentionally kept low (3) to minimise disruption to the
 		// existing layout while still placing the new node and any new dummy nodes reasonably well.
 		//
-		NodePtr createNodeInEdge(const std::string& label, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
+		NodePtr createNodeInEdge(const NodeAttributes& attributes, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
 
 		// ── createNodeNextTo ─────────────────────────────────────────────────────────────────────────
 		//
 		// Creates a new, unconnected real node and inserts it into the same layer as node, immediately
 		// to its left or right without creating any hyperedge.
 		//
-		NodePtr createNodeNextTo(const std::string& label, const NodePtr& node, bool left);
+		NodePtr createNodeNextTo(const NodeAttributes& attributes, const NodePtr& node, bool left);
 
 		// ── createSource ─────────────────────────────────────────────────────────────────────────────
 		//
@@ -186,7 +186,7 @@ namespace hypergraph_logic {
 		//   - If the edge remained short, minimizeCrossingsForNodes is called for the new source
 		//     alone, restricted to layer 0.
 		//
-		NodePtr createSource(const std::string& label, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
+		NodePtr createSource(const NodeAttributes& attributes, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
 
 		// ── createTarget ─────────────────────────────────────────────────────────────────────────────
 		//
@@ -202,7 +202,7 @@ namespace hypergraph_logic {
 		//   - If the edge remained short, minimizeCrossingsForNodes is called for the new target
 		//     alone, restricted to its layer.
 		//
-		NodePtr createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
+		NodePtr createTarget(const NodeAttributes& attributes, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers = nullptr);
 
 		// ── addConnection ────────────────────────────────────────────────────────────────────────────
 		//
@@ -357,7 +357,8 @@ namespace hypergraph_logic {
 		// ── fuseNodes ────────────────────────────────────────────────────────────────────────────────
 		//
 		// Merges node2 into node1, transferring all of node2's parent and child relationships to node1
-		// and then deleting node2. The merged node is renamed to new_label.
+		// and then deleting node2. The merged node takes the given attributes (name, shape, colours,
+		// font and fire state) in full; passing just a name gives it default attributes.
 		//
 		// The fusion is first attempted tentatively: if unifying the neighbourhoods of the two nodes
 		// would introduce a cycle, the operation is rolled back and an exception is thrown.
@@ -371,7 +372,7 @@ namespace hypergraph_logic {
 		// global sifting (10 rounds) is run from the shallowest parent layer + 1 of node1 to
 		// account for the full extent of the disruption.
 		//
-		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_name, std::set<int>* out_altered_layers = nullptr);
+		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const NodeAttributes& new_attributes, std::set<int>* out_altered_layers = nullptr);
 
 		// ============================================================================
 		// Node layer management

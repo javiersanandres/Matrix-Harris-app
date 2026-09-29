@@ -12,7 +12,8 @@ namespace ui {
 // ============================================================================
 // NodeItem
 //
-// QGraphicsRectItem representing a single real node box in the editing scene.
+// QGraphicsRectItem representing a single real node in the editing scene. The
+// rect is the node's bounding box; the item paints the node's own shape in it.
 // Handles:
 //   - Single click       → context menu with all node operations.
 //   - Double click       → inline rename (QGraphicsTextItem becomes editable).
@@ -37,6 +38,12 @@ public:
 
     // Called by DiagramScene after a rename is committed to refresh the label.
     void updateLabel(const QString& text);
+
+    // rect() is the node's bounding box; the node itself is drawn and hit-tested
+    // with its own shape (rectangle, circle or rhombus) inscribed in that box.
+    QPainterPath shape() const override;
+    void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
+               QWidget* widget = nullptr) override;
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent* event) override;

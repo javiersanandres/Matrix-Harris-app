@@ -123,8 +123,8 @@ namespace bk_internal {
 
         // ── Block-width helper ────────────────────────────────────────────────────
         //
-        // Returns the visual width of the block containing v: NODE_WIDTH if any
-        // member is a real node, DUMMY_NODE_WIDTH if all members are dummies.
+        // Returns the visual width of the block containing v: the widest
+        // Node::getWidth() among its members.
         static double computeBlockWidth(const G2& g, const BlockList& B, int v);
 
         // ── Algorithm 2 ──────────────────────────────────────────────────────────

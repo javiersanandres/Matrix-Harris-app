@@ -621,7 +621,7 @@ private:
         QLabel*                                              info = nullptr;
         ZoomableGraphicsView*                                view = nullptr;
         QGraphicsScene*                                      scene = nullptr;
-        std::unordered_map<Node*, QGraphicsRectItem*>        node_items;
+        std::unordered_map<Node*, QGraphicsPathItem*>        node_items;
         std::unordered_map<Hyperedge*, QGraphicsPathItem*>   edge_items;
     };
 

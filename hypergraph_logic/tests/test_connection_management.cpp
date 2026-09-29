@@ -854,6 +854,40 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         EXPECT_EQ(a->getName(), "fused");
     }
 
+    TEST_F(ConnectionManagementTest, FuseNodes_AttributesApplied) {
+        NodeAttributes styled("a");
+        styled.shape = NodeShape::Circle;
+        styled.fire = FireState::Fire;
+        auto a = g.createNode(styled, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, nullptr, nullptr);
+
+        NodeAttributes fused("fused");
+        fused.shape = NodeShape::Rhombus;
+        fused.colour = { 1, 2, 3, 255 };
+        fused.fire = FireState::FireWithAshes;
+        g.fuseNodes(a, b, fused);
+        EXPECT_EQ(a->getAttributes(), fused);
+    }
+
+    TEST_F(ConnectionManagementTest, FuseNodes_NameOnlyResetsToDefaultAttributes) {
+        NodeAttributes styled("a");
+        styled.shape = NodeShape::Circle;
+        auto a = g.createNode(styled, 0, nullptr, nullptr);
+        auto b = g.createNode("b", 0, nullptr, nullptr);
+        g.fuseNodes(a, b, "fused");
+        EXPECT_EQ(a->getAttributes(), NodeAttributes("fused"));
+    }
+
+    TEST_F(ConnectionManagementTest, FuseNodes_CycleFusionKeepsOriginalAttributes) {
+        auto p = g.createNode("p", 0, nullptr, nullptr);
+        auto c = g.createNode("c", 0, p);
+        NodeAttributes fused("fused");
+        fused.shape = NodeShape::Circle;
+        EXPECT_THROW(g.fuseNodes(p, c, fused), std::logic_error);
+        EXPECT_EQ(p->getAttributes(), NodeAttributes("p"));
+        EXPECT_EQ(c->getAttributes(), NodeAttributes("c"));
+    }
+
     TEST_F(ConnectionManagementTest, FuseNodes_ConnectionsMerged) {
         // r->a, s->b; fuse a and b; fused node should have both r and s as parents
         auto r = g.createNode("r", 0, nullptr, nullptr);

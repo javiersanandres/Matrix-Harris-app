@@ -45,7 +45,8 @@ namespace ui {
     // ============================================================================
     // PortInfo
     //
-    // Associates a port's x coordinate with the Node* that generated it.
+    // Associates a port's coordinates with the Node* that generated it. y is
+    // where the edge meets the node's boundary (see hypergraph_logic::Port).
     // Storing the generating node pointer allows the renderer to determine:
     //   - Whether the port comes from a real or dummy node (node->isDummy()).
     //   - For dummy nodes: the node's own source_ports and target_ports, needed
@@ -53,6 +54,7 @@ namespace ui {
     // ============================================================================
     struct PortInfo {
         double x;
+        double y;
         Node* generating_node;
     };
 
@@ -78,7 +80,7 @@ namespace ui {
     //
     // Two overloads of render() are provided:
     //
-    //   Static overload  — creates raw QGraphicsRectItem / QGraphicsPathItem.
+    //   Static overload  — creates raw QGraphicsPathItems for nodes and edges.
     //                      Intended for non-interactive contexts (export, print).
     //
     //   Factory overload — accepts factory lambdas that produce NodeItem and
@@ -105,7 +107,8 @@ namespace ui {
         // ── Static overload ───────────────────────────────────────────────────────
         //
         // Clears the scene and rebuilds it using raw Qt items. node_items is
-        // populated with QGraphicsRectItem* per real node; edge_items with
+        // populated with a QGraphicsPathItem* (outlining the node's shape) per
+        // real node; edge_items with
         // QGraphicsPathItem* per original hyperedge.
         //
         // Intended for non-interactive rendering (export, static thumbnails that
@@ -114,7 +117,7 @@ namespace ui {
         static void render(
             const GraphicalHypergraph& graph,
             QGraphicsScene* scene,
-            std::unordered_map<Node*, QGraphicsRectItem*>& node_items,
+            std::unordered_map<Node*, QGraphicsPathItem*>& node_items,
             std::unordered_map<Hyperedge*, QGraphicsPathItem*>& edge_items);
 
         // ── Factory overload ──────────────────────────────────────────────────────
@@ -139,15 +142,24 @@ namespace ui {
             const NodeItemFactory& make_node,
             const EdgeItemFactory& make_edge);
 
+        // ── nodeShapePath ─────────────────────────────────────────────────────────
+        //
+        // Returns the outline of the node's shape inscribed in rect: the rect
+        // itself, the ellipse inscribed in it, or the rhombus joining the
+        // midpoints of its sides. Shared with NodeItem for painting/hit-testing.
+        //
+        static QPainterPath nodeShapePath(const Node* node, const QRectF& rect);
+
     private:
 
         // ── computeNodeRect ───────────────────────────────────────────────────────
         //
-        // Returns the axis-aligned bounding rectangle for a node box given its
-        // layout x coordinate and its layer's y coordinate (in layout space).
+        // Returns the axis-aligned bounding box of the node's shape (its
+        // getWidth() x getHeight()) given its layout x coordinate and its layer's
+        // y coordinate (in layout space), so the shape's centre lies on the layer.
         // The result is already in Qt coordinates (y negated).
         //
-        static QRectF computeNodeRect(const NodeLayout& layout, double layer_y);
+        static QRectF computeNodeRect(const Node* node, const NodeLayout& layout, double layer_y);
 
         // ── buildPortMaps ─────────────────────────────────────────────────────────
         //
@@ -169,23 +181,24 @@ namespace ui {
         // (layer L-1 → layer L) and records the occupied y ranges in
         // vertical_occupancy.
         //
+        // Every segment runs between a port's own y (where it meets its node's
+        // boundary, or the layer's y for a dummy) and bar_y:
+        //
         // Source ports (from nodes in layer L-1):
-        //   Real node  -> segment from (x, layer_y_prev - NODE_HEIGHT/2) to (x, bar_y).
-        //   Dummy node -> segment from (x, layer_y_prev) to (x, bar_y).
-        //                If the dummy's own target port x disagrees, draws a jog
-        //                at y = layer_y_prev.
+        //   segment from (x, port.y) to (x, bar_y). For a dummy node whose own
+        //   target port x disagrees, also draws a jog at y = layer_y_prev.
         //
         // Target ports (from nodes in layer L):
-        //   Real node  -> segment from (x, bar_y) to (x, layer_y + NODE_HEIGHT/2).
-        //   Dummy node -> segment from (x, bar_y) to (x, layer_y).
-        //                No horizontal jog for dummy targets.
+        //   segment from (x, bar_y) to (x, port.y). No jog for dummy targets.
+        //
+        // Trivial edges (single x) are one segment from the source port's y
+        // straight down to the target port's y; bar_y is ignored.
         //
         static void drawVerticalSegments(
             const std::vector<PortInfo>& src_ports,
             const std::vector<PortInfo>& tgt_ports,
             double bar_y,
             double layer_y_prev,
-            double layer_y,
             bool is_trivial,
             const std::unordered_map<Node*, NodeLayout>& node_layout,
             std::map<double, std::vector<VerticalRange>>& vertical_occupancy,

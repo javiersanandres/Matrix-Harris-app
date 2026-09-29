@@ -169,6 +169,22 @@ namespace app_logic {
 			derived().commitSnapshot(std::move(saved));
 		}
 
+		// ── setNodeAttributes ─────────────────────────────────────────────────────
+		//
+		// Clones the graph, attempts setAttributes on the node (name, shape, colours,
+		// font size and fire state all at once), and commits the snapshot only on
+		// success. Attributes do not affect the layout, so no recomputation is needed.
+		void setNodeAttributes(const NodePtr& node, const NodeAttributes& attributes) {
+			auto saved = derived().takeSnapshot();
+			try {
+				node->setAttributes(attributes);
+			}
+			catch (...) {
+				throw;
+			}
+			derived().commitSnapshot(std::move(saved));
+		}
+
 		// ── addConnection ─────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts addConnection + computeLayout(), and commits
@@ -339,14 +355,14 @@ namespace app_logic {
 		// ── fuseNodes ─────────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts fuseNodes + computeLayout(), and commits the
-		// snapshot only if both succeed.
+		// snapshot only if both succeed. The fused node takes new_attributes in full.
 		void fuseNodes(const NodePtr& node1, const NodePtr& node2,
-			const std::string& new_label)
+			const NodeAttributes& new_attributes)
 		{
 			auto saved = derived().takeSnapshot();
 			try {
 				std::set<int> mip_layers;
-				derived().graph().fuseNodes(node1, node2, new_label, &mip_layers);
+				derived().graph().fuseNodes(node1, node2, new_attributes, &mip_layers);
 				derived().graph().computeLayout(mip_layers);
 			}
 			catch (...) {

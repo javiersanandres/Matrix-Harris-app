@@ -231,7 +231,7 @@ namespace port_assignment_internal {
     double PortAssigner::arrangeSymmetrically(Node* node, std::vector<Port>& ports) const {
         int n = static_cast<int>(ports.size());
         if (n == 0) return MIN_VERTICAL_SEP;
-        double node_width = node->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+        double node_width = node->getWidth();
         double node_x = node_layout_.at(node).x;
         double spacing = node_width / (n + 1);
         double min_x = node_x - node_width / 2.0;
@@ -249,10 +249,10 @@ namespace port_assignment_internal {
     {
         if (node->isDummy()) return false; // a dummy has only one port; nothing to cross
         if (moving_right) {
-            double next_port = (idx == static_cast<int>(ports.size()) - 1) ? node_x + NODE_WIDTH / 2.0 : ports[idx + 1].x;
+            double next_port = (idx == static_cast<int>(ports.size()) - 1) ? node_x + node->getWidth() / 2.0 : ports[idx + 1].x;
             return next_port < other_x;
         }
-        double prev_port = (idx == 0) ? node_x - NODE_WIDTH / 2.0 : ports[idx - 1].x;
+        double prev_port = (idx == 0) ? node_x - node->getWidth() / 2.0 : ports[idx - 1].x;
         return prev_port > other_x;
     }
 
@@ -295,9 +295,9 @@ namespace port_assignment_internal {
                 }
                 else {
                     src_span.first = (si == 0)
-                        ? src_x - NODE_WIDTH / 2.0 : src_ports[si - 1].x;
+                        ? src_x - src_node->getWidth() / 2.0 : src_ports[si - 1].x;
                     src_span.second = (si == static_cast<int>(src_ports.size()) - 1)
-                        ? src_x + NODE_WIDTH / 2.0 : src_ports[si + 1].x;
+                        ? src_x + src_node->getWidth() / 2.0 : src_ports[si + 1].x;
                 }
 
                 if (tgt_node->isDummy()) {
@@ -305,9 +305,9 @@ namespace port_assignment_internal {
                 }
                 else {
                     tgt_span.first = (ti == 0)
-                        ? tgt_x - NODE_WIDTH / 2.0 : tgt_ports[ti - 1].x;
+                        ? tgt_x - tgt_node->getWidth() / 2.0 : tgt_ports[ti - 1].x;
                     tgt_span.second = (ti == static_cast<int>(tgt_ports.size()) - 1)
-                        ? tgt_x + NODE_WIDTH / 2.0 : tgt_ports[ti + 1].x;
+                        ? tgt_x + tgt_node->getWidth() / 2.0 : tgt_ports[ti + 1].x;
                 }
 
                 double inter_lo = std::max(src_span.first, tgt_span.first);
@@ -419,23 +419,23 @@ namespace port_assignment_internal {
         for (auto& [node, fixed] : adjusted_src)
             min_spacing = std::min(min_spacing,
                 redistributePorts(node_layout_.at(node).source_ports, fixed,
-                    node_layout_.at(node).x));
+                    node_layout_.at(node).x, node->getWidth()));
         for (auto& [node, fixed] : adjusted_tgt)
             min_spacing = std::min(min_spacing,
                 redistributePorts(node_layout_.at(node).target_ports, fixed,
-                    node_layout_.at(node).x));
+                    node_layout_.at(node).x, node->getWidth()));
 
         return min_spacing;
     }
 
     double PortAssigner::redistributePorts(std::vector<Port>& ports,
         const std::unordered_set<Port*>& fixed,
-        double node_x) const
+        double node_x, double node_width) const
     {
         if (static_cast<int>(ports.size()) <= 1) return MIN_VERTICAL_SEP;
 
-        double left_boundary = node_x - NODE_WIDTH / 2.0;
-        double right_boundary = node_x + NODE_WIDTH / 2.0;
+        double left_boundary = node_x - node_width / 2.0;
+        double right_boundary = node_x + node_width / 2.0;
         double min_spacing = MIN_VERTICAL_SEP;
 
         // Collect the x coordinate of the anchors: fixed ports and node boundaries.
@@ -556,8 +556,8 @@ namespace port_assignment_internal {
             else {
                 if (!xi.source_ports.empty() && !yj.target_ports.empty())
                     conflicts.emplace_back(upper_.nodes[i].get(), lower_.nodes[j].get());
-                double wi = upper_.nodes[i]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
-                double wj = lower_.nodes[j]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                double wi = upper_.nodes[i]->getWidth();
+                double wj = lower_.nodes[j]->getWidth();
                 if (wi < wj) i++;
                 else if (wi > wj) j++;
                 else { i++; j++; }
@@ -583,8 +583,7 @@ namespace port_assignment_internal {
     // the barycentric or mid point depending on the number of brother ports to avoid
     // having very unbalanced spacings between the many ports.
     //
-    // NOTE: This function is only called when the moving node is a real node, so
-    // NODE_WIDTH is always the correct width to use here.
+    // NOTE: This function is only called when the moving node is a real node.
 
     void PortAssigner::shiftWithFixedPort(double fixed_x, Node* moving_node,
         Port& moving_port, int port_index,
@@ -595,7 +594,7 @@ namespace port_assignment_internal {
 
         if (left) {
             double neighbour_x = (port_index == 0)
-                ? node_x - NODE_WIDTH / 2.0
+                ? node_x - moving_node->getWidth() / 2.0
                 : ports[port_index - 1].x;
             moving_port.x = (ports.size() == 1)
                 ? (neighbour_x + fixed_x) / 2.0
@@ -603,7 +602,7 @@ namespace port_assignment_internal {
         }
         else {
             double neighbour_x = (port_index == static_cast<int>(ports.size()) - 1)
-                ? node_x + NODE_WIDTH / 2.0
+                ? node_x + moving_node->getWidth() / 2.0
                 : ports[port_index + 1].x;
             moving_port.x = (ports.size() == 1)
                 ? (fixed_x + neighbour_x) / 2.0
@@ -795,8 +794,8 @@ namespace port_assignment_internal {
     double PortAssigner::leftBound(Node* upper_node, Node* lower_node, Port& x_o, Port& y_o,
         std::vector<Port>& upper_ports, std::vector<Port>& lower_ports,
         int idx, int idy, double min_sep, std::vector<std::pair<Port*, bool>>& merged) {
-        double left_upper_bound = (idx == 0) ? node_layout_.at(upper_node).x - NODE_WIDTH / 2.0 : upper_ports[idx - 1].x;
-        double left_lower_bound = (idy == 0) ? node_layout_.at(lower_node).x - NODE_WIDTH / 2.0 : lower_ports[idy - 1].x;
+        double left_upper_bound = (idx == 0) ? node_layout_.at(upper_node).x - upper_node->getWidth() / 2.0 : upper_ports[idx - 1].x;
+        double left_lower_bound = (idy == 0) ? node_layout_.at(lower_node).x - lower_node->getWidth() / 2.0 : lower_ports[idy - 1].x;
         if (left_upper_bound < left_lower_bound) { // x_-1 < y_-1
             if (merged.front().second) { // pos(x_o) < pos(y_o)
                 double desired_x = x_o.x - std::min((x_o.x - left_upper_bound) / 3.0, min_sep);
@@ -834,8 +833,8 @@ namespace port_assignment_internal {
         int idx, int idy, double min_sep, std::vector<std::pair<Port*, bool>>& merged) {
         int n = static_cast<int>(upper_ports.size()) - 1;
         int m = static_cast<int>(lower_ports.size()) - 1;
-        double right_upper_bound = (idx == n) ? node_layout_.at(upper_node).x + NODE_WIDTH / 2.0 : upper_ports[idx + 1].x;
-        double right_lower_bound = (idy == m) ? node_layout_.at(lower_node).x + NODE_WIDTH / 2.0 : lower_ports[idy + 1].x;
+        double right_upper_bound = (idx == n) ? node_layout_.at(upper_node).x + upper_node->getWidth() / 2.0 : upper_ports[idx + 1].x;
+        double right_lower_bound = (idy == m) ? node_layout_.at(lower_node).x + lower_node->getWidth() / 2.0 : lower_ports[idy + 1].x;
 
         if (right_upper_bound < right_lower_bound) { // x_n+1 < y_m+1
             if (!merged.back().second) { // pos(x_n) < pos(y_m)
@@ -1081,12 +1080,12 @@ namespace port_assignment_internal {
         double high = std::numeric_limits<double>::max();
         if (idx > 0) {
             Node* l = nodes[idx - 1].get();
-            double width_l = l->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            double width_l = l->getWidth();
             low = node_layout.at(l).x + width_l * 0.5 + MIN_BLOCK_SEP;
         }
         if (idx < static_cast<int>(nodes.size()) - 1) {
             Node* r = nodes[idx + 1].get();
-            double width_r = r->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+            double width_r = r->getWidth();
             high = node_layout.at(r).x - width_r * 0.5 - MIN_BLOCK_SEP;
         }
         return { low, high };
@@ -1327,8 +1326,9 @@ namespace port_assignment_internal {
                 const NodeLayout& nl = ctx.node_layout.at(n);
 
                 if (!n->isDummy()) {
-                    if (nl.x + NODE_WIDTH * 0.5 > lo && nl.x + NODE_WIDTH * 0.5 < hi) return false;
-                    if (nl.x - NODE_WIDTH * 0.5 > lo && nl.x - NODE_WIDTH * 0.5 < hi) return false;
+                    const double half_w = n->getWidth() * 0.5;
+                    if (nl.x + half_w > lo && nl.x + half_w < hi) return false;
+                    if (nl.x - half_w > lo && nl.x - half_w < hi) return false;
                 }
                 for (const Port& p : nl.source_ports) {
                     if (p.x > lo && p.x < hi) return false;
@@ -1343,7 +1343,7 @@ namespace port_assignment_internal {
 
     // ── Alignment candidates for one end of one chain ────────────────────────
     //
-    // near: counterpart ports within NODE_WIDTH*0.5 of the chain, sorted by
+    // near: counterpart ports within half the counterpart's width of the chain, sorted by
     //       distance to it. These are aligned to directly (see resolveChainEnd).
     // far : corridors [lo, hi] between a counterpart port that is too far to
     //       align to directly and the closest coordinate where the ORIGINAL
@@ -1399,7 +1399,7 @@ namespace port_assignment_internal {
             auto& other_ports = i_is_top ? ctx.node_layout.at(other).source_ports : ctx.node_layout.at(other).target_ports;
             for (Port& p : other_ports) {
                 if (p.edge != edge) continue;
-                if (std::abs(dummy_layout.x - p.x) <= NODE_WIDTH * 0.5) {
+                if (std::abs(dummy_layout.x - p.x) <= other->getWidth() * 0.5) {
                     info.near.push_back({ other, &p });
                 }
                 else {
@@ -1818,13 +1818,13 @@ namespace port_assignment_internal {
         double high = std::numeric_limits<double>::max();
         if (pos > 0) {
             Node* l = nodes[pos - 1].get();
-            double wl = l->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
-            low = ctx.node_layout.at(l).x + (wl + NODE_WIDTH) * 0.5 + MIN_BLOCK_SEP;
+            double wl = l->getWidth();
+            low = ctx.node_layout.at(l).x + (wl + nodes[pos]->getWidth()) * 0.5 + MIN_BLOCK_SEP;
         }
         if (pos < k - 1) {
             Node* r = nodes[pos + 1].get();
-            double wr = r->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
-            high = ctx.node_layout.at(r).x - (wr + NODE_WIDTH) * 0.5 - MIN_BLOCK_SEP;
+            double wr = r->getWidth();
+            high = ctx.node_layout.at(r).x - (wr + nodes[pos]->getWidth()) * 0.5 - MIN_BLOCK_SEP;
         }
         return { low, high };
     }
@@ -1880,13 +1880,13 @@ namespace port_assignment_internal {
         for (auto& [node, fixed] : adjusted_src) {
             NodeLayout& nl = ctx.node_layout.at(node);
             int pair_layer = node->getLayer();
-            double spacing = ctx.assigners[pair_layer]->redistributePorts(nl.source_ports, fixed, nl.x);
+            double spacing = ctx.assigners[pair_layer]->redistributePorts(nl.source_ports, fixed, nl.x, node->getWidth());
             ctx.min_spacing[pair_layer] = std::min(ctx.min_spacing[pair_layer], spacing);
         }
         for (auto& [node, fixed] : adjusted_tgt) {
             NodeLayout& nl = ctx.node_layout.at(node);
             int pair_layer = node->getLayer() - 1;
-            double spacing = ctx.assigners[pair_layer]->redistributePorts(nl.target_ports, fixed, nl.x);
+            double spacing = ctx.assigners[pair_layer]->redistributePorts(nl.target_ports, fixed, nl.x, node->getWidth());
             ctx.min_spacing[pair_layer] = std::min(ctx.min_spacing[pair_layer], spacing);
         }
     }
@@ -2102,19 +2102,19 @@ namespace hypergraph_logic {
 
                     double target = (min_p + max_p) * 0.5;
                     if (nl.x == target) continue;
-                    double width_n = n->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                    double width_n = n->getWidth();
 
                     double low = std::numeric_limits<double>::lowest();
                     if (i > 0) {
                         Node* l = nodes[i - 1].get();
-                        double width_l = l->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                        double width_l = l->getWidth();
                         low = node_layout_.at(l).x + (width_l + width_n) * 0.5 + MIN_BLOCK_SEP;
                     }
 
                     double high = std::numeric_limits<double>::max();
                     if (i < k - 1) {
                         Node* r = nodes[i + 1].get();
-                        double width_r = r->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+                        double width_r = r->getWidth();
                         high = node_layout_.at(r).x - (width_n + width_r) * 0.5 - MIN_BLOCK_SEP;
                     }
 
@@ -2169,12 +2169,10 @@ namespace hypergraph_logic {
                     double candidate = (min_x + max_x) * 0.5;
 
                     double low = (i == 0) ? std::numeric_limits<double>::lowest() :
-                        nodes[i - 1]->isDummy() ? node_layout_.at(nodes[i - 1].get()).x + (DUMMY_NODE_WIDTH + NODE_WIDTH) * 0.5 + MIN_BLOCK_SEP
-                        : node_layout_.at(nodes[i - 1].get()).x + NODE_WIDTH + MIN_BLOCK_SEP;
+                        node_layout_.at(nodes[i - 1].get()).x + (nodes[i - 1]->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
 
                     double high = (i == k - 1) ? std::numeric_limits<double>::max() :
-                        nodes[i + 1]->isDummy() ? node_layout_.at(nodes[i + 1].get()).x - (DUMMY_NODE_WIDTH + NODE_WIDTH) * 0.5 - MIN_BLOCK_SEP
-                        : node_layout_.at(nodes[i + 1].get()).x - NODE_WIDTH - MIN_BLOCK_SEP;
+                        node_layout_.at(nodes[i + 1].get()).x - (nodes[i + 1]->getWidth() + node->getWidth()) * 0.5 - MIN_BLOCK_SEP;
 
                     std::vector<Interval> forbidden_regions;
                     for (const auto& e : data.outgoing_edges) {

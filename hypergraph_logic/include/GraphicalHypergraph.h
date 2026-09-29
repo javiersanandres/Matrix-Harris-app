@@ -13,11 +13,20 @@ namespace hypergraph_logic {
 	// ── Port ──────────────────────────────────────────────────────────────────────
 	//
 	// A single connection point between a node and a hyperedge, carrying the
-	// x-coordinate at which the vertical segment of the edge leaves or arrives
+	// coordinates at which the vertical segment of the edge leaves or arrives
 	// at the node.
+	//
+	// x is fixed by port assignment (stage 4), which only cares about the node's
+	// width. y is fixed afterwards by assignYCoordinates (stage 5): the shape is
+	// inscribed in its getWidth() x getHeight() box and y is where the vertical
+	// line through x meets the shape's boundary — the bottom half for source
+	// ports, the top half for target ports. For rectangles that is always the
+	// box's bottom/top edge; for circles and rhombi it gets closer to the node's
+	// centre the further x is from it. Dummy ports sit exactly on the layer's y.
 	struct Port {
 		Hyperedge* edge = nullptr;  // The hyperedge this port belongs to.
 		double x = 0.0;             // Assigned x coordinate on the node's top/bottom edge.
+		double y = 0.0;             // Assigned y coordinate on the node's boundary.
 	};
 
 	// ── NodeLayout ────────────────────────────────────────────────────────────────
@@ -107,9 +116,12 @@ namespace hypergraph_logic {
 		// to new_y_coordinate. The span of a layer is calculated as follows:
 		//	[ ( h(next(layer)) + h(layer) ) / 2, ( h(prev(layer)) + h(layer) ) / 2 ]
 		// If there were no deepest layers the lower bound will be computed as:
-		//				h(layer) - NODE_HEIGHT / 2 - LAYER_GAP
+		//				h(layer) - (H(layer) + LAYER_GAP) / 2
 		// If there were no shallowest layers the upper bound will be computed as:
-		//				h(layer) + NODE_HEIGHT / 2 + LAYER_GAP
+		//				h(layer) + (H(layer) + LAYER_GAP) / 2
+		// where H(layer) is the height of the layer's tallest node. A coordinate
+		// above h(shallowest) + H(shallowest) / 2 + LAYER_GAP requests a new
+		// shallowest layer; anything else outside every span, a new deepest one.
 		//
 		void relocateNodeToLayer(const NodePtr& node, double new_y_coordinate, 
 									std::set<int>* out_altered_layers = nullptr);
@@ -252,10 +264,29 @@ namespace hypergraph_logic {
 
 		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────
 		//
-		// Assigns a y coordinate to the horizontal span of each hyperedge and a
-		// y coordinate to each layer.
+		// Assigns a y coordinate to the horizontal span of each hyperedge, a
+		// y coordinate to each layer, and a y coordinate to every port.
+		//
+		// Every node's centre lies on its layer's y. LAYER_GAP is measured from
+		// the layer's tallest node, i.e. from layer_y -/+ getLayerHeight(layer) / 2.
 		//
 		void assignYCoordinates();
+
+		// ── Stage 5.1: port y-coordinates ─────────────────────────────────────────
+		//
+		// Given layer_layout_ and every port's x, sets each port's y to the point
+		// where the vertical line through it meets its node's boundary (see Port).
+		// Called at the end of assignYCoordinates, and by fromJSON, since port y
+		// is fully determined by the rest of the layout and is not persisted.
+		//
+		void assignPortYCoordinates();
+
+		// ── getLayerHeight ────────────────────────────────────────────────────────
+		//
+		// Height of the tallest node in the given layer (dummies count as 0), or
+		// 0 if the layer does not exist.
+		//
+		double getLayerHeight(int layer) const;
 
 		// ── choosePositionForRelocatedNode (override) ─────────────────────────────
 		//

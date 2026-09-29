@@ -6,8 +6,9 @@
 // Shared constants and types for the graphical layout pipeline.
 //
 // All coordinates are in logical pixels (1 unit = 1 Qt pixel at 96 dpi).
-// Node boxes are drawn as rectangles; dummy nodes have zero visual width and
-// are rendered only as a pass-through bend point on an edge.
+// Real nodes are drawn with their own shape (rectangle, circle or rhombus),
+// each with its own width and height (see Node::getWidth / Node::getHeight);
+// dummy nodes are rendered only as a pass-through bend point on an edge.
 // ============================================================================
 
 namespace hypergraph_logic {
@@ -22,15 +23,31 @@ namespace hypergraph_logic {
     //   sep(a, b) = (blockWidth(a) + blockWidth(b)) / 2 + MIN_BLOCK_SEP
     inline constexpr double MIN_BLOCK_SEP = 60.0;
 
-    // Default width assigned to a real node box.
+    // Width assigned to a rectangular real node box.
     inline constexpr double NODE_WIDTH = 100.0;
 
-    // Default height assigned to a real node box.
+    // Height assigned to a rectangular real node box.
     inline constexpr double NODE_HEIGHT = 50.0;
+
+    // Circles and rhombi (a square rotated 45 degrees) are regular shapes, so
+    // both are inscribed in the same square bounding box. Its side is chosen so
+    // the circle covers the same area as a rectangular box (pi * 40^2 ~ 100 * 50),
+    // which makes both shapes look balanced next to rectangles while still
+    // leaving room for a short label in the middle of the rhombus.
+    inline constexpr double REGULAR_NODE_SIZE = 80.0;
+
+    inline constexpr double CIRCLE_NODE_WIDTH = REGULAR_NODE_SIZE;
+    inline constexpr double CIRCLE_NODE_HEIGHT = REGULAR_NODE_SIZE;
+
+    inline constexpr double RHOMBUS_NODE_WIDTH = REGULAR_NODE_SIZE;
+    inline constexpr double RHOMBUS_NODE_HEIGHT = REGULAR_NODE_SIZE;
 
     // Dummy nodes are invisible bend-points on edges. Due to vertical overlap
     // issues, we need to assing them a width for the port assignment step.
     inline constexpr double DUMMY_NODE_WIDTH = 10.0;
+
+    // Dummy nodes have no vertical extent: edges pass straight through them.
+    inline constexpr double DUMMY_NODE_HEIGHT = 0.0;
 
     // Minimum vertical gap between the vertical segments of two hyperedges
     // in the same layer. This is used just as a reference. There might be 

@@ -662,6 +662,221 @@ namespace hypergraph_logic {
                         EXPECT_TRUE(g.edgeLayout().count(e.get()));
             }
 
+            // ════════════════════════════════════════════════════════════════════════
+            // Node shapes — widths, heights and boundary-aware port y-coordinates
+            // ════════════════════════════════════════════════════════════════════════
+
+            static NodeAttributes shaped(const std::string& name, NodeShape shape) {
+                NodeAttributes a(name);
+                a.shape = shape;
+                return a;
+            }
+
+            static double layerHeight(TestGraph& g, int layer) {
+                double h = 0.0;
+                for (const auto& n : g.layers().at(layer).nodes) h = std::max(h, n->getHeight());
+                return h;
+            }
+
+            // Builds a graph mixing every shape: a circle root with three children (one of
+            // each shape), a rhombus root sharing a hyperedge with a rectangle root, and a
+            // long edge that forces dummies.
+            static void buildMixedShapeGraph(TestGraph& g) {
+                NodePtr C = g.createNode(shaped("C", NodeShape::Circle), -1, nullptr);
+                NodePtr R = g.createNode(shaped("R", NodeShape::Rhombus), -1, nullptr);
+                NodePtr Q = g.createNode("Q", -1, nullptr);
+                NodePtr c1 = g.createNode(shaped("c1", NodeShape::Circle), -1, C);
+                NodePtr c2 = g.createNode(shaped("c2", NodeShape::Rhombus), -1, C);
+                NodePtr c3 = g.createNode("c3", -1, C);
+                NodePtr r1 = g.createNode(shaped("r1", NodeShape::Rhombus), -1, R);
+                g.addSourceToEdge(findEdge(g, R, r1), Q);
+                NodePtr deep = g.createNode(shaped("deep", NodeShape::Circle), -1, c1);
+                g.addConnection(Q, deep); // long edge Q -> deep, split with a dummy
+            }
+
+            TEST(NodeGeometry, WidthAndHeightPerShape) {
+                Node rect("r"), circle(shaped("c", NodeShape::Circle)), rhombus(shaped("h", NodeShape::Rhombus)), dummy;
+                EXPECT_DOUBLE_EQ(rect.getWidth(), NODE_WIDTH);
+                EXPECT_DOUBLE_EQ(rect.getHeight(), NODE_HEIGHT);
+                EXPECT_DOUBLE_EQ(circle.getWidth(), CIRCLE_NODE_WIDTH);
+                EXPECT_DOUBLE_EQ(circle.getHeight(), CIRCLE_NODE_HEIGHT);
+                EXPECT_DOUBLE_EQ(rhombus.getWidth(), RHOMBUS_NODE_WIDTH);
+                EXPECT_DOUBLE_EQ(rhombus.getHeight(), RHOMBUS_NODE_HEIGHT);
+                EXPECT_DOUBLE_EQ(dummy.getWidth(), DUMMY_NODE_WIDTH);
+                EXPECT_DOUBLE_EQ(dummy.getHeight(), DUMMY_NODE_HEIGHT);
+                // Circle and rhombus are regular: inscribed in a square.
+                EXPECT_DOUBLE_EQ(circle.getWidth(), circle.getHeight());
+                EXPECT_DOUBLE_EQ(rhombus.getWidth(), rhombus.getHeight());
+            }
+
+            TEST(NodeGeometry, BoundaryHalfHeightPerShape) {
+                Node rect("r"), circle(shaped("c", NodeShape::Circle)), rhombus(shaped("h", NodeShape::Rhombus)), dummy;
+                const double r = REGULAR_NODE_SIZE / 2.0;
+
+                for (double dx : { 0.0, 10.0, -30.0, NODE_WIDTH / 2.0 })
+                    EXPECT_DOUBLE_EQ(rect.getBoundaryHalfHeight(dx), NODE_HEIGHT / 2.0);
+
+                EXPECT_DOUBLE_EQ(circle.getBoundaryHalfHeight(0.0), r);
+                EXPECT_NEAR(circle.getBoundaryHalfHeight(0.6 * r), 0.8 * r, 1e-9);  // 3-4-5 triangle
+                EXPECT_NEAR(circle.getBoundaryHalfHeight(-0.6 * r), 0.8 * r, 1e-9);
+                EXPECT_DOUBLE_EQ(circle.getBoundaryHalfHeight(r), 0.0);
+                EXPECT_DOUBLE_EQ(circle.getBoundaryHalfHeight(3.0 * r), 0.0);        // clamped
+
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(0.0), r);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(r / 2.0), r / 2.0);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(-r / 4.0), 0.75 * r);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(r), 0.0);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(-2.0 * r), 0.0);      // clamped
+
+                EXPECT_DOUBLE_EQ(dummy.getBoundaryHalfHeight(0.0), 0.0);
+            }
+
+            // Circle -> circle, single trivial edge: every distance follows from the
+            // circle's height instead of NODE_HEIGHT.
+            TEST(ShapeLayout, CircleChainUsesCircleHeightForLayerGap) {
+                TestGraph g("circle_chain");
+                NodePtr A = g.createNode(shaped("A", NodeShape::Circle), 0, nullptr);
+                NodePtr B = g.createNode(shaped("B", NodeShape::Circle), 0, A);
+                runFullPipeline(g);
+
+                const double half = REGULAR_NODE_SIZE / 2.0;
+                EXPECT_NEAR(g.layerLayout().at(1), -(half + LAYER_GAP + half), 1e-9);
+
+                // Single centred ports touch the circles at their lowest/highest point.
+                const Port& src = g.nodeLayout().at(A.get()).source_ports.at(0);
+                const Port& tgt = g.nodeLayout().at(B.get()).target_ports.at(0);
+                EXPECT_NEAR(src.x, g.nodeLayout().at(A.get()).x, 1e-9);
+                EXPECT_NEAR(src.y, -half, 1e-9);
+                EXPECT_NEAR(tgt.y, g.layerLayout().at(1) + half, 1e-9);
+            }
+
+            // Rectangles keep their previous geometry exactly.
+            TEST(ShapeLayout, RectanglePortsSitOnBoxEdges) {
+                TestGraph g("rect");
+                NodePtr A = g.createNode("A", 0, nullptr);
+                g.createNode("B", 0, A);
+                g.createNode("C", 1, A);
+                runFullPipeline(g);
+                for (const auto& [layer_idx, data] : g.layers()) {
+                    const double y = g.layerLayout().at(layer_idx);
+                    for (const auto& n : data.nodes) {
+                        for (const Port& p : g.nodeLayout().at(n.get()).source_ports)
+                            EXPECT_NEAR(p.y, y - NODE_HEIGHT / 2.0, 1e-9);
+                        for (const Port& p : g.nodeLayout().at(n.get()).target_ports)
+                            EXPECT_NEAR(p.y, y + NODE_HEIGHT / 2.0, 1e-9);
+                    }
+                }
+            }
+
+            // A circle with three outgoing edges: ports stay within its width, and the
+            // off-centre ones meet the boundary closer to the centre than the middle one.
+            TEST(ShapeLayout, OffCentrePortsOfCircleMeetBoundaryLower) {
+                TestGraph g("circle_fan");
+                NodePtr P = g.createNode(shaped("P", NodeShape::Circle), 0, nullptr);
+                g.createNode("a", 0, P);
+                g.createNode("b", 1, P);
+                g.createNode("c", 2, P);
+                runFullPipeline(g);
+
+                const NodeLayout& nl = g.nodeLayout().at(P.get());
+                ASSERT_EQ(nl.source_ports.size(), 3u);
+                double deepest = 0.0, shallowest = -std::numeric_limits<double>::max();
+                for (const Port& p : nl.source_ports) {
+                    EXPECT_LT(std::abs(p.x - nl.x), CIRCLE_NODE_WIDTH / 2.0);
+                    deepest = std::min(deepest, p.y);
+                    shallowest = std::max(shallowest, p.y);
+                }
+                EXPECT_LT(deepest, -0.75 * CIRCLE_NODE_HEIGHT / 2.0);  // the middle port, near the bottom
+                EXPECT_GE(deepest, -CIRCLE_NODE_HEIGHT / 2.0 - 1e-9);   // never below the circle
+                EXPECT_GT(shallowest, deepest + 1.0);                   // the outer ones sit higher
+            }
+
+            // Invariants over a graph mixing every shape and dummies.
+            TEST(ShapeLayout, MixedShapes_PortsLieOnTheirNodeBoundary) {
+                TestGraph g("mixed");
+                buildMixedShapeGraph(g);
+                runFullPipeline(g);
+
+                for (const auto& [layer_idx, data] : g.layers()) {
+                    const double y = g.layerLayout().at(layer_idx);
+                    for (const auto& n : data.nodes) {
+                        const NodeLayout& nl = g.nodeLayout().at(n.get());
+                        for (const Port& p : nl.source_ports) {
+                            EXPECT_LE(std::abs(p.x - nl.x), n->getWidth() / 2.0 + 1e-9);
+                            EXPECT_NEAR(p.y, y - n->getBoundaryHalfHeight(p.x - nl.x), 1e-9);
+                        }
+                        for (const Port& p : nl.target_ports) {
+                            EXPECT_LE(std::abs(p.x - nl.x), n->getWidth() / 2.0 + 1e-9);
+                            EXPECT_NEAR(p.y, y + n->getBoundaryHalfHeight(p.x - nl.x), 1e-9);
+                        }
+                        if (n->isDummy()) {
+                            for (const Port& p : nl.source_ports) EXPECT_NEAR(p.y, y, 1e-9);
+                            for (const Port& p : nl.target_ports) EXPECT_NEAR(p.y, y, 1e-9);
+                        }
+                    }
+                }
+            }
+
+            TEST(ShapeLayout, MixedShapes_LayerGapMeasuredFromTallestNode) {
+                TestGraph g("mixed");
+                buildMixedShapeGraph(g);
+                runFullPipeline(g);
+
+                for (const auto& [layer_idx, data] : g.layers()) {
+                    if (layer_idx == 0) continue;
+                    const double upper_bottom = g.layerLayout().at(layer_idx - 1) - layerHeight(g, layer_idx - 1) / 2.0;
+                    const double lower_top = g.layerLayout().at(layer_idx) + layerHeight(g, layer_idx) / 2.0;
+                    EXPECT_LE(lower_top, upper_bottom - LAYER_GAP + 1e-9) << "layer " << layer_idx;
+
+                    // Every non-trivial bar keeps LAYER_GAP from both node rows.
+                    for (const auto& e : g.layers().at(layer_idx - 1).outgoing_edges) {
+                        double bar_y = g.edgeLayout().at(e.get());
+                        if (std::abs(bar_y - upper_bottom) < 1e-9) continue; // trivial
+                        EXPECT_LE(bar_y, upper_bottom - LAYER_GAP + 1e-9);
+                        EXPECT_GE(bar_y, lower_top + LAYER_GAP - 1e-9);
+                    }
+                }
+            }
+
+            TEST(ShapeLayout, MixedShapes_NeighboursSeparatedByTheirOwnWidths) {
+                TestGraph g("mixed");
+                buildMixedShapeGraph(g);
+                runFullPipeline(g);
+
+                for (const auto& [layer_idx, data] : g.layers()) {
+                    for (size_t i = 1; i < data.nodes.size(); ++i) {
+                        const auto& l = data.nodes[i - 1];
+                        const auto& r = data.nodes[i];
+                        double gap = g.nodeLayout().at(r.get()).x - g.nodeLayout().at(l.get()).x;
+                        EXPECT_GE(gap, (l->getWidth() + r->getWidth()) / 2.0 + MIN_BLOCK_SEP - 1e-6)
+                            << "layer " << layer_idx << " between " << l->getName() << " and " << r->getName();
+                    }
+                }
+            }
+
+            TEST(ShapeLayout, PortYsSurviveCloneAndJsonRoundTrip) {
+                TestGraph g("mixed");
+                buildMixedShapeGraph(g);
+                runFullPipeline(g);
+
+                auto portYsByName = [](const GraphicalHypergraph& graph) {
+                    std::map<std::string, std::vector<double>> ys;
+                    for (const auto& n : graph.getAllNodes()) {
+                        if (n->isDummy()) continue;
+                        const NodeLayout& nl = graph.getNodeLayout().at(n.get());
+                        for (const Port& p : nl.source_ports) ys[n->getName()].push_back(p.y);
+                        for (const Port& p : nl.target_ports) ys[n->getName()].push_back(p.y);
+                    }
+                    return ys;
+                };
+
+                nlohmann::json j;
+                g.toJSON(j);
+                GraphicalHypergraph loaded = GraphicalHypergraph::fromJSON(j);
+                EXPECT_EQ(portYsByName(loaded), portYsByName(g));
+                EXPECT_EQ(portYsByName(g.clone()), portYsByName(g));
+            }
+
         } // namespace layout
     } // namespace graphicalhypergraph_tests
 } // namespace hypergraph_logic

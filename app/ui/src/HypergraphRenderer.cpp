@@ -15,14 +15,38 @@ namespace ui {
     // ============================================================================
     // computeNodeRect
     // ============================================================================
-    QRectF HypergraphRenderer::computeNodeRect(const NodeLayout& layout, double layer_y) {
+    QRectF HypergraphRenderer::computeNodeRect(const Node* node, const NodeLayout& layout, double layer_y) {
         double cx = layout.x;
         double cy = -layer_y;   // negate: layout y=0 → Qt top, deeper → Qt down
-        return QRectF(
-            cx - NODE_WIDTH / 2.0,
-            cy - NODE_HEIGHT / 2.0,
-            NODE_WIDTH,
-            NODE_HEIGHT);
+        double w = node->getWidth();
+        double h = node->getHeight();
+        return QRectF(cx - w / 2.0, cy - h / 2.0, w, h);
+    }
+
+    // ============================================================================
+    // nodeShapePath
+    // ============================================================================
+    QPainterPath HypergraphRenderer::nodeShapePath(const Node* node, const QRectF& rect) {
+        QPainterPath path;
+        switch (node->getShape()) {
+        case NodeShape::Circle:
+            path.addEllipse(rect);
+            break;
+        case NodeShape::Rhombus: {
+            QPolygonF rhombus;
+            rhombus << QPointF(rect.center().x(), rect.top())
+                << QPointF(rect.right(), rect.center().y())
+                << QPointF(rect.center().x(), rect.bottom())
+                << QPointF(rect.left(), rect.center().y());
+            path.addPolygon(rhombus);
+            path.closeSubpath();
+            break;
+        }
+        default:
+            path.addRect(rect);
+            break;
+        }
+        return path;
     }
 
     // ============================================================================
@@ -66,7 +90,7 @@ namespace ui {
             for (const auto& node : layer_data.nodes) {
                 if (node->isDummy()) continue;
                 const NodeLayout& nl = node_layout.at(node.get());
-                place_node(node.get(), computeNodeRect(nl, layer_y));
+                place_node(node.get(), computeNodeRect(node.get(), nl, layer_y));
             }
 
             // ── Step 2: initialise on first layer ─────────────────────────────────
@@ -77,40 +101,45 @@ namespace ui {
             }
 
             double layer_y_prev = layer_layout.at(layer_idx - 1);
-            const double trivial_y = layer_y_prev - NODE_HEIGHT / 2.0;
+
+            // ── Step 3: gather the ports of each edge ─────────────────────────────
+            //
+            // An edge is trivial when all its ports share one x (the same rule
+            // assignYCoordinates uses): it needs no horizontal bar, just a single
+            // vertical segment from its source port down to its target port.
+            std::unordered_map<Hyperedge*, EdgeInfo> edge_info_cache;
+            std::unordered_set<Hyperedge*> trivial_edges; // for quick lookup when drawing horizontal bars
+            for (const auto& edge : incoming_edges) {
+                EdgeInfo& info = edge_info_cache[edge.get()];
+                buildPortMaps(edge, node_layout, info);
+                if (info.x_min == info.x_max) trivial_edges.insert(edge.get());
+            }
 
             std::stable_partition(incoming_edges.begin(), incoming_edges.end(),
-                [&](const HyperedgePtr& e) {
-                    auto it = edge_layout.find(e.get());
-                    return it != edge_layout.end() &&
-                        std::abs(it->second - trivial_y) < 1e-9;
-                });
+                [&](const HyperedgePtr& e) { return trivial_edges.count(e.get()) > 0; });
 
             std::map<double, std::vector<VerticalRange>> vertical_occupancy;
 
-            // ── Step 3: process each edge ─────────────────────────────────────────
+            // ── Step 4: process each edge ─────────────────────────────────────────
 
             // First, draw the vertical segments. Then, if the bar is non-trivial, draw th
             // horizontal bar. This is the only way to ensure that the horizontal bar hops
             // over all vertical segments that it crosses.
-            std::unordered_map<Hyperedge*, EdgeInfo> edge_info_cache;
-            std::unordered_set<Hyperedge*> trivial_edges; // for quick lookup when drawing horizontal bars
             for (const auto& edge : incoming_edges) {
                 Hyperedge* orig = get_original(edge);
                 if (!orig) continue;
-                auto it_bar = edge_layout.find(edge.get());
-                double bar_y = (it_bar != edge_layout.end()) ? it_bar->second : trivial_y;
-                bool is_trivial = (std::abs(bar_y - trivial_y) < 1e-9);
-                if (is_trivial) trivial_edges.insert(edge.get());
+                const EdgeInfo& info = edge_info_cache.at(edge.get());
+                if (info.src_ports.empty() || info.tgt_ports.empty()) continue;
 
-                edge_info_cache.emplace(edge.get(), EdgeInfo());
-                buildPortMaps(edge, node_layout, edge_info_cache[edge.get()]);
+                bool is_trivial = trivial_edges.count(edge.get()) > 0;
+                auto it_bar = edge_layout.find(edge.get());
+                double bar_y = (it_bar != edge_layout.end()) ? it_bar->second : layer_y_prev;
 
                 QPainterPath& path = ensure_path(orig);
 
                 drawVerticalSegments(
-                    edge_info_cache[edge.get()].src_ports, edge_info_cache[edge.get()].tgt_ports,
-                    bar_y, layer_y_prev, layer_y,
+                    info.src_ports, info.tgt_ports,
+                    bar_y, layer_y_prev,
                     is_trivial,
                     node_layout, vertical_occupancy, path);
             }
@@ -130,7 +159,7 @@ namespace ui {
             nodes_in_prev_layer = layer_data.nodes;
         }
 
-        // ── Step 4: commit one path per original edge ─────────────────────────────
+        // ── Step 5: commit one path per original edge ─────────────────────────────
         for (auto& [raw, path] : edge_paths)
             commit_edge(raw, path);
     }
@@ -141,7 +170,7 @@ namespace ui {
     void HypergraphRenderer::render(
         const GraphicalHypergraph& graph,
         QGraphicsScene* scene,
-        std::unordered_map<Node*, QGraphicsRectItem*>& node_items,
+        std::unordered_map<Node*, QGraphicsPathItem*>& node_items,
         std::unordered_map<Hyperedge*, QGraphicsPathItem*>& edge_items)
     {
         scene->clear();
@@ -154,7 +183,7 @@ namespace ui {
         coreSweep(graph,
             // place_node
             [&](Node* node, const QRectF& rect) {
-                auto* item = scene->addRect(rect, node_pen, QBrush(QColor(255, 255, 200)));
+                auto* item = scene->addPath(nodeShapePath(node, rect), node_pen, QBrush(QColor(255, 255, 200)));
                 // Label
                 auto* label = new QGraphicsSimpleTextItem(
                     QString::fromStdString(node->getName()), item);
@@ -213,7 +242,7 @@ namespace ui {
             if (it == node_layout.end()) continue;
             for (const auto& port : it->second.source_ports) {
                 if (port.edge == segment.get()) {
-                    edge_info.src_ports.push_back({ port.x, src_node.get() });
+                    edge_info.src_ports.push_back({ port.x, port.y, src_node.get() });
                     edge_info.x_min = std::min(edge_info.x_min, port.x);
                     edge_info.x_max = std::max(edge_info.x_max, port.x);
                     break;
@@ -225,7 +254,7 @@ namespace ui {
             if (it == node_layout.end()) continue;
             for (const auto& port : it->second.target_ports) {
                 if (port.edge == segment.get()) {
-                    edge_info.tgt_ports.push_back({ port.x, tgt_node.get() });
+                    edge_info.tgt_ports.push_back({ port.x, port.y, tgt_node.get() });
                     edge_info.x_min = std::min(edge_info.x_min, port.x);
                     edge_info.x_max = std::max(edge_info.x_max, port.x);
                     break;
@@ -242,8 +271,7 @@ namespace ui {
         const std::vector<PortInfo>& tgt_ports,
         double                                        bar_y,
         double                                        layer_y_prev,
-        double                                        layer_y,
-        bool                                          is_trivial,
+        bool                                         is_trivial,
         const std::unordered_map<Node*, NodeLayout>& node_layout,
         std::map<double, std::vector<VerticalRange>>& vertical_occupancy,
         QPainterPath& path)
@@ -252,9 +280,8 @@ namespace ui {
             const auto& src_port = src_ports.front();
             const auto& tgt_port = tgt_ports.front();
             bool is_dummy_src = src_port.generating_node->isDummy();
-            bool is_dummy_tgt = tgt_port.generating_node->isDummy();
-            double y_top = is_dummy_src ? layer_y_prev : (layer_y_prev - NODE_HEIGHT / 2.0);
-            double y_bottom = is_dummy_tgt ? layer_y : (layer_y + NODE_HEIGHT / 2.0);
+            double y_top = src_port.y;
+            double y_bottom = tgt_port.y;
 
             vertical_occupancy[src_port.x].push_back({ y_bottom, y_top });
             path.moveTo(src_port.x, -y_top);
@@ -280,7 +307,7 @@ namespace ui {
         for (const auto& pi : src_ports) {
             double x = pi.x;
             bool is_dummy = pi.generating_node->isDummy();
-            double y_top = is_dummy ? layer_y_prev : (layer_y_prev - NODE_HEIGHT / 2.0);
+            double y_top = pi.y;
             double y_bot = bar_y;
 
             path.moveTo(x, -y_top);
@@ -305,9 +332,8 @@ namespace ui {
         // ── Target ports ──────────────────────────────────────────────────────────
         for (const auto& pi : tgt_ports) {
             double x = pi.x;
-            bool is_dummy = pi.generating_node->isDummy();
             double y_top = bar_y;
-            double y_bot = is_dummy ? layer_y : (layer_y + NODE_HEIGHT / 2.0);
+            double y_bot = pi.y;
 
             path.moveTo(x, -y_top);
             path.lineTo(x, -y_bot);

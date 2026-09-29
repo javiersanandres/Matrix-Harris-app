@@ -13,12 +13,12 @@ namespace app_logic {
 	// just in case some code changes, at leas we are prepared to guarantee that
 	// the undo stack is not corrupted by failed operations.
 	NodePtr HypergraphEditor::createNode(
-		const std::string& label, int layer_position, const NodePtr& parent)
+		const NodeAttributes& attributes, int layer_position, const NodePtr& parent)
 	{
 		auto saved = takeSnapshot();
 		try {
 			std::set<int> mip_layers;
-			NodePtr result = graph_.createNode(label, layer_position, parent, &mip_layers);
+			NodePtr result = graph_.createNode(attributes, layer_position, parent, &mip_layers);
 			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;
@@ -29,12 +29,12 @@ namespace app_logic {
 	}
 
 	NodePtr HypergraphEditor::createParent(
-		const std::string& label, const NodePtr& child)
+		const NodeAttributes& attributes, const NodePtr& child)
 	{
 		auto saved = takeSnapshot();
 		try {
 			std::set<int> mip_layers;
-			NodePtr result = graph_.createParent(label, child, &mip_layers);
+			NodePtr result = graph_.createParent(attributes, child, &mip_layers);
 			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
 			return result;
@@ -45,17 +45,17 @@ namespace app_logic {
 	}
 
 	NodePtr HypergraphEditor::createNodeInEdge(
-		const std::string& label, const HyperedgePtr& edge)
+		const NodeAttributes& attributes, const HyperedgePtr& edge)
 	{
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
 			std::set<int> mip_layers;
 			if (edge->isSegment()) {
-				result = graph_.createNodeInEdge(label, edge->getOrigin().lock(), &mip_layers);
+				result = graph_.createNodeInEdge(attributes, edge->getOrigin().lock(), &mip_layers);
 			}
 			else {
-				result = graph_.createNodeInEdge(label, edge, &mip_layers);
+				result = graph_.createNodeInEdge(attributes, edge, &mip_layers);
 			}
 			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
@@ -67,12 +67,12 @@ namespace app_logic {
 	}
 
 	NodePtr HypergraphEditor::createNodeNextTo(
-		const std::string& label, const NodePtr& node, bool left)
+		const NodeAttributes& attributes, const NodePtr& node, bool left)
 	{
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
-			result = graph_.createNodeNextTo(label, node, left);
+			result = graph_.createNodeNextTo(attributes, node, left);
 			graph_.computeLayout({});
 			commitSnapshot(std::move(saved));
 			return result;
@@ -83,17 +83,17 @@ namespace app_logic {
 	}
 
 	NodePtr HypergraphEditor::createSource(
-		const std::string& label, int layer_position, const HyperedgePtr& edge)
+		const NodeAttributes& attributes, int layer_position, const HyperedgePtr& edge)
 	{
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
 			std::set<int> mip_layers;
 			if (edge->isSegment()) {
-				result = graph_.createSource(label, layer_position, edge->getOrigin().lock(), &mip_layers);
+				result = graph_.createSource(attributes, layer_position, edge->getOrigin().lock(), &mip_layers);
 			}
 			else {
-				result = graph_.createSource(label, layer_position, edge, &mip_layers);
+				result = graph_.createSource(attributes, layer_position, edge, &mip_layers);
 			}
 			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));
@@ -105,17 +105,17 @@ namespace app_logic {
 	}
 
 	NodePtr HypergraphEditor::createTarget(
-		const std::string& label, int layer_position, const HyperedgePtr& edge)
+		const NodeAttributes& attributes, int layer_position, const HyperedgePtr& edge)
 	{
 		auto saved = takeSnapshot();
 		try {
 			NodePtr result;
 			std::set<int> mip_layers;
 			if (edge->isSegment()) {
-				result = graph_.createTarget(label, layer_position, edge->getOrigin().lock(), &mip_layers);
+				result = graph_.createTarget(attributes, layer_position, edge->getOrigin().lock(), &mip_layers);
 			}
 			else {
-				result = graph_.createTarget(label, layer_position, edge, &mip_layers);
+				result = graph_.createTarget(attributes, layer_position, edge, &mip_layers);
 			}
 			graph_.computeLayout(mip_layers);
 			commitSnapshot(std::move(saved));

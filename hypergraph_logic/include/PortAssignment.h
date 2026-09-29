@@ -42,11 +42,12 @@ namespace port_assignment_internal {
 
 		// Redistributes free ports evenly within each gap defined by fixed anchor
 		// ports and the node boundaries. Called by reduceHorizontalJogs after all
-		// alignments are done to restore symmetry on affected nodes.
+		// alignments are done to restore symmetry on affected nodes. The node boundaries
+		// are node_x -/+ node_width / 2.
 		// Returns the minimum spacing produced between adjacent ports after redistribution.
 		double redistributePorts(std::vector<Port>& ports,
 			const std::unordered_set<Port*>& fixed,
-			double node_x) const;
+			double node_x, double node_width) const;
 
 		// Detect and resolve vertical-segment overlaps between this layer pair.
 		// min_vertical_sep: the minimum required x-gap between any two vertical segments.

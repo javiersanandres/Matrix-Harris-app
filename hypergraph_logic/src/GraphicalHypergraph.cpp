@@ -21,6 +21,36 @@ namespace hypergraph_logic {
 		std::vector<EdgeSpan> bars; // bars that occupy this y level.
 	};
 
+	double GraphicalHypergraph::getLayerHeight(int layer) const {
+		auto it = layers_.find(layer);
+		if (it == layers_.end()) return 0.0;
+		double height = 0.0;
+		for (const auto& n : it->second.nodes)
+			height = std::max(height, n->getHeight());
+		return height;
+	}
+
+	void GraphicalHypergraph::assignPortYCoordinates() {
+		for (const auto& [layer_idx, layer_data] : layers_) {
+			auto layer_it = layer_layout_.find(layer_idx);
+			if (layer_it == layer_layout_.end()) continue;
+			const double layer_y = layer_it->second;
+
+			for (const auto& node : layer_data.nodes) {
+				auto it = node_layout_.find(node.get());
+				if (it == node_layout_.end()) continue;
+				NodeLayout& nl = it->second;
+
+				// Source ports leave through the bottom half of the shape (more negative y),
+				// target ports arrive through the top half (less negative y).
+				for (auto& port : nl.source_ports)
+					port.y = layer_y - node->getBoundaryHalfHeight(port.x - nl.x);
+				for (auto& port : nl.target_ports)
+					port.y = layer_y + node->getBoundaryHalfHeight(port.x - nl.x);
+			}
+		}
+	}
+
 	void GraphicalHypergraph::assignYCoordinates() {
 		// incoming_edges: the outgoing_edges of the previous layer, i.e. the hyperedges
 		// that cross the gap above the current layer being processed.
@@ -30,15 +60,18 @@ namespace hypergraph_logic {
 		std::vector<NodePtr> nodes_in_prev_layer;
 
 		for (const auto& [layer_idx, layer_data] : layers_) {
+			// Every node's centre sits on its layer's y, so the tallest node of a layer
+			// decides how far that layer reaches up and down.
+			const double half_height = getLayerHeight(layer_idx) / 2.0;
+			const double prev_half_height = getLayerHeight(layer_idx - 1) / 2.0;
+
 			if (incoming_edges.empty() || nodes_in_prev_layer.empty()) {
 				if (layer_idx == 0) {
 					// No incoming edges for the top layer, so just place it at y=0.
 					layer_layout_[layer_idx] = 0.0;
 				}
 				else {
-					// This should never happen for layer_idx > 0, but just in case,
-					// we place it below the previous layer with a gap.
-					layer_layout_[layer_idx] = layer_layout_[layer_idx - 1] - LAYER_GAP - NODE_HEIGHT;
+					layer_layout_[layer_idx] = layer_layout_[layer_idx - 1] - prev_half_height - LAYER_GAP - half_height;
 				}
 				// Carry forward for the next gap.
 				incoming_edges = layer_data.outgoing_edges;
@@ -91,15 +124,15 @@ namespace hypergraph_logic {
 			// closest to the lower node row).
 			// New conflict levels are appended at the back (more negative).
 			//
-			// The first available slot is just below the upper layer's node boxes:
-			//   first_y = layer_layout_[layer_idx-1] - NODE_HEIGHT/2 - LAYER_GAP
+			// The first available slot is just below the upper layer's tallest node:
+			//   first_y = layer_layout_[layer_idx-1] - H(layer_idx-1)/2 - LAYER_GAP
 			//
 			// Edges earlier in incoming_edges were placed higher (less negative y) by
 			// the ordering step.  For each non-trivial edge we walk y_levels from the
 			// back (most negative) toward index 0 (least negative) and take the first
 			// (least negative) slot that has no x-overlap.  If every slot conflicts we
 			// push a new level one HORIZONTAL_SEP further negative.
-			const double first_y = layer_layout_[layer_idx - 1] - NODE_HEIGHT / 2 - LAYER_GAP;
+			const double first_y = layer_layout_[layer_idx - 1] - prev_half_height - LAYER_GAP;
 			std::vector<YLevel> y_levels{ { first_y, {} } };
 
 			for (const auto& edge : incoming_edges) {
@@ -107,8 +140,10 @@ namespace hypergraph_logic {
 
 				if (s.xmin == s.xmax) {
 					// Trivial: no horizontal bar needed. Place it flush against the
-					// bottom of the upper node boxes (least negative possible).
-					edge_layout_[edge.get()] = layer_layout_[layer_idx - 1] - NODE_HEIGHT / 2.0;
+					// bottom of the upper layer's tallest node (least negative possible).
+					// The bar is never drawn: the edge is a single vertical segment
+					// between its source and target ports.
+					edge_layout_[edge.get()] = layer_layout_[layer_idx - 1] - prev_half_height;
 					continue;
 				}
 
@@ -153,16 +188,18 @@ namespace hypergraph_logic {
 				// No bars at the first level, which means that all hyperedges are trivial
 				// and therfore, the next layer_layout does not need to be pushed down by
 				// the default gap.
-				layer_layout_[layer_idx] = layer_layout_[layer_idx - 1] - LAYER_GAP - NODE_HEIGHT;
+				layer_layout_[layer_idx] = layer_layout_[layer_idx - 1] - prev_half_height - LAYER_GAP - half_height;
 			}
 			else {
-				// The current layer's node row sits one LAYER_GAP below the bottom-most bar.
-				layer_layout_[layer_idx] = y_levels.back().y - LAYER_GAP - NODE_HEIGHT / 2.0;
+				// The current layer's tallest node top sits one LAYER_GAP below the bottom-most bar.
+				layer_layout_[layer_idx] = y_levels.back().y - LAYER_GAP - half_height;
 			}
 
 			incoming_edges = layer_data.outgoing_edges;
 			nodes_in_prev_layer = layer_data.nodes;
 		}
+
+		assignPortYCoordinates();
 	}
 
 	void GraphicalHypergraph::computeLayout(const std::set<int>& mip_layers) {
@@ -300,7 +337,7 @@ namespace hypergraph_logic {
 				lower_bound = (h_next + hL) / 2.0;
 			}
 			else {
-				lower_bound = hL - (NODE_HEIGHT + LAYER_GAP) / 2.0;
+				lower_bound = hL - (getLayerHeight(L) + LAYER_GAP) / 2.0;
 			}
 
 			// Upper bound involves the *previous* (shallower) layer.
@@ -310,7 +347,7 @@ namespace hypergraph_logic {
 				upper_bound = (h_prev + hL) / 2.0;
 			}
 			else {
-				upper_bound = hL + (NODE_HEIGHT + LAYER_GAP) / 2.0;
+				upper_bound = hL + (getLayerHeight(L) + LAYER_GAP) / 2.0;
 			}
 
 			if (new_y_coordinate >= lower_bound && new_y_coordinate <= upper_bound) {
@@ -325,7 +362,7 @@ namespace hypergraph_logic {
 			// shallowest layer (new shallowest layer) or below the deepest layer
 			// (new deepest layer).
 			const double h_shallowest = layer_layout_.at(shallowest);
-			const double shallowest_upper = h_shallowest + NODE_HEIGHT / 2.0 + LAYER_GAP;
+			const double shallowest_upper = h_shallowest + getLayerHeight(shallowest) / 2.0 + LAYER_GAP;
 
 			if (new_y_coordinate > shallowest_upper) {
 				desired_layer = -1;          // brand-new shallowest layer

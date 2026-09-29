@@ -29,40 +29,40 @@ namespace app_logic {
 		//
 		// Clones the graph, attempts createNode + computeLayout(), and commits the
 		// snapshot to past_ only if both succeed.
-		NodePtr createNode(const std::string& label, int layer_position,
+		NodePtr createNode(const NodeAttributes& attributes, int layer_position,
 			const NodePtr& parent);
 
 		// ── createParent  ─────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attemps createParent + computeLayout(), and commits the
 		// snapshot to past_ only if both succeed.
-		NodePtr createParent(const std::string& label, const NodePtr& child);
+		NodePtr createParent(const NodeAttributes& attributes, const NodePtr& child);
 
 		// ── createNodeInEdge  ─────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts createNodeInEdge + computeLayout(), and commits 
 		// the snapshot to past_ only if both succeed.
-		NodePtr createNodeInEdge(const std::string& label, const HyperedgePtr& edge);
+		NodePtr createNodeInEdge(const NodeAttributes& attributes, const HyperedgePtr& edge);
 
 		// ── createNodeNextTo ──────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts createNodeNextTo + computeLayout(), and commits 
 		// the snapshot to past_ only if both succeed.
-		NodePtr createNodeNextTo(const std::string& label, const NodePtr& node, 
+		NodePtr createNodeNextTo(const NodeAttributes& attributes, const NodePtr& node, 
 			bool left);
 
 		// ── createSource ─────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts createSource + computeLayout(), and commits the
 		// snapshot to past_ only if both succeed.
-		NodePtr createSource(const std::string& label, int layer_position,
+		NodePtr createSource(const NodeAttributes& attributes, int layer_position,
 			const HyperedgePtr& edge);
 
 		// ── createTarget ─────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts createTarget + computeLayout(), and commits the
 		// snapshot to past_ only if both succeed.
-		NodePtr createTarget(const std::string& label, int layer_position,
+		NodePtr createTarget(const NodeAttributes& attributes, int layer_position,
 			const HyperedgePtr& edge);
 
 		// ── canUndo / canRedo predicates ──────────────────────────────────────────

@@ -134,13 +134,14 @@ namespace bk_internal {
 #ifdef BK_TEST
 		if (g.nodes[v] == nullptr) return NODE_WIDTH;
 #endif
-		if (!g.nodes[v]->isDummy()) return NODE_WIDTH;
+		// All members of a block share one x, so the block is as wide as its widest member.
+		double width = g.nodes[v]->getWidth();
 		int cur_id = B.align[v];
 		while (cur_id != v) {
-			if (!g.nodes[cur_id]->isDummy()) return NODE_WIDTH;
+			width = std::max(width, g.nodes[cur_id]->getWidth());
 			cur_id = B.align[cur_id];
 		}
-		return DUMMY_NODE_WIDTH;
+		return width;
 	}
 
 	// ── Algorithm 2: verticalAlignment ───────────────────────────────────────────
@@ -422,19 +423,19 @@ namespace bk_internal {
 			double target;
 			if (!brightenTarget(g, x, v, target)) continue;
 
-			double width_v = g.nodes[v]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+			double width_v = g.nodes[v]->getWidth();
 
 			double low = std::numeric_limits<double>::lowest();
 			if (i > 0) {
 				int l = nodes[i - 1];
-				double width_l = g.nodes[l]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+				double width_l = g.nodes[l]->getWidth();
 				low = x[l] + (width_l + width_v) * 0.5 + MIN_BLOCK_SEP;
 			}
 
 			double high = std::numeric_limits<double>::max();
 			if (i < k - 1) {
 				int r = nodes[i + 1];
-				double width_r = g.nodes[r]->isDummy() ? DUMMY_NODE_WIDTH : NODE_WIDTH;
+				double width_r = g.nodes[r]->getWidth();
 				high = x[r] - (width_v + width_r) * 0.5 - MIN_BLOCK_SEP;
 			}
 

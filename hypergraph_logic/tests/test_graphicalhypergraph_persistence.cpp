@@ -981,6 +981,94 @@ namespace hypergraph_logic {
                 assertStructurallyEqual(loaded1, loaded2);
             }
 
+            // =========================================================================
+            // Node attributes and desired layers survive clone() and JSON round-trips
+            // =========================================================================
+
+            static NodeAttributes customAttributes(const std::string& name) {
+                NodeAttributes a(name);
+                a.shape = NodeShape::Circle;
+                a.colour = { 10, 20, 30, 40 };
+                a.font_colour = { 250, 240, 230, 255 };
+                a.font_size = 17;
+                a.fire = FireState::FireWithAshes;
+                return a;
+            }
+
+            // Builds A->B plus a root C pushed down to layer 1 by an explicit override.
+            static void buildGraphWithAttributesAndOverride(TestableGraphicalHypergraph& g) {
+                auto A = g.createNode(customAttributes("A"), -1, nullptr);
+                g.createNode("B", -1, A);
+                auto C = g.createNode("C", -1, nullptr);
+                g.Hypergraph::relocateNodeToLayer(C, 1);
+                g.computeLayout();
+                ASSERT_EQ(C->getDesiredLayer(), 1);
+            }
+
+            static void assertAttributesAndOverridePreserved(const TestableGraphicalHypergraph& copy) {
+                auto by_name = nodesByName(copy);
+                EXPECT_EQ(by_name.at("A")->getAttributes(), customAttributes("A"));
+                EXPECT_EQ(by_name.at("B")->getAttributes(), NodeAttributes("B"));
+                EXPECT_EQ(by_name.at("C")->getDesiredLayer(), 1);
+                EXPECT_EQ(by_name.at("A")->getDesiredLayer(), -1);
+            }
+
+            TEST_F(PersistenceTest, Clone_PreservesNodeAttributesAndDesiredLayer) {
+                buildGraphWithAttributesAndOverride(g);
+                auto copy = TestableGraphicalHypergraph(g.clone());
+                assertAttributesAndOverridePreserved(copy);
+            }
+
+            TEST_F(PersistenceTest, InMemory_RoundTrip_PreservesNodeAttributesAndDesiredLayer) {
+                buildGraphWithAttributesAndOverride(g);
+                nlohmann::json j;
+                g.toJSON(j);
+                auto loaded = TestableGraphicalHypergraph(GraphicalHypergraph::fromJSON(j));
+                assertAllInvariants(loaded);
+                assertAttributesAndOverridePreserved(loaded);
+            }
+
+            TEST_F(PersistenceTest, FromJSON_LegacyNodeEntries_GetDefaultAttributes) {
+                buildSimpleGraph();
+                nlohmann::json j;
+                g.toJSON(j);
+                // Strip every field that did not exist before node attributes were introduced.
+                for (auto& entry : j.at("nodes")) {
+                    for (const char* key : { "shape", "colour", "font_colour", "font_size", "fire", "desired_layer" })
+                        entry.erase(key);
+                }
+                auto loaded = TestableGraphicalHypergraph(GraphicalHypergraph::fromJSON(j));
+                assertAllInvariants(loaded);
+                auto by_name = nodesByName(loaded);
+                EXPECT_EQ(by_name.at("A")->getAttributes(), NodeAttributes("A"));
+                EXPECT_EQ(by_name.at("B")->getDesiredLayer(), -1);
+            }
+
+            TEST_F(PersistenceTest, FromJSON_AcceptsOpaqueHexColour) {
+                buildSimpleGraph();
+                nlohmann::json j;
+                g.toJSON(j);
+                for (auto& entry : j.at("nodes"))
+                    if (entry.at("name") == "A") entry["colour"] = "#FF8000";
+                auto loaded = TestableGraphicalHypergraph(GraphicalHypergraph::fromJSON(j));
+                EXPECT_EQ(nodesByName(loaded).at("A")->getColour(), (Color{ 255, 128, 0, 255 }));
+            }
+
+            TEST_F(PersistenceTest, FromJSON_InvalidAttributeValues_Throw) {
+                buildSimpleGraph();
+                nlohmann::json base;
+                g.toJSON(base);
+                auto with = [&](const char* key, const char* value) {
+                    nlohmann::json j = base;
+                    j.at("nodes")[0][key] = value;
+                    return j;
+                };
+                EXPECT_THROW(GraphicalHypergraph::fromJSON(with("shape", "hexagon")), std::runtime_error);
+                EXPECT_THROW(GraphicalHypergraph::fromJSON(with("fire", "smoke")), std::runtime_error);
+                EXPECT_THROW(GraphicalHypergraph::fromJSON(with("colour", "#12")), std::runtime_error);
+                EXPECT_THROW(GraphicalHypergraph::fromJSON(with("colour", "#GGGGGG")), std::runtime_error);
+            }
+
         } // namespace persistence
     } // namespace graphicalhypergraph_tests
 } // namespace hypergraph_logic

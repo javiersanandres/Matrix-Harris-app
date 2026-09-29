@@ -464,6 +464,61 @@ namespace app_logic {
                 EXPECT_EQ(ed.getAllNodes()[0]->getName(), "A");
             }
 
+            // ── node attributes ───────────────────────────────────────────────
+
+            static NodeAttributes styledAttributes(const std::string& name) {
+                NodeAttributes a(name);
+                a.shape = NodeShape::Rhombus;
+                a.colour = { 200, 0, 0, 255 };
+                a.font_colour = { 255, 255, 255, 255 };
+                a.font_size = 12;
+                a.fire = FireState::Fire;
+                return a;
+            }
+
+            TEST(HypergraphEditor, CreateNodeWithAttributes) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode(styledAttributes("A"), 0, nullptr);
+                EXPECT_EQ(A->getAttributes(), styledAttributes("A"));
+            }
+
+            TEST(HypergraphEditor, SetNodeAttributesCommitsSnapshot) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);
+                while (ed.canUndo()) ed.undo();
+                ed.setNodeAttributes(A, styledAttributes("Z"));
+                EXPECT_EQ(A->getAttributes(), styledAttributes("Z"));
+                EXPECT_TRUE(ed.canUndo());
+            }
+
+            TEST(HypergraphEditor, UndoRedoSetNodeAttributes) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                ed.createNode("A", 0, nullptr);
+                ed.setNodeAttributes(ed.getAllNodes()[0], styledAttributes("Z"));
+                ed.undo();
+                EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), NodeAttributes("A"));
+                ed.redo();
+                EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), styledAttributes("Z"));
+            }
+
+            TEST(HypergraphEditor, UndoKeepsAttributesOfUntouchedNodes) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                ed.createNode(styledAttributes("A"), 0, nullptr);
+                ed.createNode("B", 1, nullptr);
+                ed.undo();  // undo creating B; A comes from a snapshot clone
+                ASSERT_EQ(ed.getAllNodes().size(), 1u);
+                EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), styledAttributes("A"));
+            }
+
+            TEST(HypergraphEditor, FuseNodesWithAttributes) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);
+                NodePtr B = ed.createNode("B", 1, nullptr);
+                ed.fuseNodes(A, B, styledAttributes("AB"));
+                ASSERT_EQ(ed.getAllNodes().size(), 1u);
+                EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), styledAttributes("AB"));
+            }
+
             // ── setName ───────────────────────────────────────────────────────
 
             TEST(HypergraphEditor, SetNameUpdatesGetName) {

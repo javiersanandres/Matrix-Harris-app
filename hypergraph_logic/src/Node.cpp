@@ -1,35 +1,130 @@
 #include "Node.h"
+#include "LayoutTypes.h"
 #include <algorithm>
+#include <cmath>
+#include <stdexcept>
 
 namespace hypergraph_logic {
 
 	// ============================================================================
 	// Construction
 	// ============================================================================
-	Node::Node(std::string name)
-		: is_dummy_(false)
-		, name_(std::move(name))
+	Node::Node(NodeAttributes attributes)
+		: attributes_(std::move(attributes))
 		, layer_(0)
 		, desired_layer_(-1) {
 	}
 
+	Node::Node(std::string name)
+		: Node(NodeAttributes(std::move(name))) {
+	}
+
+	Node::Node(const char* name)
+		: Node(NodeAttributes(name)) {
+	}
+
 	Node::Node()
-		: is_dummy_(true)
-		, name_("")
+		: attributes_(std::nullopt)
 		, layer_(0)
 		, desired_layer_(-1) {
 	}
 
 	bool Node::isDummy() const noexcept {
-		return is_dummy_;
+		return !attributes_.has_value();
+	}
+
+	// ============================================================================
+	// Attributes
+	// ============================================================================
+	const NodeAttributes& Node::getAttributes() const noexcept {
+		static const NodeAttributes dummy_attributes{};
+		return attributes_ ? *attributes_ : dummy_attributes;
+	}
+
+	void Node::setAttributes(NodeAttributes attributes) {
+		if (isDummy()) {
+			throw std::logic_error("Cannot set attributes on a dummy node.");
+		}
+		attributes_ = std::move(attributes);
 	}
 
 	const std::string& Node::getName() const noexcept {
-		return name_;
+		return getAttributes().name;
 	}
 
 	void Node::setName(const std::string& name) {
-		name_ = name;
+		if (isDummy()) {
+			throw std::logic_error("Cannot rename a dummy node.");
+		}
+		attributes_->name = name;
+	}
+
+	NodeShape Node::getShape() const noexcept {
+		return getAttributes().shape;
+	}
+
+	const Color& Node::getColour() const noexcept {
+		return getAttributes().colour;
+	}
+
+	const Color& Node::getFontColour() const noexcept {
+		return getAttributes().font_colour;
+	}
+
+	int Node::getFontSize() const noexcept {
+		return getAttributes().font_size;
+	}
+
+	FireState Node::getFireState() const noexcept {
+		return getAttributes().fire;
+	}
+
+	bool Node::isFire() const noexcept {
+		return getAttributes().isFire();
+	}
+
+	bool Node::hasAshes() const noexcept {
+		return getAttributes().hasAshes();
+	}
+
+	// ============================================================================
+	// Geometry
+	// ============================================================================
+	double Node::getWidth() const noexcept {
+		if (isDummy()) return DUMMY_NODE_WIDTH;
+		switch (attributes_->shape) {
+		case NodeShape::Circle:  return CIRCLE_NODE_WIDTH;
+		case NodeShape::Rhombus: return RHOMBUS_NODE_WIDTH;
+		default:                 return NODE_WIDTH;
+		}
+	}
+
+	double Node::getHeight() const noexcept {
+		if (isDummy()) return DUMMY_NODE_HEIGHT;
+		switch (attributes_->shape) {
+		case NodeShape::Circle:  return CIRCLE_NODE_HEIGHT;
+		case NodeShape::Rhombus: return RHOMBUS_NODE_HEIGHT;
+		default:                 return NODE_HEIGHT;
+		}
+	}
+
+	double Node::getBoundaryHalfHeight(double dx) const noexcept {
+		if (isDummy()) return 0.0;
+
+		const double half_w = getWidth() / 2.0;
+		const double half_h = getHeight() / 2.0;
+		const double adx = std::min(std::abs(dx), half_w);
+
+		switch (attributes_->shape) {
+		case NodeShape::Circle:
+			// Ellipse equation, which reduces to the circle for the square bounding box.
+			return half_h * std::sqrt(std::max(0.0, 1.0 - (adx / half_w) * (adx / half_w)));
+		case NodeShape::Rhombus:
+			// Vertices at (±half_w, 0) and (0, ±half_h): the boundary is linear in |dx|.
+			return half_h * (1.0 - adx / half_w);
+		default:
+			return half_h;
+		}
 	}
 
 	int Node::getLayer() const noexcept {

@@ -16,6 +16,63 @@ namespace hypergraph_logic::node_tests {
         EXPECT_FALSE(node->isDummy());
     }
 
+    TEST(RealNode, NameConstructorAppliesDefaultAttributes) {
+        auto node = std::make_shared<Node>("TestNode");
+        const NodeAttributes& a = node->getAttributes();
+        EXPECT_EQ(a.name, "TestNode");
+        EXPECT_EQ(a.shape, NodeShape::Rectangle);
+        EXPECT_EQ(a.colour, (Color{ 255, 255, 200, 255 }));
+        EXPECT_EQ(a.font_colour, (Color{ 0, 0, 0, 255 }));
+        EXPECT_EQ(a.font_size, NodeAttributes::DEFAULT_FONT_SIZE);
+        EXPECT_EQ(a.fire, FireState::None);
+        EXPECT_FALSE(node->isFire());
+        EXPECT_FALSE(node->hasAshes());
+    }
+
+    TEST(RealNode, AttributesConstructorKeepsEveryField) {
+        NodeAttributes a("Fire");
+        a.shape = NodeShape::Rhombus;
+        a.colour = { 255, 0, 0, 255 };
+        a.font_colour = { 255, 255, 255, 128 };
+        a.font_size = 14;
+        a.fire = FireState::FireWithAshes;
+
+        auto node = std::make_shared<Node>(a);
+        EXPECT_FALSE(node->isDummy());
+        EXPECT_EQ(node->getAttributes(), a);
+        EXPECT_EQ(node->getShape(), NodeShape::Rhombus);
+        EXPECT_EQ(node->getColour(), (Color{ 255, 0, 0, 255 }));
+        EXPECT_EQ(node->getFontColour(), (Color{ 255, 255, 255, 128 }));
+        EXPECT_EQ(node->getFontSize(), 14);
+        EXPECT_TRUE(node->isFire());
+        EXPECT_TRUE(node->hasAshes());
+    }
+
+    TEST(RealNode, FireStateQueries) {
+        NodeAttributes a("F");
+        a.fire = FireState::Fire;
+        EXPECT_TRUE(a.isFire());
+        EXPECT_FALSE(a.hasAshes());
+    }
+
+    TEST(RealNode, SetNameKeepsOtherAttributes) {
+        NodeAttributes a("Old");
+        a.shape = NodeShape::Circle;
+        auto node = std::make_shared<Node>(a);
+        node->setName("New");
+        EXPECT_EQ(node->getName(), "New");
+        EXPECT_EQ(node->getShape(), NodeShape::Circle);
+    }
+
+    TEST(RealNode, SetAttributesReplacesEverything) {
+        auto node = std::make_shared<Node>("Old");
+        NodeAttributes a("New");
+        a.shape = NodeShape::Circle;
+        a.fire = FireState::Fire;
+        node->setAttributes(a);
+        EXPECT_EQ(node->getAttributes(), a);
+    }
+
     // ============================================================================
     // Dummy Node Tests
     // ============================================================================
@@ -25,6 +82,19 @@ namespace hypergraph_logic::node_tests {
 
         EXPECT_TRUE(dummy->isDummy());
         EXPECT_EQ(dummy->getName(), "");
+    }
+
+    TEST(DummyNode, ReportsDefaultAttributes) {
+        auto dummy = std::make_shared<Node>();
+        EXPECT_EQ(dummy->getAttributes(), NodeAttributes{});
+        EXPECT_FALSE(dummy->isFire());
+    }
+
+    TEST(DummyNode, CannotBeGivenAttributes) {
+        auto dummy = std::make_shared<Node>();
+        EXPECT_THROW(dummy->setAttributes(NodeAttributes("X")), std::logic_error);
+        EXPECT_THROW(dummy->setName("X"), std::logic_error);
+        EXPECT_TRUE(dummy->isDummy());
     }
 
     // ============================================================================

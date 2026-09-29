@@ -305,8 +305,8 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Connection addition management
 	// ============================================================================
-	NodePtr Hypergraph::createNode(const std::string& label, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers) {
-		NodePtr node = std::make_shared<Node>(label);
+	NodePtr Hypergraph::createNode(const NodeAttributes& attributes, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers) {
+		NodePtr node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(node);
 
 		if (!parent) {
@@ -326,11 +326,11 @@ namespace hypergraph_logic {
 		return node;
 	}
 
-	NodePtr Hypergraph::createParent(const std::string& label, const NodePtr& child, std::set<int>* out_altered_layers) {
+	NodePtr Hypergraph::createParent(const NodeAttributes& attributes, const NodePtr& child, std::set<int>* out_altered_layers) {
 		if (!child) {
 			throw std::invalid_argument("Child node cannot be null when creating a parent.");
 		}
-		NodePtr node = std::make_shared<Node>(label);
+		NodePtr node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(node);
 		addNodeToLayer(std::max(child->getLayer()-1, 0), -1, node);
 		HyperedgePtr edge = createHyperedge({ node }, { child }, -1); // layer -1: not placed yet, nothing to report here.
@@ -352,9 +352,9 @@ namespace hypergraph_logic {
 		return node;
 	}
 
-	NodePtr Hypergraph::createNodeInEdge(const std::string& label, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
+	NodePtr Hypergraph::createNodeInEdge(const NodeAttributes& attributes, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
 		if (!edge) return nullptr;
-		NodePtr node = std::make_shared<Node>(label);
+		NodePtr node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(node);
 
 		// Snapshot sources and targets before modifying.
@@ -403,9 +403,9 @@ namespace hypergraph_logic {
 		return node;
 	}
 
-	NodePtr Hypergraph::createNodeNextTo(const std::string& label, const NodePtr& node, bool left) {
+	NodePtr Hypergraph::createNodeNextTo(const NodeAttributes& attributes, const NodePtr& node, bool left) {
 		if (!node) return nullptr;
-		NodePtr new_node = std::make_shared<Node>(label);
+		NodePtr new_node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(new_node);
 
 		int layer = node->getLayer();
@@ -429,7 +429,7 @@ namespace hypergraph_logic {
 		return new_node;
 	}
 
-	NodePtr Hypergraph::createSource(const std::string& label, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
+	NodePtr Hypergraph::createSource(const NodeAttributes& attributes, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
 		if (!edge) return nullptr;
 		if (edge->getSources().empty() || edge->getTargets().empty()) {
 			// Every edge reachable through the public API always has both, by construction (any edge
@@ -439,7 +439,7 @@ namespace hypergraph_logic {
 			throw std::logic_error("Edge must already have at least one source and one target.");
 		}
 
-		NodePtr node = std::make_shared<Node>(label);
+		NodePtr node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(node);
 
 		int layer_before = edge->getLayer();
@@ -465,9 +465,9 @@ namespace hypergraph_logic {
 		return node;
 	}
 
-	NodePtr Hypergraph::createTarget(const std::string& label, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
+	NodePtr Hypergraph::createTarget(const NodeAttributes& attributes, int layer_position, const HyperedgePtr& edge, std::set<int>* out_altered_layers) {
 		if (!edge) return nullptr;
-		NodePtr node = std::make_shared<Node>(label);
+		NodePtr node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(node);
 
 		int layer_before = edge->getLayer();
@@ -1372,7 +1372,7 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Node fusion management
 	// ============================================================================
-	void Hypergraph::fuseNodes(const NodePtr& node1, const NodePtr& node2, const std::string& new_name, std::set<int>* out_altered_layers) {
+	void Hypergraph::fuseNodes(const NodePtr& node1, const NodePtr& node2, const NodeAttributes& new_attributes, std::set<int>* out_altered_layers) {
 		if (!node1 || !node2) return;
 		if (node1 == node2) {
 			throw std::invalid_argument("Cannot fuse a node with itself.");
@@ -1437,7 +1437,7 @@ namespace hypergraph_logic {
 		}
 
 		// Now we know that no cycles are added, we can safely fuse the nodes.
-		survivor->setName(new_name);
+		survivor->setAttributes(new_attributes);
 		if (survivor->getLayer() != absorbed->getLayer()) {
 			survivor->setDesiredLayer(absorbed->getDesiredLayer());
 		}

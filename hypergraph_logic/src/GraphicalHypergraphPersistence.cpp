@@ -9,6 +9,103 @@ using json = nlohmann::json;
 namespace hypergraph_logic {
 
 	// ============================================================================
+	// Node attribute (de)serialization helpers
+	//
+	// Enums are stored by name and colours as "#RRGGBBAA" strings so saved files
+	// stay human-readable and independent of the enums' underlying values.
+	// ============================================================================
+	namespace {
+
+		const char* shapeToString(NodeShape shape) {
+			switch (shape) {
+			case NodeShape::Circle:  return "circle";
+			case NodeShape::Rhombus: return "rhombus";
+			default:                 return "rectangle";
+			}
+		}
+
+		NodeShape shapeFromString(const std::string& s) {
+			if (s == "rectangle") return NodeShape::Rectangle;
+			if (s == "circle")    return NodeShape::Circle;
+			if (s == "rhombus")   return NodeShape::Rhombus;
+			throw std::runtime_error("GraphicalHypergraph::fromJSON: unknown node shape: " + s);
+		}
+
+		const char* fireToString(FireState fire) {
+			switch (fire) {
+			case FireState::Fire:          return "fire";
+			case FireState::FireWithAshes: return "fire_with_ashes";
+			default:                       return "none";
+			}
+		}
+
+		FireState fireFromString(const std::string& s) {
+			if (s == "none")            return FireState::None;
+			if (s == "fire")            return FireState::Fire;
+			if (s == "fire_with_ashes") return FireState::FireWithAshes;
+			throw std::runtime_error("GraphicalHypergraph::fromJSON: unknown fire state: " + s);
+		}
+
+		std::string colorToString(const Color& c) {
+			static const char* hex = "0123456789ABCDEF";
+			std::string out = "#";
+			for (uint8_t component : { c.r, c.g, c.b, c.a }) {
+				out += hex[component >> 4];
+				out += hex[component & 0x0F];
+			}
+			return out;
+		}
+
+		Color colorFromString(const std::string& s) {
+			// Accepts "#RRGGBB" (opaque) and "#RRGGBBAA".
+			if ((s.size() != 7 && s.size() != 9) || s[0] != '#')
+				throw std::runtime_error("GraphicalHypergraph::fromJSON: invalid colour: " + s);
+			auto nibble = [&](char ch) -> uint8_t {
+				if (ch >= '0' && ch <= '9') return static_cast<uint8_t>(ch - '0');
+				if (ch >= 'A' && ch <= 'F') return static_cast<uint8_t>(ch - 'A' + 10);
+				if (ch >= 'a' && ch <= 'f') return static_cast<uint8_t>(ch - 'a' + 10);
+				throw std::runtime_error("GraphicalHypergraph::fromJSON: invalid colour: " + s);
+			};
+			auto component = [&](size_t pos) -> uint8_t {
+				return static_cast<uint8_t>((nibble(s[pos]) << 4) | nibble(s[pos + 1]));
+			};
+			Color c;
+			c.r = component(1);
+			c.g = component(3);
+			c.b = component(5);
+			c.a = s.size() == 9 ? component(7) : 255;
+			return c;
+		}
+
+		void attributesToJSON(const NodeAttributes& a, json& entry) {
+			entry["name"] = a.name;
+			entry["shape"] = shapeToString(a.shape);
+			entry["colour"] = colorToString(a.colour);
+			entry["font_colour"] = colorToString(a.font_colour);
+			entry["font_size"] = a.font_size;
+			entry["fire"] = fireToString(a.fire);
+		}
+
+		// Every field but the name is optional, so files saved before node attributes
+		// existed still load, with the missing fields taking their default values.
+		NodeAttributes attributesFromJSON(const json& entry) {
+			NodeAttributes a(entry.at("name").get<std::string>());
+			if (entry.contains("shape"))
+				a.shape = shapeFromString(entry.at("shape").get<std::string>());
+			if (entry.contains("colour"))
+				a.colour = colorFromString(entry.at("colour").get<std::string>());
+			if (entry.contains("font_colour"))
+				a.font_colour = colorFromString(entry.at("font_colour").get<std::string>());
+			if (entry.contains("font_size"))
+				a.font_size = entry.at("font_size").get<int>();
+			if (entry.contains("fire"))
+				a.fire = fireFromString(entry.at("fire").get<std::string>());
+			return a;
+		}
+
+	} // namespace
+
+	// ============================================================================
 	// ID generation
 	// ============================================================================
 
@@ -29,8 +126,9 @@ namespace hypergraph_logic {
 		for (const auto& n : all_nodes_) {
 			NodePtr new_node = n->isDummy()
 				? std::make_shared<Node>()
-				: std::make_shared<Node>(n->getName());
+				: std::make_shared<Node>(n->getAttributes());
 			new_node->setLayer(n->getLayer());
+			new_node->setDesiredLayer(n->getDesiredLayer());
 			node_map[n.get()] = new_node;
 			copy.all_nodes_.push_back(new_node);
 		}
@@ -95,9 +193,9 @@ namespace hypergraph_logic {
 			NodeLayout new_layout;
 			new_layout.x = layout.x;
 			for (const auto& port : layout.source_ports)
-				new_layout.source_ports.push_back({ edge_map.at(port.edge).get(), port.x });
+				new_layout.source_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y });
 			for (const auto& port : layout.target_ports)
-				new_layout.target_ports.push_back({ edge_map.at(port.edge).get(), port.x });
+				new_layout.target_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y });
 			copy.node_layout_[node_map.at(raw).get()] = new_layout;
 		}
 		for (const auto& [raw, y] : edge_layout_)
@@ -159,8 +257,12 @@ namespace hypergraph_logic {
 			json entry;
 			entry["id"] = node_id[n.get()];
 			entry["dummy"] = n->isDummy();
-			entry["name"] = n->getName();
+			if (n->isDummy())
+				entry["name"] = n->getName();
+			else
+				attributesToJSON(n->getAttributes(), entry);
 			entry["layer"] = n->getLayer();
+			entry["desired_layer"] = n->getDesiredLayer();
 			nodes_arr.push_back(std::move(entry));
 		}
 		j["nodes"] = std::move(nodes_arr);
@@ -296,12 +398,14 @@ namespace hypergraph_logic {
 		for (const auto& entry : j.at("nodes")) {
 			int id = entry.at("id").get<int>();
 			bool dummy = entry.at("dummy").get<bool>();
-			std::string nm = entry.at("name").get<std::string>();
 			int layer = entry.at("layer").get<int>();
+			// Older files carry no desired layer: treat every node as un-overridden.
+			int desired_layer = entry.value("desired_layer", -1);
 
 			NodePtr n = dummy ? std::make_shared<Node>()
-				: std::make_shared<Node>(nm);
+				: std::make_shared<Node>(attributesFromJSON(entry));
 			n->setLayer(layer);
+			n->setDesiredLayer(desired_layer);
 			node_by_id[id] = n;
 			g.all_nodes_.push_back(n);
 		}
@@ -434,6 +538,10 @@ namespace hypergraph_logic {
 			double y = ee.at("y").get<double>();
 			g.edge_layout_[edge_by_id.at(eid).get()] = y;
 		}
+
+		// Port y-coordinates are not persisted: they follow from the layer y's,
+		// the port x's and each node's shape.
+		g.assignPortYCoordinates();
 
 		return g;
 	}

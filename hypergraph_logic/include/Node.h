@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <memory>
 #include <optional>
 #include <string>
@@ -14,6 +15,61 @@ namespace hypergraph_logic {
 	using WeakNodePtr = std::weak_ptr<Node>;
 
 	// ============================================================================
+	// Node attributes
+	//
+	// Everything the user can introduce about a real node. Kept free of any Qt
+	// dependency so the logic libraries stay GUI-agnostic; the UI translates
+	// Color into a QColor (QColor(r, g, b, a)) when rendering.
+	// ============================================================================
+
+	enum class NodeShape { Rectangle, Circle, Rhombus };
+
+	// Whether a node represents a fire and, if so, whether that fire has ashes.
+	// A single enum (instead of two booleans) makes "ashes without fire" unrepresentable.
+	enum class FireState { None, Fire, FireWithAshes };
+
+	struct Color {
+		uint8_t r = 0;
+		uint8_t g = 0;
+		uint8_t b = 0;
+		uint8_t a = 255;
+
+		bool operator==(const Color& other) const noexcept {
+			return r == other.r && g == other.g && b == other.b && a == other.a;
+		}
+		bool operator!=(const Color& other) const noexcept { return !(*this == other); }
+	};
+
+	struct NodeAttributes {
+		// Default font size in points: the one Qt applies by default to the node labels.
+		static constexpr int DEFAULT_FONT_SIZE = 9;
+
+		std::string name;
+		NodeShape shape = NodeShape::Rectangle;
+		Color colour = { 255, 255, 200, 255 };  // light yellow
+		Color font_colour = { 0, 0, 0, 255 };   // black
+		int font_size = DEFAULT_FONT_SIZE;
+		FireState fire = FireState::None;
+
+		NodeAttributes() = default;
+
+		// Intentionally implicit: lets every API that takes NodeAttributes keep
+		// accepting a plain label, in which case all other attributes are defaulted.
+		NodeAttributes(std::string node_name) : name(std::move(node_name)) {}
+		NodeAttributes(const char* node_name) : name(node_name) {}
+
+		bool isFire() const noexcept { return fire != FireState::None; }
+		bool hasAshes() const noexcept { return fire == FireState::FireWithAshes; }
+
+		bool operator==(const NodeAttributes& other) const noexcept {
+			return name == other.name && shape == other.shape && colour == other.colour
+				&& font_colour == other.font_colour && font_size == other.font_size
+				&& fire == other.fire;
+		}
+		bool operator!=(const NodeAttributes& other) const noexcept { return !(*this == other); }
+	};
+
+	// ============================================================================
 	// Node
 	//
 	// A vertex in a hierarchical hypergraph.
@@ -23,8 +79,8 @@ namespace hypergraph_logic {
 	// graph as a whole and is computed and stored by the hypergraph, not here.
 	//
 	// Real nodes  (isDummy() == false) are supplied by the caller and carry a
-	// name.  Dummy nodes (isDummy() == true) are inserted automatically during
-	// long-edge splitting. 
+	// set of NodeAttributes.  Dummy nodes (isDummy() == true) are inserted
+	// automatically during long-edge splitting and carry no attributes at all.
 	//
 	// Ownership model:
 	//   - The graph holds shared_ptr<Node> for every vertex.
@@ -40,14 +96,21 @@ namespace hypergraph_logic {
 	public:
 		// ── Node (real) ───────────────────────────────────────────────────────────────────────────────
 		//
-		// Constructs a real node with the given name. Real nodes are the meaningful vertices
+		// Constructs a real node with the given attributes. Real nodes are the meaningful vertices
 		// supplied by the caller; they are never created internally by the graph infrastructure.
 		//
+		explicit Node(NodeAttributes attributes);
+
+		// ── Node (real, by name) ──────────────────────────────────────────────────────────────────────
+		//
+		// Convenience constructor: a real node with the given name and default attributes.
+		//
 		explicit Node(std::string name);
+		explicit Node(const char* name);
 
 		// ── Node (dummy) ──────────────────────────────────────────────────────────────────────────────
 		//
-		// Constructs a dummy node with no name. Dummy nodes are inserted automatically by the
+		// Constructs a dummy node with no attributes. Dummy nodes are inserted automatically by the
 		// graph when a long hyperedge is split into a chain of short segment edges, one dummy
 		// per intermediate layer. They are invisible to the caller and carry no semantic content.
 		//
@@ -60,6 +123,21 @@ namespace hypergraph_logic {
 		//
 		bool isDummy() const noexcept;
 
+		// ── getAttributes ─────────────────────────────────────────────────────────────────────────────
+		//
+		// Returns the attributes of this node. For dummy nodes, which carry none, a shared
+		// default-constructed instance (empty name) is returned instead.
+		//
+		const NodeAttributes& getAttributes() const noexcept;
+
+		// ── setAttributes ─────────────────────────────────────────────────────────────────────────────
+		//
+		// Replaces all attributes of this node at once. Primarily used during node fusion, where
+		// two nodes are merged into one and the surviving node takes the requested attributes.
+		// Throws std::logic_error on dummy nodes.
+		//
+		void setAttributes(NodeAttributes attributes);
+
 		// ── getName ───────────────────────────────────────────────────────────────────────────────────
 		//
 		// Returns the name of this node. For dummy nodes the name is always an empty string.
@@ -68,10 +146,46 @@ namespace hypergraph_logic {
 
 		// ── setName ───────────────────────────────────────────────────────────────────────────────────
 		//
-		// Updates the name of this node. Primarily used during node fusion, where two nodes
-		// are merged into one and the surviving node is renamed to the requested label.
+		// Updates only the name of this node, leaving every other attribute untouched.
+		// Throws std::logic_error on dummy nodes.
 		//
 		void setName(const std::string& name);
+
+		// ── Attribute shortcuts ───────────────────────────────────────────────────────────────────────
+		//
+		// Read-only shortcuts to the individual attributes. For dummy nodes they report the defaults.
+		//
+		NodeShape getShape() const noexcept;
+		const Color& getColour() const noexcept;
+		const Color& getFontColour() const noexcept;
+		int getFontSize() const noexcept;
+		FireState getFireState() const noexcept;
+		bool isFire() const noexcept;
+		bool hasAshes() const noexcept;
+
+		// ====================================================================
+		// Geometry
+		// ====================================================================
+
+		// ── getWidth / getHeight ──────────────────────────────────────────────────────────────────────
+		//
+		// Returns the width/height of the box this node occupies in the drawing, as defined in
+		// LayoutTypes.h for its shape. Circles and rhombi report the side of the square they are
+		// inscribed in. Dummy nodes report DUMMY_NODE_WIDTH / DUMMY_NODE_HEIGHT.
+		//
+		double getWidth() const noexcept;
+		double getHeight() const noexcept;
+
+		// ── getBoundaryHalfHeight ─────────────────────────────────────────────────────────────────────
+		//
+		// Returns the vertical distance from the node's centre to its boundary along the vertical
+		// line at horizontal offset dx from that centre. The shape is symmetric, so the same value
+		// applies above and below the centre. This is where a hyperedge's vertical segment meets
+		// the node: for a rectangle it is always getHeight() / 2, for a circle and a rhombus it
+		// shrinks towards 0 as |dx| approaches getWidth() / 2. Offsets outside the shape are
+		// clamped to its left/right edge. Dummy nodes always return 0.
+		//
+		double getBoundaryHalfHeight(double dx) const noexcept;
 
 		// ====================================================================
 		// Layer management
@@ -209,8 +323,7 @@ namespace hypergraph_logic {
 		/// Set (or clear, with -1) the user-requested layer override (called by Hypergraph only)
 		void setDesiredLayer(int desired_layer) noexcept;
 
-		bool is_dummy_;
-		std::string name_; // empty for dummy nodes
+		std::optional<NodeAttributes> attributes_; // std::nullopt for dummy nodes
 		int layer_;  // Layer assignment by hypergraph
 		int desired_layer_;  // User-requested layer override, or -1. Managed by Hypergraph only.
 		std::vector<WeakNodePtr> parents_;
