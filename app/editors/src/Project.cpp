@@ -155,6 +155,18 @@ namespace app_logic {
 		return unsaved_changes_;
 	}
 
+	void Project::addRecentColour(const Color& colour) {
+		if (!recent_colours_.empty() && recent_colours_.front() == colour) return;
+
+		recent_colours_.erase(
+			std::remove(recent_colours_.begin(), recent_colours_.end(), colour),
+			recent_colours_.end());
+		recent_colours_.insert(recent_colours_.begin(), colour);
+		if (static_cast<int>(recent_colours_.size()) > MAX_RECENT_COLOURS)
+			recent_colours_.resize(MAX_RECENT_COLOURS);
+		markUnsaved();
+	}
+
 	// ============================================================================
 	// save
 	// ============================================================================
@@ -177,6 +189,11 @@ namespace app_logic {
 		json jj;
 		joint_editor_->toJSON(jj);
 		j["joint"] = std::move(jj);
+
+		json colours = json::array();
+		for (const auto& c : recent_colours_)
+			colours.push_back(colorToHex(c));
+		j["recent_colours"] = std::move(colours);
 
 		std::ofstream out(path);
 		if (!out.is_open())
@@ -221,6 +238,18 @@ namespace app_logic {
 		p->joint_editor_.reset();
 		p->joint_editor_ = std::make_unique<JointHypergraphEditor>(
 			JointGraphicalHypergraph::fromJSON(j.at("joint")));
+
+		// Projects saved before recent colours existed simply start with none.
+		if (j.contains("recent_colours")) {
+			for (const auto& c : j.at("recent_colours")) {
+				try {
+					p->recent_colours_.push_back(colorFromHex(c.get<std::string>()));
+				}
+				catch (const std::invalid_argument& e) {
+					throw std::runtime_error(std::string("Project::load: ") + e.what());
+				}
+			}
+		}
 
 		p->active_index_ = j.at("active_index").get<int>();
 		p->file_path_ = path;

@@ -40,6 +40,14 @@ namespace hypergraph_logic {
 		bool operator!=(const Color& other) const noexcept { return !(*this == other); }
 	};
 
+	// ── Colour <-> "#RRGGBBAA" ────────────────────────────────────────────────────────────────────
+	//
+	// colorToHex always writes "#RRGGBBAA" (uppercase). colorFromHex accepts "#RRGGBB" (opaque)
+	// and "#RRGGBBAA", either case, and throws std::invalid_argument on anything else.
+	//
+	std::string colorToHex(const Color& c);
+	Color colorFromHex(const std::string& s);
+
 	struct NodeAttributes {
 		// Default font size in points: the one Qt applies by default to the node labels.
 		static constexpr int DEFAULT_FONT_SIZE = 9;

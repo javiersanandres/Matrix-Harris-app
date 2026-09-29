@@ -1,8 +1,9 @@
 #include "HypergraphRenderer.h"
 #include "NodeItem.h"
 #include "HyperedgeItem.h"
+#include "NodeVisuals.h"
 
-#include <QGraphicsSimpleTextItem>
+#include <QPainter>
 #include <QPen>
 #include <QBrush>
 
@@ -27,27 +28,37 @@ namespace ui {
     // nodeShapePath
     // ============================================================================
     QPainterPath HypergraphRenderer::nodeShapePath(const Node* node, const QRectF& rect) {
-        QPainterPath path;
-        switch (node->getShape()) {
-        case NodeShape::Circle:
-            path.addEllipse(rect);
-            break;
-        case NodeShape::Rhombus: {
-            QPolygonF rhombus;
-            rhombus << QPointF(rect.center().x(), rect.top())
-                << QPointF(rect.right(), rect.center().y())
-                << QPointF(rect.center().x(), rect.bottom())
-                << QPointF(rect.left(), rect.center().y());
-            path.addPolygon(rhombus);
-            path.closeSubpath();
-            break;
-        }
-        default:
-            path.addRect(rect);
-            break;
-        }
-        return path;
+        return node_visuals::shapePath(node->getShape(), rect);
     }
+
+    // ============================================================================
+    // StaticNodeItem
+    //
+    // Non-interactive node item for the static overload: a path item (so callers
+    // keep a QGraphicsPathItem*) that paints itself exactly like NodeItem does.
+    // ============================================================================
+    namespace {
+        class StaticNodeItem : public QGraphicsPathItem {
+        public:
+            StaticNodeItem(const Node* node, const QRectF& box)
+                : QGraphicsPathItem(node_visuals::shapePath(node->getShape(), box))
+                , attributes_(node->getAttributes())
+                , box_(box)
+            {
+                setPen(QPen(Qt::black, 1.5));
+            }
+
+            void paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) override {
+                node_visuals::PaintOptions opts;
+                opts.outline = pen();
+                node_visuals::paintNode(painter, attributes_, box_, opts);
+            }
+
+        private:
+            NodeAttributes attributes_;
+            QRectF box_;
+        };
+    } // namespace
 
     // ============================================================================
     // coreSweep
@@ -177,20 +188,13 @@ namespace ui {
         node_items.clear();
         edge_items.clear();
 
-        QPen node_pen(Qt::black, 1.5);
         QPen edge_pen(Qt::black, 1.5);
 
         coreSweep(graph,
             // place_node
             [&](Node* node, const QRectF& rect) {
-                auto* item = scene->addPath(nodeShapePath(node, rect), node_pen, QBrush(QColor(255, 255, 200)));
-                // Label
-                auto* label = new QGraphicsSimpleTextItem(
-                    QString::fromStdString(node->getName()), item);
-                QRectF lb = label->boundingRect();
-                label->setPos(
-                    rect.left() + (rect.width() - lb.width()) / 2.0,
-                    rect.top() + (rect.height() - lb.height()) / 2.0);
+                auto* item = new StaticNodeItem(node, rect);
+                scene->addItem(item);
                 node_items[node] = item;
             },
             // commit_edge

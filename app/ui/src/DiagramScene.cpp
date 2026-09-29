@@ -1,5 +1,5 @@
 #include "DiagramScene.h"
-#include "FuseNodesDialog.h"
+#include "NodeDialogs.h"
 #include "AddHypergraphDialog.h"
 #include "LayoutTypes.h"
 
@@ -11,6 +11,7 @@
 #include <QGraphicsProxyWidget>
 #include <QLineEdit>
 #include <QApplication>
+#include <QGraphicsView>
 
 using namespace hypergraph_logic;
 using namespace app_logic;
@@ -156,6 +157,12 @@ namespace ui {
         }
 
         QMenu menu;
+        QAction* properties = menu.addAction(QStringLiteral("Propiedades…"), [this, item] { showNodeProperties(item); });
+        QFont bold = properties->font();
+        bold.setBold(true);
+        properties->setFont(bold);
+        menu.addAction(QStringLiteral("Renombrar"), [this, item] { startInlineRename(item); });
+        menu.addSeparator();
 		menu.addAction("Crear nodo arriba", [this, node] { onCreateNodeAbove(node); });
         menu.addAction("Crear nodo debajo", [this, node] { onCreateNodeBelow(node); });
         menu.addAction("Crear nodo a la izquierda", [this, node] { onCreateNodeLeft(node); });
@@ -244,13 +251,14 @@ namespace ui {
                 }
             }
             else if (st == InteractionState::WaitingForSecondNode_FuseNodes) {
-                FuseNodesDialog dlg(QString::fromStdString(first_ptr->getName()));
-                if (dlg.exec() == QDialog::Accepted && !dlg.chosenName().isEmpty()) {
-                    std::string label = dlg.chosenName().toStdString();
-                    if (is_joint_) joint_editor_->fuseNodes(first_ptr, second_ptr, label);
-                    else           regular_editor_->fuseNodes(first_ptr, second_ptr, label);
-                }
-                else return;
+                if (first_ptr == second_ptr) return; // clicking the same node again cancels
+                FuseNodesDialog dlg(first_ptr->getAttributes(), second_ptr->getAttributes(),
+                    recentColours(), dialogParent());
+                if (dlg.exec() != QDialog::Accepted) return;
+                const NodeAttributes fused = dlg.attributes();
+                if (is_joint_) joint_editor_->fuseNodes(first_ptr, second_ptr, fused);
+                else           regular_editor_->fuseNodes(first_ptr, second_ptr, fused);
+                rememberColours(dlg.pickedColours());
             }
             else if (st == InteractionState::WaitingForSecondNode_AddSource) {
                 if (is_joint_) joint_editor_->addSourceToEdge(edge_ptr, second_ptr);
@@ -284,91 +292,51 @@ namespace ui {
 
     void DiagramScene::onCreateNodeAbove(Node* child) {
         NodePtr child_ptr = child ? child->shared_from_this() : nullptr;
-        try {
-			NodePtr new_node = regular_editor_->createParent("Nuevo nodo", child_ptr);
-            rebuild();
-            emit graphChanged();
-            // Start inline rename immediately.
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
-	}
-    
-    
+        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+            regular_editor_->createParent(a, child_ptr);
+        });
+    }
+
     void DiagramScene::onCreateNodeBelow(Node* parent) {
         NodePtr parent_ptr = parent ? parent->shared_from_this() : nullptr;
-        try {
-            NodePtr new_node = regular_editor_->createNode("Nuevo nodo", -1, parent_ptr);
-            rebuild();
-            emit graphChanged();
-            // Start inline rename immediately.
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+            regular_editor_->createNode(a, -1, parent_ptr);
+        });
     }
 
     void DiagramScene::onCreateNodeLeft(Node* node) {
         NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
-        try {
-            NodePtr new_node = regular_editor_->createNodeNextTo("Nuevo nodo", neighbour_ptr, true);
-            rebuild();
-            emit graphChanged();
-            // Start inline rename immediately.
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+            regular_editor_->createNodeNextTo(a, neighbour_ptr, true);
+        });
     }
 
     void DiagramScene::onCreateNodeRight(Node* node) {
         NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
-        try {
-            NodePtr new_node = regular_editor_->createNodeNextTo("Nuevo nodo", neighbour_ptr, false);
-            rebuild();
-            emit graphChanged();
-            // Start inline rename immediately.
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+            regular_editor_->createNodeNextTo(a, neighbour_ptr, false);
+        });
     }
 
     void DiagramScene::onCreateNodeIntoEdge(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        try {
-            NodePtr new_node = regular_editor_->createNodeInEdge("Nuevo nodo", edge_ptr);
-            rebuild();
-            emit graphChanged();
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+            regular_editor_->createNodeInEdge(a, edge_ptr);
+        });
     }
 
     void DiagramScene::onCreateSource(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        try {
-            NodePtr new_node = regular_editor_->createSource("Nuevo origen", -1, edge_ptr);
-            rebuild();
-            emit graphChanged();
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo origen"), [&](const NodeAttributes& a) {
+            regular_editor_->createSource(a, -1, edge_ptr);
+        });
     }
 
     void DiagramScene::onCreateTarget(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        try {
-            NodePtr new_node = regular_editor_->createTarget("Nuevo destino", -1, edge_ptr);
-            rebuild();
-            emit graphChanged();
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo destino"), [&](const NodeAttributes& a) {
+            regular_editor_->createTarget(a, -1, edge_ptr);
+        });
     }
 
     void DiagramScene::onRemoveNode(Node* node) {
@@ -464,15 +432,9 @@ namespace ui {
             }
         }
 
-        try {
-            NodePtr new_node = regular_editor_->createNode(
-                "Nuevo nodo", layer_position, nullptr);
-            rebuild();
-            emit graphChanged();
-            auto it = node_items_.find(new_node.get());
-            if (it != node_items_.end()) startInlineRename(it->second);
-        }
-        catch (const std::exception& e) { showError(e); }
+        createNodeWithDialog(QStringLiteral("Nuevo nodo"), [&](const NodeAttributes& a) {
+            regular_editor_->createNode(a, layer_position, nullptr);
+        });
     }
 
     void DiagramScene::onAddHypergraph(const QPointF& scene_pos) {
@@ -481,6 +443,73 @@ namespace ui {
         // MainWindow connects a lambda to a signal for this purpose;
         // here we emit a request signal and MainWindow supplies the dialog.
         emit addHypergraphRequested(scene_pos.x());
+    }
+
+    // ============================================================================
+    // Node attribute dialogs
+    // ============================================================================
+
+    void DiagramScene::createNodeWithDialog(const QString& default_name,
+        const std::function<void(const NodeAttributes&)>& create)
+    {
+        cancelInteraction();
+        NodeDialog dlg(NodeDialog::Mode::Create, NodeAttributes(default_name.toStdString()),
+            recentColours(), dialogParent());
+        if (dlg.exec() != QDialog::Accepted) return;
+
+        try {
+            create(dlg.attributes());
+        }
+        catch (const std::exception& e) { showError(e); return; }
+
+        rememberColours(dlg.pickedColours());
+        rebuild();
+        emit graphChanged();
+    }
+
+    void DiagramScene::showNodeProperties(NodeItem* item) {
+        if (state_ != InteractionState::Idle) {
+            cancelInteraction();
+            return;
+        }
+        NodePtr node_ptr = item->node()->shared_from_this();
+        NodeDialog dlg(NodeDialog::Mode::Edit, node_ptr->getAttributes(), recentColours(), dialogParent());
+        if (dlg.exec() != QDialog::Accepted) return;
+
+        const NodeAttributes updated = dlg.attributes();
+        if (updated == node_ptr->getAttributes()) return;
+        try {
+            if (is_joint_) joint_editor_->setNodeAttributes(node_ptr, updated);
+            else           regular_editor_->setNodeAttributes(node_ptr, updated);
+        }
+        catch (const std::exception& e) { showError(e); return; }
+
+        rememberColours(dlg.pickedColours());
+        rebuild();
+        emit graphChanged();
+    }
+
+    void DiagramScene::setColourStore(std::function<QList<QColor>()> recent,
+        std::function<void(const QColor&)> remember)
+    {
+        recent_colours_ = std::move(recent);
+        remember_colour_ = std::move(remember);
+    }
+
+    QList<QColor> DiagramScene::recentColours() const {
+        return recent_colours_ ? recent_colours_() : QList<QColor>{};
+    }
+
+    void DiagramScene::rememberColours(const QList<QColor>& colours) {
+        if (!remember_colour_) return;
+        // Oldest first, so the most recently picked colour ends up first.
+        for (auto it = colours.rbegin(); it != colours.rend(); ++it)
+            remember_colour_(*it);
+    }
+
+    QWidget* DiagramScene::dialogParent() const {
+        const auto v = views();
+        return v.isEmpty() ? nullptr : v.front()->window();
     }
 
     // ============================================================================

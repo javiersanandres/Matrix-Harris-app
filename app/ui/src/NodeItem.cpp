@@ -1,7 +1,11 @@
 #include "NodeItem.h"
 #include "DiagramScene.h"
-#include "HypergraphRenderer.h"
+#include "NodeVisuals.h"
 #include "LayoutTypes.h"
+
+#include <QFontMetricsF>
+#include <QGraphicsSceneHoverEvent>
+#include <QGraphicsSceneWheelEvent>
 
 #include <QPainter>
 #include <QGraphicsSceneContextMenuEvent>
@@ -9,6 +13,7 @@
 #include <QPen>
 #include <QBrush>
 #include <QFont>
+#include <algorithm>
 #include <cmath>
 
 using namespace hypergraph_logic;
@@ -20,41 +25,68 @@ namespace ui {
         , node_(node)
     {
         setPen(QPen(Qt::black, 1.5));
-        setBrush(QBrush(QColor(255, 255, 200)));  // light yellow
         setAcceptHoverEvents(true);
         setZValue(1.0); // nodes above edges
-
-        label_ = new QGraphicsSimpleTextItem(
-            QString::fromStdString(node->getName()), this);
-        QRectF lb = label_->boundingRect();
-        label_->setPos(
-            rect.left() + (rect.width() - lb.width()) / 2.0,
-            rect.top() + (rect.height() - lb.height()) / 2.0);
+        setToolTip(QString::fromStdString(node->getName()));
     }
 
     QPainterPath NodeItem::shape() const {
-        return HypergraphRenderer::nodeShapePath(node_, rect());
+        return node_visuals::shapePath(node_->getShape(), rect());
     }
 
     void NodeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) {
         Q_UNUSED(option);
         Q_UNUSED(widget);
-        painter->setPen(pen());
-        painter->setBrush(brush());
-        painter->drawPath(HypergraphRenderer::nodeShapePath(node_, rect()));
+        node_visuals::PaintOptions opts;
+        opts.outline = pen();
+        opts.label_scroll = label_scroll_;
+        opts.show_scroll_indicator = hovered_;
+        if (dragging_)          opts.fill_override = QColor(180, 180, 180, 160); // grey out
+        else if (highlighted_)  opts.fill_override = QColor(200, 230, 255);
+        node_visuals::paintNode(painter, node_->getAttributes(), rect(), opts);
     }
 
     void NodeItem::setHighlighted(bool on) {
-        setBrush(on ? QBrush(QColor(200, 230, 255)) : QBrush(QColor(255, 255, 200)));
+        if (highlighted_ == on) return;
+        highlighted_ = on;
+        update();
     }
 
     void NodeItem::updateLabel(const QString& text) {
-        label_->setText(text);
-        QRectF r = rect();
-        QRectF lb = label_->boundingRect();
-        label_->setPos(
-            r.left() + (r.width() - lb.width()) / 2.0,
-            r.top() + (r.height() - lb.height()) / 2.0);
+        setToolTip(text);
+        label_scroll_ = 0.0;
+        update();
+    }
+
+    void NodeItem::hoverEnterEvent(QGraphicsSceneHoverEvent* event) {
+        hovered_ = true;
+        update();
+        QGraphicsRectItem::hoverEnterEvent(event);
+    }
+
+    void NodeItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
+        hovered_ = false;
+        update();
+        QGraphicsRectItem::hoverLeaveEvent(event);
+    }
+
+    void NodeItem::wheelEvent(QGraphicsSceneWheelEvent* event) {
+        // Scroll the label only when it overflows its box and can still move in
+        // the requested direction; otherwise let the view handle the wheel.
+        const double max_scroll = node_visuals::maxLabelScroll(node_->getAttributes(), rect());
+        if (max_scroll <= 0.0 || (event->modifiers() & Qt::ControlModifier)) {
+            event->ignore();
+            return;
+        }
+        const double step = QFontMetricsF(node_visuals::labelFont(node_->getAttributes())).lineSpacing();
+        const double next = std::clamp(label_scroll_ - (event->delta() / 120.0) * step, 0.0, max_scroll);
+        if (next == label_scroll_) {
+            event->ignore();
+            return;
+        }
+        label_scroll_ = next;
+        update();
+        event->accept();
     }
 
     void NodeItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
@@ -78,7 +110,7 @@ namespace ui {
         if (!dragging_ && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
             // Any movement past the threshold, in either direction, starts a drag.
             dragging_ = true;
-            setBrush(QBrush(QColor(180, 180, 180, 160))); // grey out
+            update(); // grey out
         }
 
         if (dragging_) {
@@ -87,9 +119,7 @@ namespace ui {
             drag_current_y_ = event->scenePos().y();
             double delta_x = drag_current_x_ - drag_start_x_;
             double delta_y = drag_current_y_ - drag_start_y_;
-            setRect(rect().translated(delta_x, delta_y));
-            // Move the label with the rect so the text follows the box visually.
-            label_->setPos(label_->pos() + QPointF(delta_x, delta_y));
+            setRect(rect().translated(delta_x, delta_y)); // the label is painted inside rect()
             drag_start_x_ = drag_current_x_;
             drag_start_y_ = drag_current_y_;
         }
@@ -98,7 +128,7 @@ namespace ui {
     void NodeItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         if (event->button() == Qt::LeftButton && dragging_) {
             dragging_ = false;
-            setBrush(QBrush(QColor(255, 255, 200)));  // light yellow
+            update();
 
             // Notify the scene — it will call relocateNode.
             DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
@@ -126,7 +156,7 @@ namespace ui {
     void NodeItem::mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) {
         Q_UNUSED(event);
         DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
-        if (ds) ds->startInlineRename(this);
+        if (ds) ds->showNodeProperties(this);
     }
 
     void NodeItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {

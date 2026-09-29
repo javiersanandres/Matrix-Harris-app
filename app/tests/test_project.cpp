@@ -2,7 +2,10 @@
 #include "JointHypergraphEditor.h"
 #include "Project.h"
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
+#include <filesystem>
+#include <fstream>
 #include <stdexcept>
 #include <string>
 
@@ -354,6 +357,74 @@ namespace app_logic {
                 ed0.createNode("A", 0, nullptr);
                 // ed1's undo stack must be independent.
                 EXPECT_FALSE(ed1.canUndo());
+            }
+
+            // ── Recent colours ───────────────────────────────────────────────
+
+            TEST(Project, RecentColoursStartEmpty) {
+                Project p("P");
+                EXPECT_TRUE(p.getRecentColours().empty());
+            }
+
+            TEST(Project, AddRecentColourIsMostRecentFirstWithoutDuplicates) {
+                Project p("P");
+                const Color red{ 255, 0, 0, 255 }, green{ 0, 255, 0, 255 }, blue{ 0, 0, 255, 255 };
+                p.addRecentColour(red);
+                p.addRecentColour(green);
+                p.addRecentColour(blue);
+                p.addRecentColour(red); // moves back to the front
+                ASSERT_EQ(p.getRecentColours().size(), 3u);
+                EXPECT_EQ(p.getRecentColours()[0], red);
+                EXPECT_EQ(p.getRecentColours()[1], blue);
+                EXPECT_EQ(p.getRecentColours()[2], green);
+                EXPECT_TRUE(p.hasUnsavedChanges());
+            }
+
+            TEST(Project, AddRecentColourKeepsAtMostMaxColours) {
+                Project p("P");
+                for (int i = 0; i < Project::MAX_RECENT_COLOURS + 5; ++i)
+                    p.addRecentColour(Color{ static_cast<uint8_t>(i), 0, 0, 255 });
+                ASSERT_EQ(static_cast<int>(p.getRecentColours().size()), Project::MAX_RECENT_COLOURS);
+                EXPECT_EQ(p.getRecentColours().front().r, Project::MAX_RECENT_COLOURS + 4);
+            }
+
+            TEST(Project, RecentColoursSurviveSaveAndLoad) {
+                namespace fs = std::filesystem;
+                fs::path tmp = fs::temp_directory_path() / "test_project_recent_colours.json";
+                std::vector<Color> saved;
+                {
+                    // Only one project (joint graph) may be alive at a time.
+                    Project p("P");
+                    p.addRecentColour(Color{ 10, 20, 30, 255 });
+                    p.addRecentColour(Color{ 200, 100, 50, 128 });
+                    p.save(tmp);
+                    saved = p.getRecentColours();
+                }
+
+                auto loaded = Project::load(tmp);
+                EXPECT_EQ(loaded->getRecentColours(), saved);
+                EXPECT_FALSE(loaded->hasUnsavedChanges());
+                fs::remove(tmp);
+            }
+
+            TEST(Project, LoadWithoutRecentColoursGivesEmptyList) {
+                namespace fs = std::filesystem;
+                fs::path tmp = fs::temp_directory_path() / "test_project_no_recent_colours.json";
+                {
+                    Project p("P");
+                    p.addRecentColour(Color{ 1, 2, 3, 255 });
+                    p.save(tmp);
+                }
+
+                // Strip the field, as in files saved before it existed.
+                nlohmann::json j;
+                { std::ifstream in(tmp); in >> j; }
+                j.erase("recent_colours");
+                { std::ofstream out(tmp); out << j.dump(); }
+
+                auto loaded = Project::load(tmp);
+                EXPECT_TRUE(loaded->getRecentColours().empty());
+                fs::remove(tmp);
             }
 
         } // namespace project_tests

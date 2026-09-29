@@ -1,7 +1,9 @@
 ﻿#include "Hypergraph.h"
 #include <algorithm>
 #include <stdexcept>
+#include <map>
 #include <set>
+#include <tuple>
 
 namespace hypergraph_logic {
 	// ============================================================================
@@ -1446,8 +1448,13 @@ namespace hypergraph_logic {
 		}
 
 		// Modify all hyperedges in which the absorbed node participated to replace it with the survivor.
+		// The originals among them are remembered: when the survivor ends up holding the same
+		// connection twice, the copy inherited from the absorbed node is the one that yields on a tie.
 		std::vector<HyperedgePtr> modified_edges;
+		std::unordered_set<HyperedgePtr, HyperedgePtrHash> inherited_edges;
 		for (const auto& edge : getAllHyperedges()) {
+			if (!edge->isSegment() && (edge->containsSource(absorbed) || edge->containsTarget(absorbed)))
+				inherited_edges.insert(edge);
 			if (edge->containsSource(absorbed)) {
 				if (edge->containsSource(survivor)) {
 					// If survivor is already a source of this edge, we just need to remove absorbed from the sources without replacement.
@@ -1524,11 +1531,33 @@ namespace hypergraph_logic {
 		// If no relocation is needed, that implicitly means both nodes were already at the same layer 
 		// and the fusion doesn't change any other layer number either, so nothing else needs relocating.
 		int min_start_layer = INT_MAX;
-		if (relocateNodes({ survivor }, &min_start_layer, out_altered_layers)) {
-			// applyRelocationAndPropagate already re-settled every edge touching survivor (as
-			// source or target) via its own Phase 1/Phase 3 sweep, which covers every surviving
-			// entry in modified_edges, since each one touches survivor directly.
+		// applyRelocationAndPropagate already re-settles every edge touching survivor (as
+		// source or target) via its own Phase 1/Phase 3 sweep, which covers every surviving
+		// entry in modified_edges, since each one touches survivor directly.
+		const bool relocated = relocateNodes({ survivor }, &min_start_layer, out_altered_layers);
+
+		// The fused node joins the neighbourhoods of both nodes, so connections that were fine
+		// before can now be implied by a longer path through it. Remove them to restore the
+		// Hasse-diagram invariant. This must run after the relocation: only then is the layering
+		// consistent again, which the edge trimming (re-splitting, dummy removal) relies on.
+		// Removing implied connections never changes any node's depth-rule layer (every removed
+		// parent is shallower than another parent that remains), so no further relocation is needed.
+		bool trimmed = removeConnectionsMadeRedundantThrough(survivor, &min_start_layer, out_altered_layers);
+
+		// Each connection must belong to a single hyperedge, but the survivor may now reach (or be
+		// reached from) the same neighbour through a hyperedge inherited from each fused node.
+		// Hyperedges that became fully identical were already dissolved above; this handles the
+		// partial overlaps. Done after the transitive trimming so it never spends work on
+		// connections that were about to disappear anyway.
+		trimmed |= removeDuplicateConnections(survivor, inherited_edges, &min_start_layer, out_altered_layers);
+
+		if (relocated) {
 			minimizeCrossings(10, min_start_layer);
+		}
+		else if (trimmed && min_start_layer != INT_MAX) {
+			// Trimmed edges were re-split with new dummies: same treatment as addConnection gives
+			// its transitive removals.
+			minimizeCrossings(3, min_start_layer);
 		}
 		else {
 			minimizeCrossingsForNodes({ survivor.get() }, survivor->getLayer(), survivor->getLayer());
@@ -1913,43 +1942,170 @@ namespace hypergraph_logic {
 		std::unordered_set<Node*> children_and_descendants = getAllDescendants(children);
 		for (const auto& c : children) children_and_descendants.insert(c.get());
 
+		removeConnectionPairs({ { &parents_and_ancestors, &children_and_descendants } },
+			edge_to_skip, out_min_new_layer, out_altered_layers);
+	}
+
+	bool Hypergraph::removeConnectionPairs(
+		const std::vector<ConnectionBlock>& blocks,
+		const HyperedgePtr& edge_to_skip,
+		int* out_min_new_layer,
+		std::set<int>* out_altered_layers)
+	{
+		bool any_block = false;
+		for (const auto& b : blocks)
+			if (!b.sources->empty() && !b.targets->empty()) any_block = true;
+		if (!any_block) return false;
+		bool changed = false;
+
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;
 		for (const auto& [edge, _] : snapshot) {
 			if (edge_to_skip && edge == edge_to_skip) continue; // Don't destroy the connection we're currently adding.
 
-			std::unordered_set<Node*> ancestor_sources;
-			for (const auto& s : edge->getSources())
-				if (parents_and_ancestors.count(s.get()))
-					ancestor_sources.insert(s.get());
-
-			if (ancestor_sources.empty()) continue;
-
-			std::vector<NodePtr> surviving_targets;
-			bool any_redundant = false;
-			for (const auto& t : edge->getTargets()) {
-				if (children_and_descendants.count(t.get())) {
-					any_redundant = true;
+			// For each source of the edge, the targets it must lose (union over every block it is in).
+			// Sources losing exactly the same targets are grouped so each group costs one operation.
+			std::map<std::set<Node*>, std::unordered_set<Node*>> sources_by_lost_targets;
+			const auto targets = edge->getTargets();
+			for (const auto& s : edge->getSources()) {
+				std::set<Node*> lost;
+				for (const auto& b : blocks) {
+					if (!b.sources->count(s.get())) continue;
+					for (const auto& t : targets)
+						if (b.targets->count(t.get())) lost.insert(t.get());
 				}
-				else {
-					surviving_targets.push_back(t);
-				}
+				if (!lost.empty()) sources_by_lost_targets[lost].insert(s.get());
 			}
 
-			if (!any_redundant) continue;
+			if (sources_by_lost_targets.empty()) continue;
+			changed = true;
 
-			removeSourcesFromHyperedge(edge, ancestor_sources, false, out_altered_layers);
-
-			if (!surviving_targets.empty()) {
-				std::vector<NodePtr> ancestor_sources_vec;
-				ancestor_sources_vec.reserve(ancestor_sources.size());
-				for (Node* n : ancestor_sources) {
-					ancestor_sources_vec.push_back(n->shared_from_this());
-				}
-
-				const auto& new_edge = createHyperedge(ancestor_sources_vec, surviving_targets, -1);
-				settleEdgePlacement(new_edge, out_min_new_layer, out_altered_layers);
+			for (const auto& [lost, group] : sources_by_lost_targets) {
+				const std::unordered_set<Node*> lost_set(lost.begin(), lost.end());
+				removePairsFromEdge(edge, group, lost_set, out_min_new_layer, out_altered_layers);
 			}
 		}
+		return changed;
+	}
+
+	HyperedgePtr Hypergraph::removePairsFromEdge(
+		const HyperedgePtr& edge,
+		const std::unordered_set<Node*>& sources,
+		const std::unordered_set<Node*>& targets,
+		int* out_min_new_layer,
+		std::set<int>* out_altered_layers)
+	{
+		if (sources.empty() || targets.empty()) return nullptr;
+
+		std::vector<NodePtr> remaining_targets;
+		for (const auto& t : edge->getTargets())
+			if (!targets.count(t.get())) remaining_targets.push_back(t);
+
+		// Either these sources leave the edge entirely (they lose all its targets), 
+		// or they leave it and keep their other targets through a new, trimmed edge.
+		removeSourcesFromHyperedge(edge, sources, false, out_altered_layers);
+		if (remaining_targets.empty()) return nullptr;
+
+		std::vector<NodePtr> sources_vec;
+		sources_vec.reserve(sources.size());
+		for (Node* n : sources) sources_vec.push_back(n->shared_from_this());
+
+		const auto& new_edge = createHyperedge(sources_vec, remaining_targets, -1);
+		settleEdgePlacement(new_edge, out_min_new_layer, out_altered_layers);
+		return new_edge;
+	}
+
+	bool Hypergraph::removeConnectionsMadeRedundantThrough(const NodePtr& node, int* out_min_new_layer, std::set<int>* out_altered_layers) {
+		std::unordered_set<Node*> ancestors;
+		std::unordered_set<Node*> above_parents;
+		for (const auto& p : node->getParents()) {
+			auto a = p->getAllAncestors();
+			above_parents.insert(a.begin(), a.end());
+			ancestors.insert(p.get());
+		}
+		ancestors.insert(above_parents.begin(), above_parents.end());
+
+		std::unordered_set<Node*> descendants;
+		std::unordered_set<Node*> below_children;
+		for (const auto& c : node->getChildren()) {
+			auto d = c->getAllDescendants();
+			below_children.insert(d.begin(), d.end());
+			descendants.insert(c.get());
+		}
+		descendants.insert(below_children.begin(), below_children.end());
+
+		const std::unordered_set<Node*> only_node{ node.get() };
+
+		// A single scan over the hyperedges removes, at once:
+		return removeConnectionPairs({
+			// 1. ancestor -> descendant, implied by ancestor ~> node ~> descendant.
+			{ &ancestors, &descendants },
+			// 2. ancestor -> node, implied by ancestor ~> some parent -> node.
+			{ &above_parents, &only_node },
+			// 3. node -> descendant, implied by node -> some child ~> descendant.
+			{ &only_node, &below_children },
+		}, nullptr, out_min_new_layer, out_altered_layers);
+	}
+
+	bool Hypergraph::removeDuplicateConnections(const NodePtr& node,
+		const std::unordered_set<HyperedgePtr, HyperedgePtrHash>& yielding_edges,
+		int* out_min_new_layer, std::set<int>* out_altered_layers)
+	{
+		bool changed = false;
+
+		// as_source: node is a source of both hyperedges and they share targets (node -> d twice).
+		// Otherwise node is a target of both and they share sources (s -> node twice).
+		for (const bool as_source : { true, false }) {
+			// Resolving one clash can create or dissolve hyperedges, so look again after each one.
+			bool resolved_one = true;
+			while (resolved_one) {
+				resolved_one = false;
+
+				std::vector<HyperedgePtr> edges;
+				for (const auto& [e, _] : all_hyperedges_)
+					if (as_source ? e->containsSource(node) : e->containsTarget(node))
+						edges.push_back(e);
+
+				auto own_side = [as_source](const HyperedgePtr& e) { return as_source ? e->getSources() : e->getTargets(); };
+				auto other_side = [as_source](const HyperedgePtr& e) { return as_source ? e->getTargets() : e->getSources(); };
+
+				for (size_t i = 0; i < edges.size() && !resolved_one; ++i) {
+					std::unordered_set<Node*> counterparts_i;
+					for (const auto& n : other_side(edges[i])) counterparts_i.insert(n.get());
+
+					for (size_t j = i + 1; j < edges.size() && !resolved_one; ++j) {
+						std::unordered_set<Node*> shared;
+						for (const auto& n : other_side(edges[j]))
+							if (counterparts_i.count(n.get())) shared.insert(n.get());
+						if (shared.empty()) continue;
+
+						// Rank each candidate to give up the shared connections; lower yields first.
+						auto rank = [&](const HyperedgePtr& e) {
+							const size_t own = own_side(e).size();
+							const size_t other = other_side(e).size();
+							const bool disappears = own == 1 && other == shared.size();
+							const bool needs_new_edge = own > 1 && other > shared.size();
+							const bool inherited = yielding_edges.count(e) > 0;
+							return std::make_tuple(!disappears, needs_new_edge, own * other, !inherited);
+						};
+						const HyperedgePtr& yielding = (rank(edges[j]) < rank(edges[i])) ? edges[j] : edges[i];
+
+						const std::unordered_set<Node*> only_node{ node.get() };
+						if (as_source) removePairsFromEdge(yielding, only_node, shared, out_min_new_layer, out_altered_layers);
+						else           removePairsFromEdge(yielding, shared, only_node, out_min_new_layer, out_altered_layers);
+
+						// The shared connections still exist through the other hyperedge, but removing
+						// them from the yielding one also dropped the nodes' links: put them back.
+						for (Node* n : shared) {
+							const NodePtr other = n->shared_from_this();
+							if (as_source) { node->addChild(other); other->addParent(node); }
+							else           { other->addChild(node); node->addParent(other); }
+						}
+						changed = resolved_one = true;
+					}
+				}
+			}
+		}
+		return changed;
 	}
 
 	HyperedgePtr Hypergraph::resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, int* out_min_new_layer, std::set<int>* out_altered_layers) {

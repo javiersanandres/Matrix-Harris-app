@@ -704,14 +704,15 @@ namespace hypergraph_logic {
                 EXPECT_DOUBLE_EQ(rhombus.getHeight(), RHOMBUS_NODE_HEIGHT);
                 EXPECT_DOUBLE_EQ(dummy.getWidth(), DUMMY_NODE_WIDTH);
                 EXPECT_DOUBLE_EQ(dummy.getHeight(), DUMMY_NODE_HEIGHT);
-                // Circle and rhombus are regular: inscribed in a square.
+                // Circle and rhombus are regular: each inscribed in a square.
                 EXPECT_DOUBLE_EQ(circle.getWidth(), circle.getHeight());
                 EXPECT_DOUBLE_EQ(rhombus.getWidth(), rhombus.getHeight());
             }
 
             TEST(NodeGeometry, BoundaryHalfHeightPerShape) {
                 Node rect("r"), circle(shaped("c", NodeShape::Circle)), rhombus(shaped("h", NodeShape::Rhombus)), dummy;
-                const double r = REGULAR_NODE_SIZE / 2.0;
+                const double r = CIRCLE_NODE_WIDTH / 2.0;   // circle radius
+                const double h = RHOMBUS_NODE_WIDTH / 2.0;  // rhombus half diagonal
 
                 for (double dx : { 0.0, 10.0, -30.0, NODE_WIDTH / 2.0 })
                     EXPECT_DOUBLE_EQ(rect.getBoundaryHalfHeight(dx), NODE_HEIGHT / 2.0);
@@ -722,11 +723,11 @@ namespace hypergraph_logic {
                 EXPECT_DOUBLE_EQ(circle.getBoundaryHalfHeight(r), 0.0);
                 EXPECT_DOUBLE_EQ(circle.getBoundaryHalfHeight(3.0 * r), 0.0);        // clamped
 
-                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(0.0), r);
-                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(r / 2.0), r / 2.0);
-                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(-r / 4.0), 0.75 * r);
-                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(r), 0.0);
-                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(-2.0 * r), 0.0);      // clamped
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(0.0), h);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(h / 2.0), h / 2.0);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(-h / 4.0), 0.75 * h);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(h), 0.0);
+                EXPECT_DOUBLE_EQ(rhombus.getBoundaryHalfHeight(-2.0 * h), 0.0);      // clamped
 
                 EXPECT_DOUBLE_EQ(dummy.getBoundaryHalfHeight(0.0), 0.0);
             }
@@ -739,7 +740,7 @@ namespace hypergraph_logic {
                 NodePtr B = g.createNode(shaped("B", NodeShape::Circle), 0, A);
                 runFullPipeline(g);
 
-                const double half = REGULAR_NODE_SIZE / 2.0;
+                const double half = CIRCLE_NODE_HEIGHT / 2.0;
                 EXPECT_NEAR(g.layerLayout().at(1), -(half + LAYER_GAP + half), 1e-9);
 
                 // Single centred ports touch the circles at their lowest/highest point.

@@ -1,4 +1,3 @@
-#include "FuseNodesDialog.h"
 #include "AddHypergraphDialog.h"
 
 #include <QVBoxLayout>
@@ -6,37 +5,6 @@
 #include <QListWidgetItem>
 
 namespace ui {
-
-// ============================================================================
-// FuseNodesDialog
-// ============================================================================
-
-FuseNodesDialog::FuseNodesDialog(const QString& default_name, QWidget* parent)
-    : QDialog(parent)
-{
-    setWindowTitle("Fusionar nodos");
-    setModal(true);
-
-    auto* layout = new QVBoxLayout(this);
-    layout->addWidget(new QLabel("Nombre del nodo fusionado:"));
-
-    name_edit_ = new QLineEdit(default_name, this);
-    name_edit_->selectAll();
-    layout->addWidget(name_edit_);
-
-    buttons_ = new QDialogButtonBox(
-        QDialogButtonBox::Ok | QDialogButtonBox::Cancel, this);
-    layout->addWidget(buttons_);
-
-    connect(buttons_, &QDialogButtonBox::accepted, this, &QDialog::accept);
-    connect(buttons_, &QDialogButtonBox::rejected, this, &QDialog::reject);
-    connect(name_edit_, &QLineEdit::returnPressed, this, &QDialog::accept);
-}
-
-QString FuseNodesDialog::chosenName() const {
-    return (result() == QDialog::Accepted) ? name_edit_->text().trimmed()
-                                           : QString();
-}
 
 // ============================================================================
 // AddHypergraphDialog

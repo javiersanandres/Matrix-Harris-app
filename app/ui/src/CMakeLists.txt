@@ -23,6 +23,9 @@ target_sources(ui_lib
         DiagramTabWidget.cpp
         DiagramTabBar.cpp
         Dialogs.cpp
+        NodeVisuals.cpp
+        NodeEditorWidgets.cpp
+        NodeDialogs.cpp
         BusySpinner.cpp
         MinimizingProgressDialog.cpp
         HelpButton.cpp
@@ -39,7 +42,9 @@ target_sources(ui_lib
             ../include/DiagramView.h
             ../include/DiagramTabWidget.h
             ../include/DiagramTabBar.h
-            ../include/FuseNodesDialog.h
+            ../include/NodeDialogs.h
+            ../include/NodeVisuals.h
+            ../include/NodeEditorWidgets.h
             ../include/AddHypergraphDialog.h
             ../include/MinimizingProgressDialog.h
             ../include/BusySpinner.h

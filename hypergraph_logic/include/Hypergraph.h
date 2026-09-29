@@ -367,10 +367,19 @@ namespace hypergraph_logic {
 		// in originals or segments) are updated to reference node1 instead. If this produces
 		// duplicate hyperedges (same source set and target set), the duplicates are dissolved.
 		//
-		// Finally, node1 is relocated if its optimal layer changed as a result of inheriting
-		// node2's parents; all its descendants are propagated accordingly. If relocation occurs,
-		// global sifting (10 rounds) is run from the shallowest parent layer + 1 of node1 to
-		// account for the full extent of the disruption.
+		// Next, node1 is relocated if its optimal layer changed as a result of inheriting
+		// node2's parents; all its descendants are propagated accordingly.
+		//
+		// Finally, the Hasse-diagram invariant is restored: joining both neighbourhoods can make
+		// existing connections implied by a longer path through the fused node, and every such
+		// connection is removed (see removeConnectionsMadeRedundantThrough). Then every connection
+		// the fused node ended up holding twice (through a hyperedge inherited from each node) is
+		// kept in just one of them (see removeDuplicateConnections).
+		//
+		// Crossing minimization: if relocation occurred, global sifting (10 rounds) is run from the
+		// shallowest affected layer; otherwise, if removing implied connections created new dummy
+		// nodes, global sifting (3 rounds) is run from the shallowest of them; otherwise only the
+		// fused node is re-placed within its layer.
 		//
 		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const NodeAttributes& new_attributes, std::set<int>* out_altered_layers = nullptr);
 
@@ -695,6 +704,72 @@ namespace hypergraph_logic {
 		// connection the caller just built.
 		//
 		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children, const HyperedgePtr& edge_to_skip = nullptr, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+
+		// ── ConnectionBlock ───────────────────────────────────────────────────────────────────────────
+		//
+		// Every connection (source, target) with source in *sources and target in *targets.
+		// Non-owning: the sets must outlive the call that receives the block.
+		//
+		struct ConnectionBlock {
+			const std::unordered_set<Node*>* sources;
+			const std::unordered_set<Node*>* targets;
+		};
+
+		// ── removeConnectionPairs ─────────────────────────────────────────────────────────────────────
+		//
+		// Removes every connection that falls in any of the given blocks from every original hyperedge
+		// except edge_to_skip, in a single scan over the hyperedges, while keeping every other
+		// connection those hyperedges encoded. Within one hyperedge, each source loses the union of its
+		// matching targets over all blocks; sources that lose the same targets are handled together
+		// through removePairsFromEdge. Blocks may overlap freely (on the same hyperedge, or even on the
+		// same source): since each source's union is removed at once, a trimmed edge never carries a
+		// connection from any block, which is why trimmed edges need no re-scan.
+		// The blocks are taken as given: callers compute them before the call, on the graph as it is.
+		// Returns true if any hyperedge was changed.
+		//
+		// This is the per-edge work behind removeTransitiveConnections and
+		// removeConnectionsMadeRedundantThrough.
+		//
+		bool removeConnectionPairs(const std::vector<ConnectionBlock>& blocks, const HyperedgePtr& edge_to_skip = nullptr, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+
+		// ── removePairsFromEdge ───────────────────────────────────────────────────────────────────────
+		//
+		// Removes the connections sources x targets (sources among edge's sources, targets among its
+		// targets) from a single original hyperedge, keeping everything else it encoded: the sources
+		// are removed from edge (dissolving it if none are left) and, if they still reach other
+		// targets of edge, a new edge sources -> (those targets) is created and settled.
+		// Like removeSourcesFromHyperedge, it also drops the real nodes' parent/child links for the
+		// removed connections. Returns the new edge, if one was created.
+		//
+		HyperedgePtr removePairsFromEdge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources, const std::unordered_set<Node*>& targets, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+
+		// ── removeDuplicateConnections ────────────────────────────────────────────────────────────────
+		//
+		// Used by fuseNodes. Every connection must belong to exactly one hyperedge, but after a fusion
+		// node can reach (or be reached from) the same neighbour through a hyperedge inherited from each
+		// of the fused nodes. For every two hyperedges sharing connections with node on the same side,
+		// one of them gives up the shared connections (see removePairsFromEdge), chosen by, in order:
+		//   1. the one that would disappear entirely (it is contained in the other);
+		//   2. the one that can drop them without creating a new hyperedge;
+		//   3. the one with fewer connections, so the larger grouping stays intact;
+		//   4. one listed in yielding_edges (the absorbed node's), so the survivor's structure prevails.
+		// Must only be called while the layering is consistent. Returns true if anything changed.
+		//
+		bool removeDuplicateConnections(const NodePtr& node,
+			const std::unordered_set<HyperedgePtr, HyperedgePtrHash>& yielding_edges,
+			int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+
+		// ── removeConnectionsMadeRedundantThrough ─────────────────────────────────────────────────────
+		//
+		// Used by fuseNodes once node has absorbed another node's parents and children. Any new path in
+		// the graph goes through node, so a connection u -> v is now redundant exactly when there is a
+		// longer path u ~> node ~> v. That happens in three cases, all removed here:
+		//   1. u is a strict ancestor and v a strict descendant of node (implied via node).
+		//   2. v == node and u is a strict ancestor of one of node's parents.
+		//   3. u == node and v is a strict descendant of one of node's children.
+		// Must only be called while the layering is consistent.
+		//
+		bool removeConnectionsMadeRedundantThrough(const NodePtr& node, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── resolveOwnRedundantTargets ────────────────────────────────────────────────────────────────
 		//

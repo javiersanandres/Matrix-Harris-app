@@ -98,6 +98,10 @@ namespace ui {
         // Create and register a new DiagramScene for the regular editor at index.
         DiagramScene* createSceneForEditor(int index);
 
+        // Lets the scene's node dialogs read and extend the project's list of
+        // recently used colours (always the current project_).
+        void attachColourStore(DiagramScene* scene);
+
         // ── Undo / redo state sync ────────────────────────────────────────────────
         void updateUndoRedoActions();
 

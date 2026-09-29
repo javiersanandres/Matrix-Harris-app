@@ -6,8 +6,12 @@
 #include "NodeItem.h"
 #include "HyperedgeItem.h"
 
+#include <QColor>
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
+#include <QList>
+
+#include <functional>
 #include <unordered_map>
 
 namespace ui {
@@ -55,7 +59,7 @@ namespace ui {
     // ============================================================================
     class DiagramScene : public QGraphicsScene {
         Q_OBJECT
-		friend class NodeItem;  // Allow NodeItem to use StartInlineRename and CommitInlineRename.
+		friend class NodeItem;  // Allow NodeItem to open the context menu and the properties dialog.
 		friend class HyperedgeItem;  // Allow HyperedgeItem to call showEdgeContextMenu.
     public:
         // Construct for a regular diagram editor.
@@ -72,6 +76,11 @@ namespace ui {
 
         // Cancel any pending two-step interaction and return to Idle.
         void cancelInteraction();
+
+        // Where the node dialogs read the project's recently used colours from,
+        // and where they report every colour the user picks. Set by MainWindow.
+        void setColourStore(std::function<QList<QColor>()> recent,
+            std::function<void(const QColor&)> remember);
 
         // ── Signals emitted to MainWindow ────────────────────────────────────────
     signals:
@@ -113,6 +122,10 @@ namespace ui {
 
         // Edge selected in addSource/addTarget/removeSource/removeTarget.
         hypergraph_logic::Hyperedge* pending_edge_ = nullptr;
+
+        // ── Project colour store (see setColourStore) ─────────────────────────────
+        std::function<QList<QColor>()> recent_colours_;
+        std::function<void(const QColor&)> remember_colour_;
 
         // ── Pan state ─────────────────────────────────────────────────────────────
         bool    panning_ = false;
@@ -160,6 +173,16 @@ namespace ui {
         // Background / joint operations
         void onCreateRootNode(const QPointF& scene_pos);
         void onAddHypergraph(const QPointF& scene_pos);
+
+        // Node attribute dialogs. createNodeWithDialog asks for the new node's
+        // attributes (pre-filled with default_name) and, if accepted, runs create
+        // with them; showNodeProperties edits an existing node ("Propiedades").
+        void createNodeWithDialog(const QString& default_name,
+            const std::function<void(const hypergraph_logic::NodeAttributes&)>& create);
+        void showNodeProperties(NodeItem* item);
+        QList<QColor> recentColours() const;
+        void rememberColours(const QList<QColor>& colours);
+        QWidget* dialogParent() const;
 
         // Inline rename helpers
         void startInlineRename(NodeItem* item);

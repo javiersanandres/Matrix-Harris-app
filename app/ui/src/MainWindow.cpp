@@ -1,6 +1,7 @@
 #include "MainWindow.h"
 #include "AddHypergraphDialog.h"
-#include "FuseNodesDialog.h"
+#include "NodeDialogs.h"
+#include "NodeVisuals.h"
 #include "MinimizingProgressDialog.h"
 #include "HelpButton.h"
 
@@ -210,6 +211,7 @@ namespace ui {
         joint_scene_ = new DiagramScene(&project_->getJointEditor(), this);
         connect(joint_scene_, &DiagramScene::graphChanged,
             this, &MainWindow::onGraphChanged);
+        attachColourStore(joint_scene_);
         connect(joint_scene_, &DiagramScene::addHypergraphRequested,
             this, [this](double click_x) {
                 // Build entry list.
@@ -270,7 +272,21 @@ namespace ui {
         auto* scene = new DiagramScene(&project_->getEditor(index), this);
         connect(scene, &DiagramScene::graphChanged,
             this, &MainWindow::onGraphChanged);
+        attachColourStore(scene);
         return scene;
+    }
+
+    void MainWindow::attachColourStore(DiagramScene* scene) {
+        scene->setColourStore(
+            [this] {
+                QList<QColor> colours;
+                for (const auto& c : project_->getRecentColours())
+                    colours << node_visuals::toQColor(c);
+                return colours;
+            },
+            [this](const QColor& colour) {
+                project_->addRecentColour(node_visuals::fromQColor(colour));
+            });
     }
 
     // ============================================================================

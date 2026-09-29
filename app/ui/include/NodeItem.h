@@ -15,8 +15,10 @@ namespace ui {
 // QGraphicsRectItem representing a single real node in the editing scene. The
 // rect is the node's bounding box; the item paints the node's own shape in it.
 // Handles:
-//   - Single click       → context menu with all node operations.
-//   - Double click       → inline rename (QGraphicsTextItem becomes editable).
+//   - Right click        → context menu with all node operations.
+//   - Double click       → "Propiedades" dialog to edit every node attribute.
+//   - Mouse wheel        → scrolls the label when it overflows the node's shape
+//                          (its scroll indicator only shows while hovering).
 //   - Mouse press + drag → horizontal-only drag (grey out, snap on release
 //                          calls relocateNodeInLayer via the scene).
 //
@@ -36,7 +38,8 @@ public:
     // two-click operation (addConnection, fuseNodes, etc.).
     void setHighlighted(bool on);
 
-    // Called by DiagramScene after a rename is committed to refresh the label.
+    // Called by DiagramScene after a rename is committed to refresh the label
+    // (the text itself is read from the node when painting).
     void updateLabel(const QString& text);
 
     // rect() is the node's bounding box; the node itself is drawn and hit-tested
@@ -50,11 +53,17 @@ protected:
     void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
     void mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) override;
+    void wheelEvent(QGraphicsSceneWheelEvent* event) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
     void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
 
 private:
     hypergraph_logic::Node* node_;
-    QGraphicsSimpleTextItem* label_;
+
+    bool   highlighted_  = false;  // valid target of a pending two-click operation
+    double label_scroll_ = 0.0;    // vertical scroll of an overflowing label
+    bool   hovered_      = false;  // mouse over the node: show the label's scroll indicator
 
     // Drag state
     bool    dragging_       = false;

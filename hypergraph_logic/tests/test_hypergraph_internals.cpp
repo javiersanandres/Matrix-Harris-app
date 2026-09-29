@@ -34,6 +34,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
+#include <map>
 
 namespace hypergraph_logic::hypergraph_tests::internals {
 
@@ -104,6 +105,10 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         void pub_removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children, const HyperedgePtr& edge_to_skip = nullptr, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
             removeTransitiveConnections(parents, children, edge_to_skip, out_min_new_layer, out_altered_layers);
         }
+        bool pub_removeConnectionPairs(const std::vector<ConnectionBlock>& blocks) {
+            return removeConnectionPairs(blocks);
+        }
+        using Hypergraph::ConnectionBlock;
         HyperedgePtr pub_resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
             return resolveOwnRedundantTargets(edge, target, out_min_new_layer, out_altered_layers);
         }
@@ -1599,6 +1604,59 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
         EXPECT_EQ(min_new_layer, 1) << "Trimmed edge a->{d} is long and splits; first dummy at layer 1";
         EXPECT_EQ(altered, std::set<int>({ 0, 1, 2, })) << "Every segment of the trimmed replacement";
+    }
+
+    // Two blocks hitting the same hyperedge {s1, s2} -> {t1, t2, t3}, overlapping both on one
+    // source (s1 is in both) and across sources: A = {s1} x {t1}, B = {s1, s2} x {t2}.
+    // Exactly the connections in A u B must go, every other one must survive exactly once, and
+    // no trimmed edge may reintroduce a connection of either block.
+    TEST_F(HypergraphInternalsTest, RemoveConnectionPairs_OverlappingBlocksOnOneHyperedge) {
+        auto s1 = g.createNode("s1", 0, nullptr, nullptr);
+        auto s2 = g.createNode("s2", 1, nullptr, nullptr);
+        auto t2 = g.createNode("t2", 2, nullptr, nullptr);
+        auto t3 = g.createNode("t3", 3, nullptr, nullptr);
+        auto t1 = g.createNode("t1", 0, s1);
+        auto find = [&](const NodePtr& s, const NodePtr& t) -> HyperedgePtr {
+            for (const auto& e : g.getAllHyperedges())
+                if (!e->isSegment() && edgeHasSource(e, s) && edgeHasTarget(e, t)) return e;
+            return nullptr;
+        };
+        g.addSourceToEdge(find(s1, t1), s2);
+        g.addTargetToEdge(find(s1, t1), t2);
+        g.addTargetToEdge(find(s1, t1), t3);
+        ASSERT_EQ(find(s1, t1), find(s2, t3)) << "setup: a single hyperedge {s1, s2} -> {t1, t2, t3}";
+
+        const std::unordered_set<Node*> a_src{ s1.get() }, a_tgt{ t1.get() };
+        const std::unordered_set<Node*> b_src{ s1.get(), s2.get() }, b_tgt{ t2.get() };
+        EXPECT_TRUE(g.pub_removeConnectionPairs({ { &a_src, &a_tgt }, { &b_src, &b_tgt } }));
+
+        // Removed: s1 -> t1 (A), s1 -> t2 and s2 -> t2 (B).
+        EXPECT_EQ(find(s1, t1), nullptr);
+        EXPECT_EQ(find(s1, t2), nullptr);
+        EXPECT_EQ(find(s2, t2), nullptr);
+        // Kept: s1 -> t3, s2 -> t1, s2 -> t3.
+        EXPECT_NE(find(s1, t3), nullptr);
+        EXPECT_NE(find(s2, t1), nullptr);
+        EXPECT_NE(find(s2, t3), nullptr);
+
+        // Each surviving connection exactly once, and the nodes' links match the hyperedges.
+        std::map<std::pair<Node*, Node*>, int> count;
+        for (const auto& e : g.getAllHyperedges()) {
+            if (e->isSegment()) continue;
+            for (const auto& s : e->getSources())
+                for (const auto& t : e->getTargets())
+                    ++count[{ s.get(), t.get() }];
+        }
+        EXPECT_EQ(count.size(), 3u);
+        for (const auto& [pair, n] : count) EXPECT_EQ(n, 1);
+        auto children = [](const NodePtr& n) {
+            std::unordered_set<Node*> out;
+            for (const auto& c : n->getChildren()) out.insert(c.get());
+            return out;
+        };
+        EXPECT_EQ(children(s1), (std::unordered_set<Node*>{ t3.get() }));
+        EXPECT_EQ(children(s2), (std::unordered_set<Node*>{ t1.get(), t3.get() }));
+        EXPECT_TRUE(allSegmentEdgesAreShort(g));
     }
 
     TEST_F(HypergraphInternalsTest, ResolveOwnRedundantTargets_PointerSignature_ReportsOnDissolveAndReplace) {

@@ -31,16 +31,14 @@ namespace hypergraph_logic {
 
     // Circles and rhombi (a square rotated 45 degrees) are regular shapes, so
     // both are inscribed in the same square bounding box. Its side is chosen so
-    // the circle covers the same area as a rectangular box (pi * 40^2 ~ 100 * 50),
-    // which makes both shapes look balanced next to rectangles while still
-    // leaving room for a short label in the middle of the rhombus.
-    inline constexpr double REGULAR_NODE_SIZE = 80.0;
+    // both cover the same area as a rectangular box ((50 * sqrt(2))^2 ~ 100 * 50)
+    // and (pi * 40^2 ~ 100 * 50), which makes both shapes look balanced next to
+    // rectangles while still leaving room for a short label in the middle.
+    inline constexpr double CIRCLE_NODE_WIDTH = 80.0;
+    inline constexpr double CIRCLE_NODE_HEIGHT = 80.0;
 
-    inline constexpr double CIRCLE_NODE_WIDTH = REGULAR_NODE_SIZE;
-    inline constexpr double CIRCLE_NODE_HEIGHT = REGULAR_NODE_SIZE;
-
-    inline constexpr double RHOMBUS_NODE_WIDTH = REGULAR_NODE_SIZE;
-    inline constexpr double RHOMBUS_NODE_HEIGHT = REGULAR_NODE_SIZE;
+    inline constexpr double RHOMBUS_NODE_WIDTH = 90.0;
+    inline constexpr double RHOMBUS_NODE_HEIGHT = 90.0;
 
     // Dummy nodes are invisible bend-points on edges. Due to vertical overlap
     // issues, we need to assing them a width for the port assignment step.

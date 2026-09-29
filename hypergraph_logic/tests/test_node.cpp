@@ -90,6 +90,16 @@ namespace hypergraph_logic::node_tests {
         EXPECT_FALSE(dummy->isFire());
     }
 
+    TEST(ColourHex, RoundTripAndFormats) {
+        const Color c{ 0x0A, 0xB0, 0xFF, 0x80 };
+        EXPECT_EQ(colorToHex(c), "#0AB0FF80");
+        EXPECT_EQ(colorFromHex("#0AB0FF80"), c);
+        EXPECT_EQ(colorFromHex("#0ab0ff80"), c);
+        EXPECT_EQ(colorFromHex("#0AB0FF"), (Color{ 0x0A, 0xB0, 0xFF, 255 }));
+        for (const char* bad : { "", "#12", "0AB0FF", "#0AB0FG", "#0AB0FF8" })
+            EXPECT_THROW(colorFromHex(bad), std::invalid_argument) << bad;
+    }
+
     TEST(DummyNode, CannotBeGivenAttributes) {
         auto dummy = std::make_shared<Node>();
         EXPECT_THROW(dummy->setAttributes(NodeAttributes("X")), std::logic_error);

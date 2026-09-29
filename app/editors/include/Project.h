@@ -168,7 +168,8 @@ namespace app_logic {
 		//     "active_index": <int>,
 		//     "diagram_names": [<string>, ...],
 		//     "diagrams": [ <GraphicalHypergraph JSON>, ... ],
-		//     "joint": <JointGraphicalHypergraph JSON>
+		//     "joint": <JointGraphicalHypergraph JSON>,
+		//     "recent_colours": [ "#RRGGBBAA", ... ]   (optional when loading)
 		//   }
 		// Updates file_path_ and resets the unsaved-changes flag.
 		// Throws std::runtime_error if the file cannot be written.
@@ -193,6 +194,24 @@ namespace app_logic {
 		static std::unique_ptr<Project> load(const std::filesystem::path& path);
 
 		void markUnsaved() { unsaved_changes_ = true; }
+
+		// ── Recent colours ────────────────────────────────────────────────────────
+		//
+		// Colours the user has picked for nodes in this project, most recent first,
+		// so the colour pickers can offer them again. Saved with the project.
+		//
+		static constexpr int MAX_RECENT_COLOURS = 10;
+
+		const std::vector<Color>& getRecentColours() const { return recent_colours_; }
+
+		// ── addRecentColour ───────────────────────────────────────────────────────
+		//
+		// Moves the colour to the front of the list (adding it if new) and drops
+		// the oldest entries beyond MAX_RECENT_COLOURS. Marks the project unsaved
+		// only if the list actually changed.
+		//
+		void addRecentColour(const Color& colour);
+
 	private:
 		std::string name_;
 		std::filesystem::path file_path_;
@@ -201,6 +220,7 @@ namespace app_logic {
 
 		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;
+		std::vector<Color> recent_colours_;
 	};
 
 } // namespace app_logic

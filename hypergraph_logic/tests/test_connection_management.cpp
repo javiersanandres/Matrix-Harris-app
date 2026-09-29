@@ -12,6 +12,7 @@
 #include <algorithm>
 #include <unordered_set>
 #include <unordered_map>
+#include <map>
 
 namespace hypergraph_logic::hypergraph_tests::connection_management {
 
@@ -947,6 +948,262 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
         g.fuseNodes(a, b, "ab");
         EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
         EXPECT_TRUE(allSegmentEdgesAreShort(g));
+    }
+
+    // ── Fusion must keep the Hasse-diagram invariant ─────────────────────────────
+
+    // True iff some original hyperedge connects s -> t.
+    static bool connected(const TestableHypergraph& g, const NodePtr& s, const NodePtr& t) {
+        return findEdgeWithSourceAndTarget(g, s, t) != nullptr;
+    }
+
+    // No direct connection s -> t may also be implied by a longer path s -> c ~> t.
+    static bool isHasseDiagram(const TestableHypergraph& g) {
+        for (const auto& e : g.getAllHyperedges()) {
+            if (e->isSegment()) continue;
+            for (const auto& s : e->getSources()) {
+                for (const auto& t : e->getTargets()) {
+                    for (const auto& c : s->getChildren()) {
+                        if (c == t) continue;
+                        if (c->getAllDescendants().count(t.get())) return false;
+                    }
+                }
+            }
+        }
+        return true;
+    }
+
+    // The real nodes' child links are exactly the targets of the edges they are a source of.
+    static bool linksMatchEdges(const TestableHypergraph& g) {
+        for (const auto& n : g.getAllNodes()) {
+            if (n->isDummy()) continue;
+            std::unordered_set<Node*> from_edges, from_links;
+            for (const auto& e : g.getAllHyperedges())
+                if (!e->isSegment() && edgeHasSource(e, n))
+                    for (const auto& t : e->getTargets()) from_edges.insert(t.get());
+            for (const auto& c : n->getChildren()) from_links.insert(c.get());
+            if (from_edges != from_links) return false;
+        }
+        return true;
+    }
+
+    // Every connection s -> t belongs to exactly one original hyperedge.
+    static bool eachConnectionInOneHyperedge(const TestableHypergraph& g) {
+        std::map<std::pair<Node*, Node*>, int> count;
+        for (const auto& e : g.getAllHyperedges()) {
+            if (e->isSegment()) continue;
+            for (const auto& s : e->getSources())
+                for (const auto& t : e->getTargets())
+                    if (++count[{ s.get(), t.get() }] > 1) return false;
+        }
+        return true;
+    }
+
+    static int countOriginalEdges(const TestableHypergraph& g) {
+        int n = 0;
+        for (const auto& e : g.getAllHyperedges()) if (!e->isSegment()) ++n;
+        return n;
+    }
+
+    static void expectFusionInvariants(TestableHypergraph& g) {
+        EXPECT_TRUE(eachConnectionInOneHyperedge(g));
+        EXPECT_TRUE(isHasseDiagram(g));
+        EXPECT_TRUE(linksMatchEdges(g));
+        EXPECT_TRUE(layersAreConsistentWithAllNodes(g));
+        EXPECT_TRUE(allSegmentEdgesAreShort(g));
+        EXPECT_TRUE(shortEdgesAreConsistentWithAdjacency(g));
+    }
+
+    static NodePtr survivorOf(const TestableHypergraph& g, const NodePtr& a, const NodePtr& b) {
+        return nodeInAllNodes(g, a) ? a : b;
+    }
+
+    // r -> a, x -> b -> c, and r -> c. Fusing a and b gives r -> ab -> c, so r -> c is implied.
+    TEST_F(ConnectionManagementTest, FuseNodes_RemovesAncestorToDescendantConnection) {
+        auto r = g.createNode("r", 0, nullptr, nullptr);
+        auto x = g.createNode("x", 1, nullptr, nullptr);
+        auto a = g.createNode("a", 0, r);
+        auto b = g.createNode("b", 1, x);
+        auto c = g.createNode("c", 0, b);
+        g.addConnection(r, c);
+        ASSERT_TRUE(connected(g, r, c));
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        EXPECT_FALSE(connected(g, r, c));
+        EXPECT_TRUE(connected(g, r, ab));
+        EXPECT_TRUE(connected(g, x, ab));
+        EXPECT_TRUE(connected(g, ab, c));
+        expectFusionInvariants(g);
+    }
+
+    // u -> p -> a and u -> b. Fusing a and b gives u -> p -> ab, so u -> ab is implied.
+    TEST_F(ConnectionManagementTest, FuseNodes_RemovesConnectionFromAncestorOfAnotherParent) {
+        auto u = g.createNode("u", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 0, u);
+        auto a = g.createNode("a", 0, p);
+        auto b = g.createNode("b", 1, u);
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        EXPECT_FALSE(connected(g, u, ab));
+        EXPECT_TRUE(connected(g, u, p));
+        EXPECT_TRUE(connected(g, p, ab));
+        EXPECT_EQ(ab->getLayer(), 2);
+        expectFusionInvariants(g);
+    }
+
+    // a -> v and b -> w -> v. Fusing a and b gives ab -> w -> v, so ab -> v is implied.
+    TEST_F(ConnectionManagementTest, FuseNodes_RemovesConnectionToDescendantOfAnotherChild) {
+        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto b = g.createNode("b", 1, nullptr, nullptr);
+        auto w = g.createNode("w", 0, b);
+        auto v = g.createNode("v", 0, w);
+        g.addConnection(a, v);
+        ASSERT_TRUE(connected(g, a, v));
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        EXPECT_FALSE(connected(g, ab, v));
+        EXPECT_TRUE(connected(g, ab, w));
+        EXPECT_TRUE(connected(g, w, v));
+        expectFusionInvariants(g);
+    }
+
+    // Hyperedge {r, q} -> {c, d}; after fusing, only r -> c is implied (r -> ab -> c). Every
+    // other connection the hyperedge encoded must survive.
+    TEST_F(ConnectionManagementTest, FuseNodes_KeepsTheNonRedundantPartOfAHyperedge) {
+        auto r = g.createNode("r", 0, nullptr, nullptr);
+        auto q = g.createNode("q", 1, nullptr, nullptr);
+        auto d = g.createNode("d", 2, nullptr, nullptr);
+        auto c = g.createNode("c", 0, r);
+        auto edge = findEdgeWithSourceAndTarget(g, r, c);
+        ASSERT_NE(edge, nullptr);
+        g.addSourceToEdge(edge, q);
+        g.addTargetToEdge(findEdgeWithSourceAndTarget(g, r, c), d);
+        auto a = g.createNode("a", -1, r);
+        auto b = g.createNode("b", -1, nullptr);
+        g.addConnection(b, c);
+        ASSERT_TRUE(connected(g, r, c));
+        ASSERT_TRUE(connected(g, r, d));
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        EXPECT_FALSE(connected(g, r, c));
+        EXPECT_TRUE(connected(g, r, d));
+        EXPECT_TRUE(connected(g, q, c));
+        EXPECT_TRUE(connected(g, q, d));
+        EXPECT_TRUE(connected(g, r, ab));
+        EXPECT_TRUE(connected(g, ab, c));
+        expectFusionInvariants(g);
+    }
+
+    // ── Fusion must not leave a connection in two hyperedges ──────────────────────
+
+    // {a} -> {t, x} and {b} -> {t}: after fusing, ab -> t would be held twice. {ab} -> {t} is
+    // entirely contained in {ab} -> {t, x}, so it is the one that disappears.
+    TEST_F(ConnectionManagementTest, FuseNodes_DuplicateConnection_ContainedHyperedgeDisappears) {
+        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto b = g.createNode("b", 1, nullptr, nullptr);
+        auto x = g.createNode("x", 2, nullptr, nullptr);
+        auto t = g.createNode("t", 0, a);
+        g.addTargetToEdge(findEdgeWithSourceAndTarget(g, a, t), x);
+        g.addConnection(b, t);
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        auto edge = findEdgeWithSourceAndTarget(g, ab, t);
+        ASSERT_NE(edge, nullptr);
+        EXPECT_TRUE(edgeHasTarget(edge, x)) << "the larger hyperedge must be the one kept";
+        EXPECT_EQ(countOriginalEdges(g), 1);
+        expectFusionInvariants(g);
+    }
+
+    // Same, with the fused node as the target: {s} -> {a, x} and {s} -> {b}.
+    TEST_F(ConnectionManagementTest, FuseNodes_DuplicateParentConnection_ContainedHyperedgeDisappears) {
+        auto s = g.createNode("s", 0, nullptr, nullptr);
+        auto x = g.createNode("x", 1, nullptr, nullptr);
+        auto a = g.createNode("a", 0, s);
+        g.addTargetToEdge(findEdgeWithSourceAndTarget(g, s, a), x);
+        auto b = g.createNode("b", -1, s);
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        auto edge = findEdgeWithSourceAndTarget(g, s, ab);
+        ASSERT_NE(edge, nullptr);
+        EXPECT_TRUE(edgeHasTarget(edge, x));
+        EXPECT_EQ(countOriginalEdges(g), 1);
+        expectFusionInvariants(g);
+    }
+
+    // {a} -> {t, u} and {b, q} -> {t}: ab -> t is held twice. The second can give it up by just
+    // dropping ab from its sources (t is all it reaches), so no new hyperedge is needed there,
+    // and ties are broken in favour of the survivor's own hyperedge.
+    TEST_F(ConnectionManagementTest, FuseNodes_DuplicateConnection_SharedHyperedgeLosesTheFusedNode) {
+        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto b = g.createNode("b", 1, nullptr, nullptr);
+        auto q = g.createNode("q", 2, nullptr, nullptr);
+        auto u = g.createNode("u", 3, nullptr, nullptr);
+        auto t = g.createNode("t", 0, a);
+        g.addTargetToEdge(findEdgeWithSourceAndTarget(g, a, t), u);
+        g.addConnection(b, t);
+        g.addSourceToEdge(findEdgeWithSourceAndTarget(g, b, t), q);
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        EXPECT_TRUE(connected(g, ab, t));
+        EXPECT_TRUE(connected(g, ab, u));
+        EXPECT_TRUE(connected(g, q, t));
+        auto q_edge = findEdgeWithSourceAndTarget(g, q, t);
+        ASSERT_NE(q_edge, nullptr);
+        EXPECT_FALSE(edgeHasSource(q_edge, ab));
+        EXPECT_EQ(countOriginalEdges(g), 2);
+        expectFusionInvariants(g);
+    }
+
+    // {a, p} -> {t, u} and {b, q} -> {t, w}: neither can give up ab -> t without a new hyperedge.
+    // One of them loses ab, and ab keeps its other target through a new hyperedge.
+    TEST_F(ConnectionManagementTest, FuseNodes_DuplicateConnection_SplitsOffANewHyperedge) {
+        auto a = g.createNode("a", 0, nullptr, nullptr);
+        auto p = g.createNode("p", 1, nullptr, nullptr);
+        auto b = g.createNode("b", 2, nullptr, nullptr);
+        auto q = g.createNode("q", 3, nullptr, nullptr);
+        auto u = g.createNode("u", 4, nullptr, nullptr);
+        auto w = g.createNode("w", 5, nullptr, nullptr);
+        auto t = g.createNode("t", 0, a);
+        g.addSourceToEdge(findEdgeWithSourceAndTarget(g, a, t), p);
+        g.addTargetToEdge(findEdgeWithSourceAndTarget(g, a, t), u);
+        g.addConnection(b, t);
+        g.addSourceToEdge(findEdgeWithSourceAndTarget(g, b, t), q);
+        g.addTargetToEdge(findEdgeWithSourceAndTarget(g, b, t), w);
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        for (const auto& [s, d] : std::vector<std::pair<NodePtr, NodePtr>>{
+                { ab, t }, { ab, u }, { ab, w }, { p, t }, { p, u }, { q, t }, { q, w } })
+            EXPECT_TRUE(connected(g, s, d)) << s->getName() << " -> " << d->getName();
+        EXPECT_FALSE(connected(g, p, w));
+        EXPECT_FALSE(connected(g, q, u));
+        EXPECT_EQ(countOriginalEdges(g), 3);
+        expectFusionInvariants(g);
+    }
+
+    // Nothing becomes implied: fusion must not remove any connection.
+    TEST_F(ConnectionManagementTest, FuseNodes_NoRedundancy_KeepsEveryConnection) {
+        auto r1 = g.createNode("r1", 0, nullptr, nullptr);
+        auto r2 = g.createNode("r2", 1, nullptr, nullptr);
+        auto a = g.createNode("a", 0, r1);
+        auto b = g.createNode("b", 1, r2);
+        auto c = g.createNode("c", 0, a);
+        auto d = g.createNode("d", 0, b);
+
+        g.fuseNodes(a, b, "ab");
+        auto ab = survivorOf(g, a, b);
+        EXPECT_TRUE(connected(g, r1, ab));
+        EXPECT_TRUE(connected(g, r2, ab));
+        EXPECT_TRUE(connected(g, ab, c));
+        EXPECT_TRUE(connected(g, ab, d));
+        expectFusionInvariants(g);
     }
 
     // =============================================================================

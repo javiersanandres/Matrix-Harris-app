@@ -52,6 +52,7 @@ set(BENCHMARK_COMMON_SOURCES
     ${HYPERGRAPH_SRC_DIR}/GraphicalHypergraphPersistence.cpp
     ${HYPERGRAPH_SRC_DIR}/JointGraphicalHypergraph.cpp
     ${UI_DIR}/src/HypergraphRenderer.cpp
+    ${UI_DIR}/src/NodeVisuals.cpp
     $<IF:$<BOOL:${Gurobi_FOUND}>,${HYPERGRAPH_SRC_DIR}/horizontalOrder.cpp,>
 )
 

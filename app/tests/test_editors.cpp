@@ -1,6 +1,7 @@
 #include "HypergraphEditor.h"
 #include "JointHypergraphEditor.h"
 #include "Project.h"
+#include "LayoutTypes.h"
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -517,6 +518,27 @@ namespace app_logic {
                 ed.fuseNodes(A, B, styledAttributes("AB"));
                 ASSERT_EQ(ed.getAllNodes().size(), 1u);
                 EXPECT_EQ(ed.getAllNodes()[0]->getAttributes(), styledAttributes("AB"));
+            }
+
+            // A new shape changes the node's size, so the layout must follow.
+            TEST(HypergraphEditor, SetNodeAttributesWithNewShapeRecomputesLayout) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, nullptr);
+                ed.createNode("B", 0, A);
+                const double layer1_before = ed.getGraph().getLayerLayout().at(1);
+
+                NodeAttributes circle("A");
+                circle.shape = NodeShape::Circle;
+                ed.setNodeAttributes(A, circle);
+
+                const double layer1_after = ed.getGraph().getLayerLayout().at(1);
+                // Layer 1 moves down by the extra half height of the circle.
+                EXPECT_NEAR(layer1_before - layer1_after, (CIRCLE_NODE_HEIGHT - NODE_HEIGHT) / 2.0, 1e-9);
+                const Port& src = ed.getGraph().getNodeLayout().at(A.get()).source_ports.at(0);
+                EXPECT_NEAR(src.y, -A->getBoundaryHalfHeight(src.x - ed.getX(A)), 1e-9);
+
+                ed.undo();
+                EXPECT_NEAR(ed.getGraph().getLayerLayout().at(1), layer1_before, 1e-9);
             }
 
             // ── setName ───────────────────────────────────────────────────────

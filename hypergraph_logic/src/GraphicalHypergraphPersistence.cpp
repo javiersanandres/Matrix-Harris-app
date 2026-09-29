@@ -46,42 +46,20 @@ namespace hypergraph_logic {
 			throw std::runtime_error("GraphicalHypergraph::fromJSON: unknown fire state: " + s);
 		}
 
-		std::string colorToString(const Color& c) {
-			static const char* hex = "0123456789ABCDEF";
-			std::string out = "#";
-			for (uint8_t component : { c.r, c.g, c.b, c.a }) {
-				out += hex[component >> 4];
-				out += hex[component & 0x0F];
-			}
-			return out;
-		}
-
 		Color colorFromString(const std::string& s) {
-			// Accepts "#RRGGBB" (opaque) and "#RRGGBBAA".
-			if ((s.size() != 7 && s.size() != 9) || s[0] != '#')
+			try {
+				return colorFromHex(s);
+			}
+			catch (const std::invalid_argument&) {
 				throw std::runtime_error("GraphicalHypergraph::fromJSON: invalid colour: " + s);
-			auto nibble = [&](char ch) -> uint8_t {
-				if (ch >= '0' && ch <= '9') return static_cast<uint8_t>(ch - '0');
-				if (ch >= 'A' && ch <= 'F') return static_cast<uint8_t>(ch - 'A' + 10);
-				if (ch >= 'a' && ch <= 'f') return static_cast<uint8_t>(ch - 'a' + 10);
-				throw std::runtime_error("GraphicalHypergraph::fromJSON: invalid colour: " + s);
-			};
-			auto component = [&](size_t pos) -> uint8_t {
-				return static_cast<uint8_t>((nibble(s[pos]) << 4) | nibble(s[pos + 1]));
-			};
-			Color c;
-			c.r = component(1);
-			c.g = component(3);
-			c.b = component(5);
-			c.a = s.size() == 9 ? component(7) : 255;
-			return c;
+			}
 		}
 
 		void attributesToJSON(const NodeAttributes& a, json& entry) {
 			entry["name"] = a.name;
 			entry["shape"] = shapeToString(a.shape);
-			entry["colour"] = colorToString(a.colour);
-			entry["font_colour"] = colorToString(a.font_colour);
+			entry["colour"] = colorToHex(a.colour);
+			entry["font_colour"] = colorToHex(a.font_colour);
 			entry["font_size"] = a.font_size;
 			entry["fire"] = fireToString(a.fire);
 		}

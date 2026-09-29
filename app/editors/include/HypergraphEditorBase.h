@@ -173,11 +173,20 @@ namespace app_logic {
 		//
 		// Clones the graph, attempts setAttributes on the node (name, shape, colours,
 		// font size and fire state all at once), and commits the snapshot only on
-		// success. Attributes do not affect the layout, so no recomputation is needed.
+		// success. A new shape changes the node's width and height, so the layout is
+		// recomputed in that case (re-ordering the bars around the node's layer);
+		// every other attribute is purely cosmetic.
 		void setNodeAttributes(const NodePtr& node, const NodeAttributes& attributes) {
 			auto saved = derived().takeSnapshot();
 			try {
+				const bool shape_changed = node->getShape() != attributes.shape;
 				node->setAttributes(attributes);
+				if (shape_changed) {
+					const int layer = node->getLayer();
+					std::set<int> mip_layers{ layer };
+					if (layer > 0) mip_layers.insert(layer - 1);
+					derived().graph().computeLayout(mip_layers);
+				}
 			}
 			catch (...) {
 				throw;
