@@ -59,6 +59,8 @@ namespace ui::style {
         LineSolid,         // two boxes joined by a continuous line
         LineDashed,        // two boxes joined by a discontinuous line
         Pause,             // two rounded bars
+        Move,              // a piece of diagram with a four-way arrow
+        TakeOut,           // a piece of diagram leaving through a dashed frame
     };
 
     QIcon icon(Icon which);

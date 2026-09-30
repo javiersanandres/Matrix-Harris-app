@@ -19,8 +19,9 @@ namespace ui {
 //   - Double click       → "Propiedades" dialog to edit every node attribute.
 //   - Mouse wheel        → scrolls the label when it overflows the node's shape
 //                          (its scroll indicator only shows while hovering).
-//   - Mouse press + drag → horizontal-only drag (grey out, snap on release
-//                          calls relocateNodeInLayer via the scene).
+//   - Mouse press + drag → the box lifts and follows the mouse (the scene shows
+//                          where it would land); on release the scene relocates
+//                          it and the layout glides to its new shape.
 //
 // The item stores a raw Node* for identification. The pointer is valid for the
 // lifetime of the scene because the scene is rebuilt from scratch after every

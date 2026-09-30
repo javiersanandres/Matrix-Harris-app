@@ -11,11 +11,21 @@
 #include <QGraphicsScene>
 #include <QGraphicsRectItem>
 #include <QList>
+#include <QPointer>
+#include <QVariantAnimation>
 
 #include <functional>
+#include <optional>
+#include <string>
 #include <unordered_map>
 #include <unordered_set>
+#include <utility>
+#include <vector>
 
+class QGraphicsEllipseItem;
+class QGraphicsItemGroup;
+class QGraphicsPathItem;
+class QMenu;
 class QTimer;
 
 namespace ui {
@@ -93,6 +103,25 @@ namespace ui {
         void setColourStore(std::function<QList<QColor>()> recent,
             std::function<void(const QColor&)> remember);
 
+        // ── Layout transitions ────────────────────────────────────────────────────
+        //
+        // Where every box is drawn right now (centre, scene coordinates).
+        std::unordered_map<hypergraph_logic::Node*, QPointF> nodeCenters() const;
+
+        // rebuild(), then every box glides from where it was drawn in `from` to
+        // its new place, boxes that did not exist fade in, and the connections
+        // of anything that moved fade back in once the boxes are nearly there.
+        void rebuildAnimated(const std::unordered_map<hypergraph_logic::Node*, QPointF>& from);
+
+        // ── Moving a whole piece of the joint diagram ─────────────────────────────
+        //
+        // A diagram (not mixed with others) or a connected block, chosen from a
+        // box or connection menu: it lifts off the canvas and follows the mouse,
+        // with a guide showing where it would land (see JointGraphicalHypergraph's
+        // placement); a click (or releasing a drag) drops it there, Esc or a right
+        // click puts it back.
+        bool isMovingPiece() const { return piece_move_.has_value(); }
+
         // ── Signals emitted to MainWindow ────────────────────────────────────────
     signals:
         // Emitted after any mutation so MainWindow can update undo/redo actions
@@ -113,6 +142,9 @@ namespace ui {
 
     protected:
         void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
+        void mouseMoveEvent(QGraphicsSceneMouseEvent* event) override;
+        void mouseReleaseEvent(QGraphicsSceneMouseEvent* event) override;
+        void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
         void keyPressEvent(QKeyEvent* event) override;
 
     private:
@@ -145,6 +177,87 @@ namespace ui {
         // ── Project colour store (see setColourStore) ─────────────────────────────
         std::function<QList<QColor>()> recent_colours_;
         std::function<void(const QColor&)> remember_colour_;
+
+        // ── Dragging one box (see NodeItem) ───────────────────────────────────────
+        struct BoxDrag {
+            NodeItem* item = nullptr;
+            std::vector<HyperedgeItem*> edges; // its connections, faded while it moves
+        };
+        std::optional<BoxDrag> box_drag_;
+
+        void beginBoxDrag(NodeItem* item);   // lifts the box
+        void updateBoxDrag(NodeItem* item);  // landing guide in the target layer
+        void endBoxDrag();
+
+        // ── Moving a piece of the joint diagram ───────────────────────────────────
+        struct PieceMove {
+            std::string diagram_id;                   // empty: a connected block
+            hypergraph_logic::Node* anchor = nullptr; // a box of the block
+            std::unordered_set<hypergraph_logic::Node*> nodes;
+            std::vector<std::pair<double, double>> regions; // the others'
+            QGraphicsItemGroup* piece = nullptr;      // its items, lifted
+            QPointF grab;                             // cursor when it was lifted
+            QPointF offset;                           // how far it has been moved
+            double center_x = 0.0;                    // of its span, before moving
+            int top_layer = 0;
+            int bottom_layer = 0;
+            double top_row_y = 0.0;                   // scene y of its first row
+        };
+        std::optional<PieceMove> piece_move_;
+        bool swallow_context_menu_ = false; // the right click that put a piece back
+
+        void startPieceMove(const std::string& diagram_id, hypergraph_logic::Node* anchor);
+        void updatePiecePreview();
+        void dropPiece();
+        void cancelPieceMove();
+        void endPieceMove(); // leaves the moving state without touching the graph
+
+        // What the joint diagram's menus can offer for the piece around a box.
+        struct PieceChoice {
+            std::string diagram_id;  // the box's diagram, when it is separable
+            QString diagram_name;
+            bool move_diagram = false;
+            bool move_block = false;
+        };
+        PieceChoice pieceChoiceFor(hypergraph_logic::Node* box) const;
+        void addMoveEntries(QMenu* menu, const PieceChoice& choice, hypergraph_logic::Node* box);
+        void addTakeOutEntry(QMenu* menu, const PieceChoice& choice);
+        void onRemoveDiagram(const std::string& diagram_id);
+
+        // ── Guides drawn over the diagram while something moves ───────────────────
+        //
+        // Created once when a move starts and only reshaped while it goes on:
+        // deleting items while the scene is delivering a mouse event to the
+        // dragged box makes Qt drop that box's mouse grab (the drag would stop).
+        struct Guides {
+            QGraphicsPathItem* band = nullptr;      // target layer (box drag)
+            QGraphicsPathItem* halo = nullptr;      // insertion bar: glow...
+            QGraphicsPathItem* bar = nullptr;       // ...the bar...
+            QGraphicsEllipseItem* dot_top = nullptr;    // ...and its ends
+            QGraphicsEllipseItem* dot_bottom = nullptr;
+            QGraphicsItem* chip = nullptr;          // label (ChipItem)
+            std::vector<QGraphicsPathItem*> regions; // other pieces (piece move)
+        };
+        std::optional<Guides> guides_;
+        void createGuides();  // hidden until placed
+        void clearGuides();   // outside mouse-event delivery (see above)
+        void placeBand(const QRectF& rect, bool dashed);
+        void placeLandingMarker(double x, double top_y, double bottom_y);
+        void placeChip(const QString& text, const QPointF& anchor); // empty text hides it
+
+        // Scene y of a layer's row; beyond the existing layers, one layer gap
+        // per layer above the first or below the last.
+        double rowSceneY(int layer) const;
+
+        // Where the mouse is, in scene coordinates (of the editing view).
+        QPointF cursorScenePos() const;
+
+        // Animations: the layout transition, the lift of what is being moved and
+        // the fade-out of a diagram being taken out.
+        QPointer<QVariantAnimation> transition_;
+        QPointer<QVariantAnimation> lift_;
+        QPointer<QVariantAnimation> fade_;
+        void stopAnimations();
 
         // ── Helpers ───────────────────────────────────────────────────────────────
 

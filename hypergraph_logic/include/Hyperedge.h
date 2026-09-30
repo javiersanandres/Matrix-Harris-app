@@ -14,6 +14,7 @@ namespace hypergraph_logic {
 	// Forward declaration for friend access
 	class Hypergraph;
 	class GraphicalHypergraph;
+	class JointGraphicalHypergraph;
 
 	// ============================================================================
 	// Hyperedge
@@ -41,6 +42,7 @@ namespace hypergraph_logic {
 	class Hyperedge : public std::enable_shared_from_this<Hyperedge> {
 		friend class Hypergraph;  // Allow Hypergraph to set layer.
 		friend class GraphicalHypergraph;  // Allow GraphicalHypergraph to set the layer.
+		friend class JointGraphicalHypergraph;  // Moves whole diagrams between layers.
 	public:
 
 		// ── Hyperedge (original) ──────────────────────────────────────────────────────────────────────

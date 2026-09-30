@@ -6,15 +6,26 @@
 #include "UiStyle.h"
 
 #include <QGraphicsSceneMouseEvent>
+#include <QGraphicsSceneContextMenuEvent>
+#include <QGraphicsDropShadowEffect>
+#include <QGraphicsEllipseItem>
+#include <QGraphicsItemGroup>
+#include <QGraphicsPathItem>
 #include <QKeyEvent>
 #include <QMenu>
 #include <QAction>
 #include "AppDialogs.h"
 #include <QApplication>
+#include <QCursor>
 #include <QGraphicsView>
+#include <QPainter>
+#include <QPainterPath>
 #include <QTimer>
 
+#include <algorithm>
 #include <cmath>
+#include <limits>
+#include <memory>
 #include <numbers>
 
 using namespace hypergraph_logic;
@@ -25,6 +36,63 @@ namespace ui {
     namespace {
         // One full breath of the candidates' glow, in milliseconds.
         constexpr double PULSE_PERIOD_MS = 1400.0;
+
+        // Layout transition and lift timings, in milliseconds.
+        constexpr int GLIDE_MS = 340;
+        constexpr int LIFT_MS = 170;
+        constexpr int TAKE_OUT_MS = 220;
+
+        // A small label in the brand gradient; its position is the middle of its
+        // bottom edge. The scene scales it to look the same size at any zoom of
+        // the editing view (see placeChip) -- not ItemIgnoresTransformations, which
+        // would draw it just as big over the tab miniatures.
+        class ChipItem : public QGraphicsItem {
+        public:
+            ChipItem() {
+                setZValue(60);
+                font_.setPointSizeF(9.0);
+                font_.setBold(true);
+            }
+            void setText(const QString& text) {
+                if (text == text_) return;
+                prepareGeometryChange();
+                text_ = text;
+                const QFontMetricsF fm(font_);
+                const QSizeF size(fm.horizontalAdvance(text_) + 22.0, fm.height() + 10.0);
+                rect_ = QRectF(-size.width() / 2.0, -size.height() - 6.0, size.width(), size.height());
+                update();
+            }
+            QRectF boundingRect() const override { return rect_.adjusted(-6, -6, 6, 12); }
+            void paint(QPainter* p, const QStyleOptionGraphicsItem*, QWidget*) override {
+                p->setRenderHint(QPainter::Antialiasing);
+                const double r = rect_.height() / 2.0;
+                // Soft shadow, then the pill and a small pointer down to the anchor.
+                p->setPen(Qt::NoPen);
+                p->setBrush(QColor(31, 35, 48, 40));
+                p->drawRoundedRect(rect_.translated(0, 3), r, r);
+                QLinearGradient g(rect_.topLeft(), rect_.topRight());
+                g.setColorAt(0, style::palette::accent);
+                g.setColorAt(1, style::palette::violet);
+                p->setBrush(g);
+                QPainterPath pill;
+                pill.addRoundedRect(rect_, r, r);
+                QPolygonF tip{ QPointF(-5, rect_.bottom() - 0.5), QPointF(5, rect_.bottom() - 0.5), QPointF(0, rect_.bottom() + 5) };
+                pill.addPolygon(tip);
+                p->drawPath(pill.simplified());
+                p->setPen(Qt::white);
+                p->setFont(font_);
+                p->drawText(rect_, Qt::AlignCenter, text_);
+            }
+        private:
+            QString text_;
+            QFont font_;
+            QRectF rect_;
+        };
+
+        double easeOutCubic(double t) {
+            t = std::clamp(t, 0.0, 1.0);
+            return 1.0 - std::pow(1.0 - t, 3.0);
+        }
     }
 
     // ============================================================================
@@ -38,14 +106,17 @@ namespace ui {
     {
         connect(this, &DiagramScene::nodeRelocated,
             this, [this](Node* node, double new_x, double new_y) {
+                // Every box glides from where it is drawn now (the dragged one
+                // from where it was dropped); a refused move glides it back.
+                const auto from = nodeCenters();
                 try {
                     regular_editor_->relocateNode(node->shared_from_this(), new_x, -new_y);
                 }
                 catch (const std::exception&) {
-                    rebuild();
+                    rebuildAnimated(from);
                     return;
                 }
-                rebuild();
+                rebuildAnimated(from);
                 emit graphChanged();
             });
         initialise();
@@ -58,14 +129,15 @@ namespace ui {
     {
         connect(this, &DiagramScene::nodeRelocated,
             this, [this](Node* node, double new_x, double new_y) {
+                const auto from = nodeCenters();
                 try {
                     joint_editor_->relocateNode(node->shared_from_this(), new_x, -new_y);
                 }
                 catch (const std::exception&) {
-                    rebuild();
+                    rebuildAnimated(from);
                     return;
                 }
-                rebuild();
+                rebuildAnimated(from);
                 emit graphChanged();
             });
         initialise();
@@ -89,6 +161,11 @@ namespace ui {
 
     void DiagramScene::rebuild() {
         cancelInteraction();
+        // Whatever was moving or animating refers to items about to be deleted.
+        stopAnimations();
+        clearGuides();
+        box_drag_.reset();
+        if (piece_move_) endPieceMove();
         node_items_.clear();
         edge_items_.clear();
 
@@ -231,6 +308,18 @@ namespace ui {
     // ============================================================================
 
     void DiagramScene::mousePressEvent(QGraphicsSceneMouseEvent* event) {
+        if (piece_move_) {
+            // The piece is dropped when the button is released (a click drops it
+            // where it is; a drag, where the drag ends); a right click puts it back.
+            if (event->button() == Qt::RightButton) {
+                swallow_context_menu_ = true;
+                cancelPieceMove();
+            }
+            event->accept();
+            return;
+        }
+        swallow_context_menu_ = false; // a new click: its menu is a real one
+
         QGraphicsItem* item = itemAt(event->scenePos(), QTransform());
 
         if (state_ != InteractionState::Idle) {
@@ -260,7 +349,41 @@ namespace ui {
         }
     }
 
+    void DiagramScene::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
+        if (piece_move_) {
+            piece_move_->offset = event->scenePos() - piece_move_->grab;
+            piece_move_->piece->setPos(piece_move_->offset);
+            updatePiecePreview();
+            event->accept();
+            return;
+        }
+        QGraphicsScene::mouseMoveEvent(event);
+    }
+
+    void DiagramScene::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
+        if (piece_move_) {
+            if (event->button() == Qt::LeftButton) dropPiece();
+            event->accept();
+            return;
+        }
+        QGraphicsScene::mouseReleaseEvent(event);
+    }
+
+    void DiagramScene::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
+        if (piece_move_ || swallow_context_menu_) { // the right click already put it back
+            swallow_context_menu_ = false;
+            event->accept();
+            return;
+        }
+        QGraphicsScene::contextMenuEvent(event);
+    }
+
     void DiagramScene::keyPressEvent(QKeyEvent* event) {
+        if (event->key() == Qt::Key_Escape && piece_move_) {
+            cancelPieceMove();
+            event->accept();
+            return;
+        }
         if (event->key() == Qt::Key_Escape && state_ != InteractionState::Idle) {
             cancelInteraction();
             event->accept();
@@ -332,6 +455,9 @@ namespace ui {
             InteractionState::WaitingForSecondNode_FuseNodes,
             QStringLiteral("Ninguna caja puede fusionarse con esta"));
 
+        const PieceChoice piece = pieceChoiceFor(node);
+        addMoveEntries(menu, piece, node);
+
         // "Conexiones hipotéticas": one checkable entry per connection of this box,
         // named after the boxes at its other end. A doubtful connection is drawn
         // discontinuous from this box (see HypergraphRenderer).
@@ -378,6 +504,7 @@ namespace ui {
             QStringLiteral("Esta caja no está conectada a ninguna otra"));
         menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar caja"),
             [this, node] { onRemoveNode(node); });
+        addTakeOutEntry(menu, piece);
 
         menu->popup(QCursor::pos());
     }
@@ -433,6 +560,11 @@ namespace ui {
             InteractionState::WaitingForSecondNode_AddTarget,
             QStringLiteral("Ninguna caja puede unirse a esta conexión por abajo"));
 
+        // A connection belongs to the same diagram and block as its boxes.
+        Node* reference = edge->getSources().empty() ? nullptr : edge->getSources().front().get();
+        const PieceChoice piece = pieceChoiceFor(reference);
+        addMoveEntries(menu, piece, reference);
+
         // Each entry names what it will do, with an icon of the result. A
         // connection that is partly dashed (doubtful at some boxes) offers both.
         style::addMenuSection(menu, QStringLiteral("Estilo"));
@@ -452,6 +584,7 @@ namespace ui {
             InteractionState::WaitingForSecondNode_SimplifyConnection, QString());
         menu->addAction(style::icon(style::Icon::RemoveConnection), QStringLiteral("Eliminar conexión"),
             [this, edge] { onRemoveHyperedge(edge); });
+        addTakeOutEntry(menu, piece);
 
         menu->popup(QCursor::pos());
     }
@@ -745,6 +878,576 @@ namespace ui {
     QWidget* DiagramScene::dialogParent() const {
         const auto v = views();
         return v.isEmpty() ? nullptr : v.front()->window();
+    }
+
+    // ============================================================================
+    // Layout transitions
+    // ============================================================================
+
+    std::unordered_map<Node*, QPointF> DiagramScene::nodeCenters() const {
+        std::unordered_map<Node*, QPointF> centers;
+        for (const auto& [node, item] : node_items_)
+            centers[node] = item->mapToScene(item->rect().center());
+        return centers;
+    }
+
+    void DiagramScene::rebuildAnimated(const std::unordered_map<Node*, QPointF>& from) {
+        rebuild();
+
+        struct Glide { NodeItem* item; QPointF offset; };
+        auto glides = std::make_shared<std::vector<Glide>>();
+        auto arrivals = std::make_shared<std::vector<NodeItem*>>(); // boxes that were not there
+        std::unordered_set<Node*> changed;
+        for (const auto& [node, item] : node_items_) {
+            auto it = from.find(node);
+            if (it == from.end()) {
+                arrivals->push_back(item);
+                changed.insert(node);
+                continue;
+            }
+            const QPointF offset = it->second - item->mapToScene(item->rect().center());
+            if (std::hypot(offset.x(), offset.y()) < 0.5) continue;
+            glides->push_back({ item, offset });
+            changed.insert(node);
+        }
+        // Connections of what moved are redrawn in their new shape: they fade in.
+        auto redrawn = std::make_shared<std::vector<HyperedgeItem*>>();
+        for (const auto& [edge, item] : edge_items_) {
+            bool touches = false;
+            for (const auto& s : edge->getSources()) touches = touches || changed.count(s.get());
+            for (const auto& t : edge->getTargets()) touches = touches || changed.count(t.get());
+            if (touches) redrawn->push_back(item);
+        }
+        if (glides->empty() && arrivals->empty()) return;
+
+        auto apply = [glides, arrivals, redrawn](double raw) {
+            const double t = easeOutCubic(raw);
+            for (const auto& g : *glides) g.item->setPos(g.offset * (1.0 - t));
+            for (NodeItem* item : *arrivals) {
+                item->setOpacity(t);
+                item->setScale(0.92 + 0.08 * t);
+            }
+            // The connections come back once the boxes are nearly in place.
+            const double edges = std::clamp((raw - 0.35) / 0.65, 0.0, 1.0);
+            for (HyperedgeItem* item : *redrawn) item->setOpacity(edges);
+        };
+        for (NodeItem* item : *arrivals) item->setTransformOriginPoint(item->rect().center());
+        apply(0.0);
+
+        transition_ = new QVariantAnimation(this);
+        transition_->setDuration(GLIDE_MS);
+        transition_->setStartValue(0.0);
+        transition_->setEndValue(1.0);
+        connect(transition_, &QVariantAnimation::valueChanged, this, [apply](const QVariant& v) { apply(v.toDouble()); });
+        connect(transition_, &QVariantAnimation::finished, this, [apply] { apply(1.0); });
+        transition_->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    void DiagramScene::stopAnimations() {
+        // Stopping never emits finished(), so nothing runs on deleted items.
+        for (QPointer<QVariantAnimation>* a : { &transition_, &lift_, &fade_ })
+            if (*a) (*a)->stop();
+    }
+
+    // ============================================================================
+    // Guides drawn while something moves
+    // ============================================================================
+
+    void DiagramScene::createGuides() {
+        clearGuides();
+        Guides g;
+        auto keep = [this](QGraphicsItem* item, double z) {
+            item->setZValue(z);
+            item->setVisible(false);
+            item->setAcceptedMouseButtons(Qt::NoButton);
+            addItem(item);
+        };
+        g.band = new QGraphicsPathItem;
+        keep(g.band, -1.0); // behind the boxes
+        QColor glow = style::palette::accent;
+        glow.setAlpha(55);
+        g.halo = new QGraphicsPathItem;
+        g.halo->setPen(QPen(glow, 12.0, Qt::SolidLine, Qt::RoundCap));
+        keep(g.halo, 40);
+        g.bar = new QGraphicsPathItem;
+        keep(g.bar, 41);
+        g.dot_top = new QGraphicsEllipseItem(-5.5, -5.5, 11.0, 11.0);
+        g.dot_top->setPen(QPen(Qt::white, 2.0));
+        g.dot_top->setBrush(style::palette::accent);
+        keep(g.dot_top, 42);
+        g.dot_bottom = new QGraphicsEllipseItem(-5.5, -5.5, 11.0, 11.0);
+        g.dot_bottom->setPen(QPen(Qt::white, 2.0));
+        g.dot_bottom->setBrush(style::palette::violet);
+        keep(g.dot_bottom, 42);
+        g.chip = new ChipItem;
+        keep(g.chip, 60);
+        guides_ = std::move(g);
+    }
+
+    void DiagramScene::clearGuides() {
+        if (!guides_) return;
+        std::vector<QGraphicsItem*> items{ guides_->band, guides_->halo, guides_->bar,
+            guides_->dot_top, guides_->dot_bottom, guides_->chip };
+        items.insert(items.end(), guides_->regions.begin(), guides_->regions.end());
+        guides_.reset();
+        for (QGraphicsItem* item : items) {
+            removeItem(item);
+            delete item;
+        }
+    }
+
+    void DiagramScene::placeBand(const QRectF& rect, bool dashed) {
+        if (!guides_) return;
+        QPainterPath path;
+        path.addRoundedRect(rect, 18.0, 18.0);
+        guides_->band->setPath(path);
+        QColor fill = style::palette::accent;
+        fill.setAlpha(dashed ? 10 : 18);
+        guides_->band->setBrush(fill);
+        QColor edge = style::palette::accent;
+        edge.setAlpha(dashed ? 150 : 45);
+        QPen pen(edge, 1.4, dashed ? Qt::DashLine : Qt::SolidLine);
+        pen.setCosmetic(true);
+        guides_->band->setPen(pen);
+        guides_->band->setVisible(true);
+    }
+
+    void DiagramScene::placeLandingMarker(double x, double top_y, double bottom_y) {
+        if (!guides_) return;
+        // An insertion bar: a soft glow, the bar and a dot at each end.
+        QPainterPath line;
+        line.moveTo(x, top_y);
+        line.lineTo(x, bottom_y);
+        guides_->halo->setPath(line);
+        guides_->bar->setPath(line);
+        QLinearGradient g(x, top_y, x, bottom_y);
+        g.setColorAt(0, style::palette::accent);
+        g.setColorAt(1, style::palette::violet);
+        guides_->bar->setPen(QPen(QBrush(g), 4.0, Qt::SolidLine, Qt::RoundCap));
+        guides_->dot_top->setPos(x, top_y);
+        guides_->dot_bottom->setPos(x, bottom_y);
+        for (QGraphicsItem* item : { static_cast<QGraphicsItem*>(guides_->halo), static_cast<QGraphicsItem*>(guides_->bar),
+                                     static_cast<QGraphicsItem*>(guides_->dot_top), static_cast<QGraphicsItem*>(guides_->dot_bottom) })
+            item->setVisible(true);
+    }
+
+    void DiagramScene::placeChip(const QString& text, const QPointF& anchor) {
+        if (!guides_) return;
+        auto* chip = static_cast<ChipItem*>(guides_->chip);
+        if (text.isEmpty()) { chip->setVisible(false); return; }
+        chip->setText(text);
+        chip->setPos(anchor);
+        // Same size on screen at any zoom of the editing view.
+        for (QGraphicsView* v : views())
+            if (v->isInteractive() && v->isVisible() && v->transform().m11() > 0.0) {
+                chip->setScale(1.0 / v->transform().m11());
+                break;
+            }
+        chip->setVisible(true);
+    }
+
+    double DiagramScene::rowSceneY(int layer) const {
+        const auto& ly = currentGraph().getLayerLayout();
+        if (ly.empty()) return 0.0;
+        int last = 0;
+        for (const auto& [l, y] : ly) last = std::max(last, l);
+        const double y0 = -ly.at(0);
+        const double gap = ly.count(1) ? -ly.at(1) - y0 : 170.0;
+        if (layer < 0) return y0 + layer * gap;
+        if (layer > last) return -ly.at(last) + (layer - last) * gap;
+        auto it = ly.find(layer);
+        return it != ly.end() ? -it->second : y0 + layer * gap;
+    }
+
+    QPointF DiagramScene::cursorScenePos() const {
+        for (QGraphicsView* v : views())
+            if (v->isInteractive() && v->isVisible())
+                return v->mapToScene(v->viewport()->mapFromGlobal(QCursor::pos()));
+        return QPointF();
+    }
+
+    // ============================================================================
+    // Dragging one box
+    // ============================================================================
+
+    void DiagramScene::beginBoxDrag(NodeItem* item) {
+        cancelInteraction();
+        stopAnimations();
+        BoxDrag drag;
+        drag.item = item;
+        for (const auto& [edge, edge_item] : edge_items_) {
+            bool touches = false;
+            for (const auto& s : edge->getSources()) touches = touches || s.get() == item->node();
+            for (const auto& t : edge->getTargets()) touches = touches || t.get() == item->node();
+            if (touches) drag.edges.push_back(edge_item);
+        }
+        box_drag_ = drag;
+        createGuides();
+
+        // Lift: the box rises above everything, grows a little and casts a
+        // shadow; its connections step back, since they will be redrawn.
+        item->setZValue(20);
+        item->setTransformOriginPoint(item->rect().center());
+        item->setCursor(Qt::ClosedHandCursor);
+        auto* shadow = new QGraphicsDropShadowEffect;
+        shadow->setColor(QColor(31, 35, 48, 95));
+        shadow->setBlurRadius(0);
+        shadow->setOffset(0, 0);
+        item->setGraphicsEffect(shadow);
+
+        auto edges = drag.edges;
+        lift_ = new QVariantAnimation(this);
+        lift_->setDuration(LIFT_MS);
+        lift_->setStartValue(0.0);
+        lift_->setEndValue(1.0);
+        lift_->setEasingCurve(QEasingCurve::OutCubic);
+        connect(lift_, &QVariantAnimation::valueChanged, this, [item, shadow, edges](const QVariant& v) {
+            const double t = v.toDouble();
+            item->setScale(1.0 + 0.06 * t);
+            shadow->setBlurRadius(30.0 * t);
+            shadow->setOffset(0, 12.0 * t);
+            for (HyperedgeItem* e : edges) e->setOpacity(1.0 - 0.75 * t);
+        });
+        lift_->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    void DiagramScene::updateBoxDrag(NodeItem* item) {
+        const GraphicalHypergraph& graph = currentGraph();
+        const QPointF c = item->mapToScene(item->rect().center());
+        const int layer = graph.layerForY(-c.y());
+        const double y = rowSceneY(layer);
+
+        // The target layer as a soft band across the diagram (dashed when the
+        // box would open a new one)...
+        const QRectF bounds = sceneRect();
+        const bool new_layer = graph.getLayers().find(layer) == graph.getLayers().end();
+        placeBand(QRectF(bounds.left(), y - 40.0, bounds.width(), 80.0), new_layer);
+
+        // ...and, inside it, where the box would land among its neighbours.
+        double left = -std::numeric_limits<double>::infinity();
+        double right = std::numeric_limits<double>::infinity();
+        if (!new_layer) {
+            for (const auto& n : graph.getLayers().at(layer).nodes) {
+                if (n.get() == item->node()) continue;
+                const double x = graph.getNodeLayout().at(n.get()).x;
+                const double half = n->getWidth() / 2.0;
+                if (x < c.x()) left = std::max(left, x + half);
+                else           right = std::min(right, x - half);
+            }
+        }
+        double x = c.x();
+        if (std::isfinite(left) && std::isfinite(right)) x = (left + right) / 2.0;
+        else if (std::isfinite(left))                    x = left + 36.0;
+        else if (std::isfinite(right))                   x = right - 36.0;
+        placeLandingMarker(x, y - 34.0, y + 34.0);
+        placeChip(!new_layer ? QString()
+                  : layer < 0 ? QStringLiteral("Nuevo nivel arriba") : QStringLiteral("Nuevo nivel abajo"),
+            QPointF(x, y - 40.0));
+    }
+
+    void DiagramScene::endBoxDrag() {
+        // Called while the release is being delivered to the box: the guides
+        // are only hidden here; the rebuild that follows the drop removes them.
+        if (lift_) lift_->stop();
+        if (guides_) {
+            for (QGraphicsItem* item : { static_cast<QGraphicsItem*>(guides_->band), static_cast<QGraphicsItem*>(guides_->halo),
+                                         static_cast<QGraphicsItem*>(guides_->bar), static_cast<QGraphicsItem*>(guides_->dot_top),
+                                         static_cast<QGraphicsItem*>(guides_->dot_bottom), guides_->chip })
+                item->setVisible(false);
+        }
+        box_drag_.reset();
+    }
+
+    // ============================================================================
+    // Moving a piece of the joint diagram
+    // ============================================================================
+
+    DiagramScene::PieceChoice DiagramScene::pieceChoiceFor(Node* box) const {
+        PieceChoice choice;
+        if (!is_joint_ || !box) return choice;
+        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+        const size_t everything = joint.getAllNodes().size();
+
+        std::unordered_set<Node*> block;
+        try { block = joint.getComponentNodes(box); }
+        catch (const std::exception&) { return choice; }
+
+        std::unordered_set<Node*> diagram;
+        const auto ids = joint.graphsOf(box);
+        if (ids.size() == 1 && !ids.begin()->empty() && joint.isSeparable(*ids.begin())) {
+            choice.diagram_id = *ids.begin();
+            choice.diagram_name = QString::fromStdString(joint.getIncorporatedName(choice.diagram_id));
+            diagram = joint.getHypergraphNodes(choice.diagram_id);
+            // Moving everything there is would change nothing.
+            choice.move_diagram = diagram.size() < everything;
+        }
+        // The block is offered when it is something else than the whole diagram.
+        choice.move_block = block.size() < everything && block != diagram;
+        return choice;
+    }
+
+    void DiagramScene::addMoveEntries(QMenu* menu, const PieceChoice& choice, Node* box) {
+        if (!choice.move_diagram && !choice.move_block) return;
+        style::addMenuSection(menu, QStringLiteral("Mover"));
+        if (choice.move_diagram) {
+            const QString name = QFontMetrics(menu->font()).elidedText(choice.diagram_name, Qt::ElideRight, 200);
+            QAction* a = menu->addAction(style::icon(style::Icon::Move),
+                name.isEmpty() ? QStringLiteral("Mover este esquema") : QStringLiteral("Mover esquema «%1»").arg(name),
+                [this, id = choice.diagram_id] { startPieceMove(id, nullptr); });
+            a->setToolTip(QStringLiteral("Llévalo entero a otro sitio o a otro nivel: se mueve con el ratón "
+                                         "y se deja con un clic"));
+        }
+        if (choice.move_block) {
+            QAction* a = menu->addAction(style::icon(style::Icon::Move), QStringLiteral("Mover bloque"),
+                [this, box] { startPieceMove(std::string(), box); });
+            a->setToolTip(QStringLiteral("Mueve esta caja junto con todas las que están unidas a ella"));
+        }
+    }
+
+    void DiagramScene::addTakeOutEntry(QMenu* menu, const PieceChoice& choice) {
+        if (choice.diagram_id.empty()) return;
+        const QString name = QFontMetrics(menu->font()).elidedText(choice.diagram_name, Qt::ElideRight, 200);
+        QAction* a = menu->addAction(style::icon(style::Icon::TakeOut),
+            name.isEmpty() ? QStringLiteral("Quitar este esquema del conjunto")
+                           : QStringLiteral("Quitar «%1» del conjunto").arg(name),
+            [this, id = choice.diagram_id] { onRemoveDiagram(id); });
+        a->setToolTip(QStringLiteral("Saca del esquema conjunto todas sus cajas y conexiones; "
+                                     "el esquema original no cambia"));
+    }
+
+    void DiagramScene::onRemoveDiagram(const std::string& diagram_id) {
+        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+        const QString name = QString::fromStdString(joint.getIncorporatedName(diagram_id));
+        if (!dialogs::confirm(dialogParent(),
+                name.isEmpty() ? QStringLiteral("¿Quitar este esquema del conjunto?")
+                               : QStringLiteral("¿Quitar «%1» del conjunto?").arg(name),
+                QStringLiteral("Se quitarán del esquema conjunto todas sus cajas y conexiones. "
+                               "El esquema original no cambia y podrás volver a añadirlo."),
+                QStringLiteral("Quitar"), true))
+            return;
+
+        std::unordered_set<Node*> doomed;
+        try { doomed = joint.getHypergraphNodes(diagram_id); }
+        catch (const std::exception& e) { showError(e); return; }
+
+        // Its boxes and connections shrink away; then the rest closes the gap.
+        auto items = std::make_shared<std::vector<QGraphicsItem*>>();
+        for (const auto& [node, item] : node_items_)
+            if (doomed.count(node)) {
+                item->setTransformOriginPoint(item->rect().center());
+                items->push_back(item);
+            }
+        for (const auto& [edge, item] : edge_items_)
+            if (!edge->getSources().empty() && doomed.count(edge->getSources().front().get()))
+                items->push_back(item);
+
+        stopAnimations();
+        fade_ = new QVariantAnimation(this);
+        fade_->setDuration(TAKE_OUT_MS);
+        fade_->setStartValue(0.0);
+        fade_->setEndValue(1.0);
+        fade_->setEasingCurve(QEasingCurve::InCubic);
+        connect(fade_, &QVariantAnimation::valueChanged, this, [items](const QVariant& v) {
+            const double t = v.toDouble();
+            for (QGraphicsItem* item : *items) {
+                item->setOpacity(1.0 - t);
+                item->setScale(1.0 - 0.12 * t);
+            }
+        });
+        connect(fade_, &QVariantAnimation::finished, this, [this, diagram_id] {
+            const auto from = nodeCenters();
+            try { joint_editor_->removeHypergraph(diagram_id); }
+            catch (const std::exception& e) {
+                showError(e);
+                rebuildAnimated(from);
+                return;
+            }
+            rebuildAnimated(from);
+            emit graphChanged();
+        });
+        fade_->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    void DiagramScene::startPieceMove(const std::string& diagram_id, Node* anchor) {
+        cancelInteraction();
+        stopAnimations();
+        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+
+        PieceMove move;
+        move.diagram_id = diagram_id;
+        move.anchor = anchor;
+        try {
+            move.nodes = diagram_id.empty() ? joint.getComponentNodes(anchor) : joint.getHypergraphNodes(diagram_id);
+        }
+        catch (const std::exception& e) { showError(e); return; }
+        if (move.nodes.empty()) return;
+        move.regions = joint.getOccupiedRegionsExcluding(move.nodes);
+
+        double left = std::numeric_limits<double>::infinity(), right = -left;
+        move.top_layer = std::numeric_limits<int>::max();
+        move.bottom_layer = std::numeric_limits<int>::min();
+        for (Node* n : move.nodes) {
+            move.top_layer = std::min(move.top_layer, n->getLayer());
+            move.bottom_layer = std::max(move.bottom_layer, n->getLayer());
+            const double x = joint.getNodeLayout().at(n).x;
+            left = std::min(left, x - n->getWidth() / 2.0);
+            right = std::max(right, x + n->getWidth() / 2.0);
+        }
+        move.center_x = (left + right) / 2.0;
+        move.top_row_y = rowSceneY(move.top_layer);
+
+        // Its boxes and connections become one piece, lifted above the rest.
+        std::vector<QGraphicsItem*> others;
+        move.piece = new QGraphicsItemGroup;
+        addItem(move.piece);
+        move.piece->setZValue(30);
+        for (const auto& [node, item] : node_items_) {
+            if (move.nodes.count(node)) move.piece->addToGroup(item);
+            else others.push_back(item);
+        }
+        for (const auto& [edge, item] : edge_items_) {
+            if (!edge->getSources().empty() && move.nodes.count(edge->getSources().front().get()))
+                move.piece->addToGroup(item);
+            else others.push_back(item);
+        }
+        auto* shadow = new QGraphicsDropShadowEffect;
+        shadow->setColor(QColor(31, 35, 48, 90));
+        shadow->setBlurRadius(0);
+        shadow->setOffset(0, 0);
+        move.piece->setGraphicsEffect(shadow);
+
+        move.grab = cursorScenePos();
+        piece_move_ = move;
+
+        // Guides: one outline per other piece's region, the insertion bar and its label.
+        createGuides();
+        for (size_t i = 0; i < piece_move_->regions.size(); ++i) {
+            auto* region = new QGraphicsPathItem;
+            region->setZValue(-1.0);
+            region->setAcceptedMouseButtons(Qt::NoButton);
+            addItem(region);
+            guides_->regions.push_back(region);
+        }
+
+        // Lift: the piece casts a growing shadow while the rest steps back.
+        lift_ = new QVariantAnimation(this);
+        lift_->setDuration(LIFT_MS);
+        lift_->setStartValue(0.0);
+        lift_->setEndValue(1.0);
+        lift_->setEasingCurve(QEasingCurve::OutCubic);
+        connect(lift_, &QVariantAnimation::valueChanged, this, [shadow, others](const QVariant& v) {
+            const double t = v.toDouble();
+            shadow->setBlurRadius(34.0 * t);
+            shadow->setOffset(0, 14.0 * t);
+            for (QGraphicsItem* item : others) item->setOpacity(1.0 - 0.6 * t);
+        });
+        lift_->start(QAbstractAnimation::DeleteWhenStopped);
+
+        for (QGraphicsView* v : views()) {
+            if (!v->isInteractive()) continue;
+            v->viewport()->setMouseTracking(true);
+            v->viewport()->setCursor(Qt::SizeAllCursor);
+        }
+        const QString what = diagram_id.empty()
+            ? QStringLiteral("el bloque")
+            : QStringLiteral("«%1»").arg(QString::fromStdString(joint.getIncorporatedName(diagram_id)));
+        emit interactionHintChanged(QStringLiteral("Mueve %1 con el ratón y haz clic donde quieras dejarlo "
+                                                   "· Esc para cancelar").arg(what));
+        updatePiecePreview();
+    }
+
+    void DiagramScene::updatePiecePreview() {
+        if (!piece_move_ || !guides_) return;
+        const PieceMove& move = *piece_move_;
+
+        const QRectF bounds = sceneRect();
+        const double piece_x = move.center_x + move.offset.x();
+        const double at_x = JointGraphicalHypergraph::placementPoint(move.regions, piece_x);
+
+        // The other pieces' regions, the one under the piece a little stronger.
+        for (size_t i = 0; i < move.regions.size() && i < guides_->regions.size(); ++i) {
+            const auto [lo, hi] = move.regions[i];
+            const bool under = lo <= piece_x && piece_x <= hi;
+            QGraphicsPathItem* region = guides_->regions[i];
+            QPainterPath path;
+            path.addRoundedRect(QRectF(lo - 14.0, bounds.top() + 6.0, hi - lo + 28.0, bounds.height() - 12.0), 20.0, 20.0);
+            region->setPath(path);
+            QColor fill = style::palette::accent;
+            fill.setAlpha(under ? 26 : 12);
+            region->setBrush(fill);
+            QColor line = style::palette::accent;
+            line.setAlpha(under ? 120 : 50);
+            QPen pen(line, 1.4, Qt::DashLine);
+            pen.setCosmetic(true);
+            region->setPen(pen);
+        }
+
+        // Where it lands: an insertion bar over the rows it will take, and a
+        // label saying which layer it starts at.
+        const GraphicalHypergraph& graph = currentGraph();
+        const int target = graph.layerForY(-(move.top_row_y + move.offset.y()));
+        const int rows = move.bottom_layer - move.top_layer;
+        int last = 0;
+        for (const auto& [l, data] : graph.getLayers()) last = std::max(last, l);
+        const double top_y = rowSceneY(target) - 40.0;
+        const double bottom_y = rowSceneY(target + rows) + 40.0;
+        // Next to a region, the bar stands in the gap it will open, not on the
+        // region's edge (which lies inside its drawn outline).
+        double marker_x = at_x;
+        for (const auto& [lo, hi] : move.regions) {
+            if (at_x == hi) marker_x = hi + MIN_BLOCK_SEP * 0.5;
+            else if (at_x == lo) marker_x = lo - MIN_BLOCK_SEP * 0.5;
+        }
+        placeLandingMarker(marker_x, top_y, bottom_y);
+        placeChip(target < 0 ? QStringLiteral("Nuevo nivel arriba")
+              : target > last ? QStringLiteral("Nuevo nivel abajo")
+              : QStringLiteral("Desde el nivel %1").arg(target + 1),
+            QPointF(marker_x, top_y - 8.0));
+    }
+
+    void DiagramScene::dropPiece() {
+        if (!piece_move_) return;
+        const PieceMove move = *piece_move_;
+        if (std::hypot(move.offset.x(), move.offset.y()) < 4.0) { // a click without moving
+            cancelPieceMove();
+            return;
+        }
+
+        const auto from = nodeCenters(); // the piece where it was dropped
+        const double click_x = move.center_x + move.offset.x();
+        const int top_layer = currentGraph().layerForY(-(move.top_row_y + move.offset.y()));
+        endPieceMove();
+        try {
+            if (move.diagram_id.empty())
+                joint_editor_->moveComponent(move.anchor->shared_from_this(), click_x, top_layer);
+            else
+                joint_editor_->moveHypergraph(move.diagram_id, click_x, top_layer);
+        }
+        catch (const std::exception& e) {
+            showError(e);
+            rebuildAnimated(from); // glides back
+            return;
+        }
+        rebuildAnimated(from);
+        emit graphChanged();
+    }
+
+    void DiagramScene::cancelPieceMove() {
+        if (!piece_move_) return;
+        const auto from = nodeCenters();
+        endPieceMove();
+        rebuildAnimated(from); // everything glides back to where it was
+    }
+
+    void DiagramScene::endPieceMove() {
+        // No item holds the mouse during a piece move (the scene handles it),
+        // so the guides can go right away.
+        if (lift_) lift_->stop();
+        clearGuides();
+        piece_move_.reset();
+        for (QGraphicsView* v : views())
+            if (v->isInteractive()) v->viewport()->setCursor(Qt::ArrowCursor);
+        emit interactionHintChanged(QString());
     }
 
     // ============================================================================

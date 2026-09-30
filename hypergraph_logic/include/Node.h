@@ -97,10 +97,12 @@ namespace hypergraph_logic {
 	// ============================================================================
 	class Hypergraph;  // Forward declaration
 	class GraphicalHypergraph;  // Forward declaration
+	class JointGraphicalHypergraph;  // Forward declaration
 
 	class Node : public std::enable_shared_from_this<Node> {
 		friend class Hypergraph;  // Allow Hypergraph to set layer
 		friend class GraphicalHypergraph;  // Allow GraphicalHypergraph to set layer
+		friend class JointGraphicalHypergraph;  // Moves whole diagrams between layers
 	public:
 		// ── Node (real) ───────────────────────────────────────────────────────────────────────────────
 		//

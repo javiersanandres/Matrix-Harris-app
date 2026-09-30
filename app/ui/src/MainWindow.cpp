@@ -406,25 +406,17 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
                 std::string selected_id = dlg.selectedId();
                 if (selected_id.empty()) return;
 
-                // Find the corresponding editor and determine left/right.
+                // Find the corresponding editor; the joint places the diagram
+                // by where the user clicked, among the diagrams already there.
                 for (int i = 0; i < project_->getDiagramCount(); ++i) {
                     if (project_->getEditor(i).getId() == selected_id) {
-                        // Determine left: click_x < leftmost node x in layer 0.
-                        bool left = false;
-                        const auto& jg = project_->getJointEditor().getGraph();
-                        if (!jg.getLayers().empty()) {
-                            auto nodes0 = jg.getNodesAt(0);
-                            if (!nodes0.empty()) {
-                                double lx = jg.getNodeLayout()
-                                    .at(nodes0.front().get()).x;
-                                left = (click_x < lx);
-                            }
-                        }
                         GraphicalHypergraph& g = const_cast<GraphicalHypergraph&>(
                             project_->getEditor(i).getGraph());
                         try {
-                            project_->getJointEditor().addHypergraph(g, left);
-                            joint_scene_->rebuild();
+                            // The others make room and the new diagram fades in.
+                            const auto from = joint_scene_->nodeCenters();
+                            project_->getJointEditor().addHypergraph(g, click_x);
+                            joint_scene_->rebuildAnimated(from);
                             onGraphChanged();
                         }
                         catch (const std::exception& e) {

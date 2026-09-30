@@ -2,6 +2,7 @@
 
 #include "Hypergraph.h"
 #include <nlohmann/json.hpp>
+#include <functional>
 #include <string>
 
 using json = nlohmann::json;
@@ -260,6 +261,12 @@ namespace hypergraph_logic {
 		//   left = false — incoming nodes and outgoing edges are appended.
 		//
 		void mergeFrom(GraphicalHypergraph&& other, bool left);
+
+		// Same, but the incoming nodes of each layer are inserted as one block at
+		// position insert_at(layer) of that layer (clamped to its size; a layer
+		// this graph does not have yet is created). The incoming hyperedges are
+		// appended to each layer's outgoing edges.
+		void mergeFrom(GraphicalHypergraph&& other, const std::function<size_t(int layer)>& insert_at);
 
 		// ── Stage 3: horizontal order of hyperedge bars ───────────────────────────
 		//

@@ -1,5 +1,6 @@
 #include "GraphicalHypergraph.h"
 
+#include <algorithm>
 #include <atomic>
 #include <fstream>
 #include <stdexcept>
@@ -209,6 +210,32 @@ namespace hypergraph_logic {
 				dst.outgoing_edges.insert(dst.outgoing_edges.end(),
 					src_data.outgoing_edges.begin(), src_data.outgoing_edges.end());
 			}
+		}
+
+		for (auto& [raw, layout] : other.node_layout_)
+			node_layout_[raw] = std::move(layout);
+		for (auto& [raw, y] : other.edge_layout_)
+			edge_layout_[raw] = y;
+		for (const auto& [idx, y] : other.layer_layout_)
+			layer_layout_.emplace(idx, y);
+	}
+
+	void GraphicalHypergraph::mergeFrom(GraphicalHypergraph&& other,
+		const std::function<size_t(int layer)>& insert_at)
+	{
+		for (const auto& node : other.all_nodes_)
+			all_nodes_.push_back(node);
+
+		for (auto& [orig, segs] : other.all_hyperedges_)
+			all_hyperedges_[orig] = std::move(segs);
+
+		for (auto& [layer_idx, src_data] : other.layers_) {
+			LayerData& dst = layers_[layer_idx];
+			const size_t at = std::min(insert_at(layer_idx), dst.nodes.size());
+			dst.nodes.insert(dst.nodes.begin() + static_cast<std::ptrdiff_t>(at),
+				src_data.nodes.begin(), src_data.nodes.end());
+			dst.outgoing_edges.insert(dst.outgoing_edges.end(),
+				src_data.outgoing_edges.begin(), src_data.outgoing_edges.end());
 		}
 
 		for (auto& [raw, layout] : other.node_layout_)

@@ -350,6 +350,42 @@ namespace ui::style {
                 p.drawLine(QPointF(11.5, 8), QPointF(11.2, 14.5));
                 break;
             }
+            case Icon::Move: {
+                // Two joined boxes, and a four-way arrow at their right.
+                p.setPen(c.pen(palette::ink_soft, 1.2));
+                p.drawLine(QPointF(4.5, 7.5), QPointF(4.5, 12.5));
+                c.existing({ 1.5, 3.0, 6.0, 4.5 });
+                c.existing({ 1.5, 12.5, 6.0, 4.5 });
+                const QPointF m(14.0, 10.0);
+                p.setPen(c.pen(palette::accent, 1.5));
+                p.drawLine(m + QPointF(-4.5, 0), m + QPointF(4.5, 0));
+                p.drawLine(m + QPointF(0, -6.5), m + QPointF(0, 6.5));
+                p.setBrush(palette::accent);
+                auto head = [&](QPointF tip, QPointF dir) {
+                    const QPointF side(-dir.y(), dir.x());
+                    QPolygonF tri{ tip, tip - dir * 2.4 + side * 1.9, tip - dir * 2.4 - side * 1.9 };
+                    p.drawPolygon(tri);
+                };
+                p.setPen(c.pen(palette::accent, 0.8));
+                head(m + QPointF(5.5, 0), { 1, 0 });
+                head(m + QPointF(-5.5, 0), { -1, 0 });
+                head(m + QPointF(0, -7.5), { 0, -1 });
+                head(m + QPointF(0, 7.5), { 0, 1 });
+                break;
+            }
+            case Icon::TakeOut: {
+                // The joint's dashed frame, and a piece leaving it up and to the right.
+                p.setPen(c.pen(palette::faint, 1.2, Qt::DashLine));
+                p.setBrush(Qt::NoBrush);
+                p.drawRoundedRect(QRectF(1.5, 6.0, 12.0, 12.0), 2.0, 2.0);
+                p.setPen(c.pen(palette::danger, 1.4));
+                p.setBrush(QColor(0xFD, 0xEC, 0xEC));
+                p.drawRoundedRect(QRectF(8.5, 1.5, 9.0, 6.5), 1.8, 1.8);
+                p.drawLine(QPointF(5.0, 14.0), QPointF(10.0, 9.0));
+                p.drawLine(QPointF(10.0, 9.0), QPointF(7.0, 9.0));
+                p.drawLine(QPointF(10.0, 9.0), QPointF(10.0, 12.0));
+                break;
+            }
             case Icon::Pause: {
                 p.setPen(Qt::NoPen);
                 p.setBrush(palette::ink_soft);

@@ -72,7 +72,6 @@ namespace ui {
         opts.outline = pen();
         opts.label_scroll = label_scroll_;
         opts.show_scroll_indicator = hovered_;
-        if (dragging_) opts.fill_override = QColor(180, 180, 180, 160); // grey out
         node_visuals::paintNode(painter, node_->getAttributes(), rect(), opts);
 
         if (candidate || origin) {
@@ -145,35 +144,36 @@ namespace ui {
         double dx = std::abs(event->scenePos().x() - press_pos_.x());
         double dy = std::abs(event->scenePos().y() - press_pos_.y());
 
+        DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
         if (!dragging_ && (dx > DRAG_THRESHOLD || dy > DRAG_THRESHOLD)) {
-            // Any movement past the threshold, in either direction, starts a drag.
+            // Any movement past the threshold, in either direction, starts a
+            // drag: the scene lifts the box (shadow, slight zoom).
             dragging_ = true;
-            update(); // grey out
+            if (ds) ds->beginBoxDrag(this);
         }
 
         if (dragging_) {
-            // Follow the cursor freely in 2D.
+            // Follow the cursor freely in 2D, and let the scene show where the
+            // box would land.
             drag_current_x_ = event->scenePos().x();
             drag_current_y_ = event->scenePos().y();
-            double delta_x = drag_current_x_ - drag_start_x_;
-            double delta_y = drag_current_y_ - drag_start_y_;
-            setRect(rect().translated(delta_x, delta_y)); // the label is painted inside rect()
-            drag_start_x_ = drag_current_x_;
-            drag_start_y_ = drag_current_y_;
+            setPos(event->scenePos() - press_pos_);
+            if (ds) ds->updateBoxDrag(this);
         }
     }
 
     void NodeItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
         if (event->button() == Qt::LeftButton && dragging_) {
             dragging_ = false;
-            update();
 
             // Notify the scene — it will call relocateNode.
             DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
             if (ds) {
-                // Pass the scene-space centre of the item's current rect.
-                double new_x = rect().center().x();
-                double new_y = rect().center().y();
+                ds->endBoxDrag();
+                // Pass the scene-space centre of where the box was dropped.
+                const QPointF dropped = mapToScene(rect().center());
+                double new_x = dropped.x();
+                double new_y = dropped.y();
                 // The scene will handle calling the editor and then rebuild().
                 QMetaObject::invokeMethod(ds, [ds, node = node_, new_x, new_y]() {
                     // Find the NodeItem again after potential rebuild — but since

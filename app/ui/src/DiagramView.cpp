@@ -54,6 +54,13 @@ namespace ui {
     }
 
     void DiagramView::mousePressEvent(QMouseEvent* event) {
+        // While a piece of the joint diagram is being moved, left and right
+        // clicks belong to the scene (drop / put back), wherever they land.
+        if (auto* ds = qobject_cast<DiagramScene*>(scene());
+            ds && ds->isMovingPiece() && event->button() != Qt::MiddleButton) {
+            QGraphicsView::mousePressEvent(event);
+            return;
+        }
         // While the scene waits for the second node of an operation, a click on
         // the background cancels it rather than panning.
         if (event->button() == Qt::LeftButton && !itemAt(event->pos())) {

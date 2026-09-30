@@ -1091,6 +1091,12 @@ namespace hypergraph_logic {
 				if (remaining_sources.empty()) {
 					int min_new_layer = INT_MAX;
 					if (relocateNodes({ child }, &min_new_layer, out_altered_layers)) {
+						if (child->getChildren().empty()) {
+							// The child has no children, so no new dummies could have been added
+							// and therefore there is nothing to minimize because the function
+							// choosePositionForRelocatedNode will handle everything for us.
+							return;
+						}
 						minimizeCrossingsAfterRelocation(child->getParents(), min_new_layer);
 					}
 					return;
@@ -1713,7 +1719,21 @@ namespace hypergraph_logic {
 
 			int min_start_layer = std::min(node->getLayer(), desired_layer);
 			applyRelocationAndPropagate({ {node, desired_layer} }, &min_start_layer, out_altered_layers);
-			minimizeCrossingsAfterRelocation(parents, min_start_layer);
+
+			bool no_parents = node->getParents().empty(), no_children = node->getChildren().empty();
+			if (no_parents && !no_children) {
+				// Thanks to choosePositionForRelocatedNode() selecting the x-abcisas 
+				// needed for a vertical placement, we just need to minimize crossings
+				// from bottom down.
+				minimizeCrossings(5, desired_layer + 1);
+			}
+			else if (!no_parents && no_children) {
+				// Find a good placing for the new dummy nodes created.
+				minimizeCrossings(5, min_start_layer); // TO-DO: just minimmize crossings in a range
+			}
+			else if (!no_parents && !no_children) {
+				minimizeCrossingsAfterRelocation(parents, min_start_layer);
+			}
 		}
 	}
 

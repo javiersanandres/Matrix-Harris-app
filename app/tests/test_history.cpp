@@ -183,6 +183,33 @@ namespace app_logic {
             EXPECT_EQ(named(jed, "A"), nullptr);
         }
 
+        TEST(History, RemovingAndMovingADiagramInTheJointAreUndoable) {
+            JointHypergraphEditor jed(JointGraphicalHypergraph::create("j"));
+            GraphicalHypergraph a("a"), b("b");
+            a.createNode("A", 0, 0, nullptr);
+            b.createNode("B", 0, 0, nullptr);
+            jed.addHypergraph(a, false);
+            jed.addHypergraph(b, false);
+            auto order = [&] {
+                std::string s;
+                for (const auto& n : jed.getNodesAt(0)) s += n->getName();
+                return s;
+            };
+            ASSERT_EQ(order(), "AB");
+
+            jed.moveHypergraph(a.getId(), std::numeric_limits<double>::infinity());
+            EXPECT_EQ(order(), "BA");
+            jed.removeHypergraph(b.getId());
+            EXPECT_EQ(order(), "A");
+            EXPECT_FALSE(jed.getGraph().isSeparable(b.getId()));
+
+            jed.undo();
+            EXPECT_EQ(order(), "BA");
+            EXPECT_TRUE(jed.getGraph().isSeparable(b.getId())); // origins restored with the snapshot
+            jed.undo();
+            EXPECT_EQ(order(), "AB");
+        }
+
         // ── Saved state ─────────────────────────────────────────────────────────
 
         TEST(SavedState, UndoingEveryChangeGoesBackToTheSavedState) {
