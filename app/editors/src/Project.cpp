@@ -152,7 +152,10 @@ namespace app_logic {
 	}
 
 	bool Project::hasUnsavedChanges() const {
-		return unsaved_changes_;
+		if (unsaved_changes_) return true;
+		for (const auto& editor : editors_)
+			if (!editor->isAtSavedState()) return true;
+		return !joint_editor_->isAtSavedState();
 	}
 
 	void Project::addRecentColour(const Color& colour) {
@@ -164,7 +167,6 @@ namespace app_logic {
 		recent_colours_.insert(recent_colours_.begin(), colour);
 		if (static_cast<int>(recent_colours_.size()) > MAX_RECENT_COLOURS)
 			recent_colours_.resize(MAX_RECENT_COLOURS);
-		markUnsaved();
 	}
 
 	// ============================================================================
@@ -203,6 +205,8 @@ namespace app_logic {
 
 		file_path_ = path;
 		unsaved_changes_ = false;
+		for (const auto& editor : editors_) editor->markSaved();
+		joint_editor_->markSaved();
 	}
 
 	void Project::save() {
@@ -230,14 +234,17 @@ namespace app_logic {
 		auto p = std::make_unique<Project>(j.at("name").get<std::string>());
 		p->editors_.clear();
 
+		// The file carries the full layout of every diagram: open them as they
+		// were saved, without laying them out again.
 		for (const auto& dj : j.at("diagrams")) {
 			auto gh = GraphicalHypergraph::fromJSON(dj);
-			p->editors_.emplace_back(std::make_unique<HypergraphEditor>(std::move(gh)));
+			p->editors_.emplace_back(std::make_unique<HypergraphEditor>(
+				std::move(gh), InitialLayout::Keep));
 		}
 
 		p->joint_editor_.reset();
 		p->joint_editor_ = std::make_unique<JointHypergraphEditor>(
-			JointGraphicalHypergraph::fromJSON(j.at("joint")));
+			JointGraphicalHypergraph::fromJSON(j.at("joint")), InitialLayout::Keep);
 
 		// Projects saved before recent colours existed simply start with none.
 		if (j.contains("recent_colours")) {

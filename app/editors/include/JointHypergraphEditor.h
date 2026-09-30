@@ -27,10 +27,12 @@ namespace app_logic {
 
 		// ── JointHypergraphEditor ─────────────────────────────────────────────────
 		//
-		// Takes ownership of the supplied joint graph. The undo and redo stacks
-		// start empty.
+		// Takes ownership of the supplied joint graph and lays it out unless told
+		// to keep the layout it carries (see InitialLayout). The undo and redo
+		// stacks start empty.
 		explicit JointHypergraphEditor(
-			std::unique_ptr<JointGraphicalHypergraph> joint);
+			std::unique_ptr<JointGraphicalHypergraph> joint,
+			InitialLayout layout = InitialLayout::Compute);
 
 		// ── Joint-specific API ────────────────────────────────────────────────────
 
@@ -54,49 +56,25 @@ namespace app_logic {
 		// ── takeSnapshot() — required by HypergraphEditorBase ─────────────────────
 		//
 		// Clones the live joint graph via cloneJoint() and returns the clone as a
-		// unique_ptr. Called at the start of every mutating method before the
-		// mutation is attempted. The returned clone is only committed to past_ if
-		// the mutation succeeds.
+		// unique_ptr. Called at the start of every structural mutation before it
+		// is attempted. The returned clone is only committed to past_ if the
+		// mutation succeeds.
 		std::unique_ptr<JointGraphicalHypergraph> takeSnapshot() {
 			return joint_->cloneJoint();
 		}
 
-		// ── commitSnapshot() — required by HypergraphEditorBase ───────────────────
+		// ── installSnapshot() — required by HypergraphEditorBase ──────────────────
 		//
-		// Receives a ready-made snapshot (produced by takeSnapshot() before the
-		// mutation ran) and pushes it onto past_. Enforces the MAX_HISTORY cap and
-		// clears future_.
-		//
-		// Only called after a mutation has fully succeeded — never on failure.
-		void commitSnapshot(std::unique_ptr<JointGraphicalHypergraph>&& snapshot) {
-			past_.push_back(std::move(snapshot));
-			if (static_cast<int>(past_.size()) > MAX_HISTORY)
-				past_.pop_front();
-			future_.clear();
-			notifyMutated();
+		// Makes snapshot the live joint graph (undo/redo of a structural change).
+		void installSnapshot(std::unique_ptr<JointGraphicalHypergraph>&& snapshot) {
+			joint_ = std::move(snapshot);
 		}
 
-		// ── restoreSnapshot() — required by HypergraphEditorBase ──────────────────
-		//
-		// Pops the top of src, saves the current joint to dst via cloneJoint(),
-		// and replaces the live joint with the popped snapshot.
-		// undo() → restoreSnapshot(past_, future_)
-		// redo() → restoreSnapshot(future_, past_)
-		void restoreSnapshot(
-			std::deque<std::unique_ptr<JointGraphicalHypergraph>>& src,
-			std::deque<std::unique_ptr<JointGraphicalHypergraph>>& dst)
-		{
-			dst.push_back(joint_->cloneJoint());
-			if (static_cast<int>(dst.size()) > MAX_HISTORY)
-				dst.pop_front();
-			joint_ = std::move(src.back());
-			src.pop_back();
-			notifyMutated();
-		}
+		using Snapshot = std::unique_ptr<JointGraphicalHypergraph>;
 
 		std::unique_ptr<JointGraphicalHypergraph> joint_;
-		std::deque<std::unique_ptr<JointGraphicalHypergraph>> past_;
-		std::deque<std::unique_ptr<JointGraphicalHypergraph>> future_;
+		std::deque<HistoryEntry<Snapshot>> past_;
+		std::deque<HistoryEntry<Snapshot>> future_;
 	};
 
 } // namespace app_logic

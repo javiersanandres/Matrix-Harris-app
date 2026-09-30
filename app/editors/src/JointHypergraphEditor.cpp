@@ -4,13 +4,13 @@ namespace app_logic {
 	using namespace hypergraph_logic;
 
 	JointHypergraphEditor::JointHypergraphEditor(
-		std::unique_ptr<JointGraphicalHypergraph> joint)
+		std::unique_ptr<JointGraphicalHypergraph> joint, InitialLayout layout)
 		: joint_(std::move(joint))
 	{
 		if (!joint_)
 			throw std::invalid_argument(
 				"JointHypergraphEditor: supplied joint pointer is null.");
-		joint_->computeLayout();
+		if (layout == InitialLayout::Compute) joint_->computeLayout();
 	}
 
 	void JointHypergraphEditor::addHypergraph(GraphicalHypergraph& g, bool left) {

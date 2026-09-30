@@ -471,11 +471,17 @@ namespace app_logic {
                 EXPECT_EQ(A->getName(), "Z");
             }
 
+            // An editor over a graph that already has box "A", with an empty history.
+            static HypergraphEditor editorWithOneBox() {
+                GraphicalHypergraph g("g");
+                g.createNode("A", 0, 0, nullptr);
+                return HypergraphEditor(std::move(g));
+            }
+
             TEST(HypergraphEditor, RenameNodeCommitsSnapshot) {
-                HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, 0, nullptr);
-                while (ed.canUndo()) ed.undo();
-                ed.renameNode(A, "Z");
+                HypergraphEditor ed = editorWithOneBox();
+                ASSERT_FALSE(ed.canUndo());
+                ed.renameNode(ed.getAllNodes()[0], "Z");
                 EXPECT_TRUE(ed.canUndo());
             }
 
@@ -506,9 +512,9 @@ namespace app_logic {
             }
 
             TEST(HypergraphEditor, SetNodeAttributesCommitsSnapshot) {
-                HypergraphEditor ed(GraphicalHypergraph("g"));
-                NodePtr A = ed.createNode("A", 0, 0, nullptr);
-                while (ed.canUndo()) ed.undo();
+                HypergraphEditor ed = editorWithOneBox();
+                NodePtr A = ed.getAllNodes()[0];
+                ASSERT_FALSE(ed.canUndo());
                 ed.setNodeAttributes(A, styledAttributes("Z"));
                 EXPECT_EQ(A->getAttributes(), styledAttributes("Z"));
                 EXPECT_TRUE(ed.canUndo());

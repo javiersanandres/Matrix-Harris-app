@@ -49,6 +49,14 @@ namespace ui {
         QPushButton* addButton(const QString& text, int result, ButtonStyle style,
             bool is_default = false, bool is_escape = false);
 
+        // A button styled like the others that does NOT close the dialog: the
+        // caller connects it (e.g. "Pausar" while something runs).
+        QPushButton* addActionButton(const QString& text, ButtonStyle style);
+
+        // Replaces the badge with another emblem of the same size (48 x 48),
+        // e.g. a busy spinner.
+        void setEmblem(QWidget* emblem);
+
         int choice() const { return choice_; }
 
         // Sizes and centres the dialog before its window is shown, so Windows
@@ -62,8 +70,13 @@ namespace ui {
         void mouseReleaseEvent(QMouseEvent* event) override;
 
     private:
+        QPushButton* makeButton(const QString& text, ButtonStyle style);
+
+        QHBoxLayout* top_;
+        QWidget* emblem_;
         QVBoxLayout* text_column_;
         QLabel* message_ = nullptr;
+        QWidget* buttons_host_; // hidden until the first button
         QHBoxLayout* buttons_;
         int choice_ = -1;
         int escape_result_ = -1;

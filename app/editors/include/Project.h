@@ -152,8 +152,15 @@ namespace app_logic {
 
 		// ── hasUnsavedChanges ─────────────────────────────────────────────────────
 		//
-		// Returns true if any diagram has been mutated since the last save.
-		// Used by the UI to show a "save before closing?" prompt.
+		// Returns true if the project differs from what was last saved (or, if
+		// never saved, from how it started). Used by the UI for the "*" in the
+		// title and the "save before closing?" prompt.
+		//
+		// Changes made inside a diagram are judged by its editor's history: if
+		// every diagram is back at the state it was saved in (for example after
+		// undoing every change made since), there is nothing unsaved. Changes the
+		// history cannot take back (adding or removing a diagram, markUnsaved())
+		// count until the next save.
 		//
 		bool hasUnsavedChanges() const;
 
@@ -193,6 +200,8 @@ namespace app_logic {
 		//static Project load(const std::filesystem::path& path);
 		static std::unique_ptr<Project> load(const std::filesystem::path& path);
 
+		// Records a change outside every diagram's undo history, so it counts as
+		// unsaved until the next save.
 		void markUnsaved() { unsaved_changes_ = true; }
 
 		// ── Recent colours ────────────────────────────────────────────────────────
@@ -207,8 +216,9 @@ namespace app_logic {
 		// ── addRecentColour ───────────────────────────────────────────────────────
 		//
 		// Moves the colour to the front of the list (adding it if new) and drops
-		// the oldest entries beyond MAX_RECENT_COLOURS. Marks the project unsaved
-		// only if the list actually changed.
+		// the oldest entries beyond MAX_RECENT_COLOURS. The list is a convenience
+		// kept with the next save; it does not by itself mark the project unsaved
+		// (the colour change it comes with does, until it is undone).
 		//
 		void addRecentColour(const Color& colour);
 
@@ -216,7 +226,7 @@ namespace app_logic {
 		std::string name_;
 		std::filesystem::path file_path_;
 		int active_index_ = 0;
-		bool unsaved_changes_ = false;
+		bool unsaved_changes_ = false; // changes outside the diagrams' histories
 
 		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;

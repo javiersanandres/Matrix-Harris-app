@@ -58,6 +58,7 @@ namespace ui::style {
         ImageFolder,       // a folder holding a picture
         LineSolid,         // two boxes joined by a continuous line
         LineDashed,        // two boxes joined by a discontinuous line
+        Pause,             // two rounded bars
     };
 
     QIcon icon(Icon which);

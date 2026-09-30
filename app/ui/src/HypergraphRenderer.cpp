@@ -420,7 +420,7 @@ namespace ui {
         // ── Step 6: commit each original edge, split into solid and dashed ─────
         for (auto& [raw, tree] : trees) {
             QPainterPath solid, dashed;
-            tree.split(!raw->isContinuous(), solid, dashed);
+            tree.split(raw->allEndsUncertain(), solid, dashed);
             commit_edge(raw, solid, dashed);
         }
     }

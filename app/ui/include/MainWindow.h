@@ -145,6 +145,11 @@ namespace ui {
         // ── State sync ────────────────────────────────────────────────────────────
         void updateUndoRedoActions();
         void updateWindowTitle();
+        // The editors' onMutated callback: refreshes the "*" in the title. An
+        // editor can change on a worker thread (crossing minimisation), and
+        // widgets may only be touched from the GUI thread, so the refresh is
+        // always carried out there.
+        void onEditorMutated();
         void updateStatusBar();
         void updateZoomLabel();
 

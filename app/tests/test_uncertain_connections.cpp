@@ -164,13 +164,80 @@ namespace app_logic {
             EXPECT_TRUE(theEdge(ed)->isTargetUncertain(named(ed, "c").get()));
         }
 
+        // The marks of the connection as a string: which ends are doubted.
+        std::string marks(HypergraphEditor& ed) {
+            std::string out;
+            auto e = theEdge(ed);
+            for (const auto& s : e->getSources()) if (e->isSourceUncertain(s.get())) out += s->getName();
+            out += ">";
+            for (const auto& t : e->getTargets()) if (e->isTargetUncertain(t.get())) out += t->getName();
+            return out;
+        }
+
+        TEST(UncertainConnectionEditor, UndoAndRedoRestoreExactlyTheMarks) {
+            // a -> {b, c}. Dashing it as a whole, then unticking b, leaves a
+            // (its only source) and c doubted: undo/redo must come back to
+            // exactly that, not to "every end".
+            HypergraphEditor ed(fork());
+            ed.setConnectionEndUncertain(theEdge(ed), named(ed, "c"), true);
+            const std::string s1 = marks(ed);
+            ed.setHyperedgeContinuous(theEdge(ed), false);
+            const std::string s2 = marks(ed);
+            ed.setConnectionEndUncertain(theEdge(ed), named(ed, "b"), false);
+            const std::string s3 = marks(ed);
+            ed.setConnectionEndUncertain(theEdge(ed), named(ed, "a"), false);
+            const std::string s4 = marks(ed);
+            ASSERT_EQ(s1, ">c");
+            ASSERT_EQ(s2, "a>bc");
+            ASSERT_EQ(s3, "a>c");
+
+            ed.undo(); EXPECT_EQ(marks(ed), s3);
+            ed.undo(); EXPECT_EQ(marks(ed), s2);
+            ed.undo(); EXPECT_EQ(marks(ed), s1);
+            ed.undo(); EXPECT_EQ(marks(ed), ">");
+            ed.redo(); EXPECT_EQ(marks(ed), s1);
+            ed.redo(); EXPECT_EQ(marks(ed), s2);
+            ed.redo(); EXPECT_EQ(marks(ed), s3);
+            ed.redo(); EXPECT_EQ(marks(ed), s4);
+        }
+
+        TEST(UncertainConnectionEditor, StructuralUndoKeepsExactlyTheMarks) {
+            // Undoing a structural step installs a copy of the graph: the copy
+            // must carry the same marks.
+            HypergraphEditor ed(fork());
+            ed.setHyperedgeContinuous(theEdge(ed), false);
+            ed.setConnectionEndUncertain(theEdge(ed), named(ed, "b"), false);
+            ASSERT_EQ(marks(ed), "a>c");
+            ed.createNode("z", 0, 1, nullptr);
+            ed.undo();
+            EXPECT_EQ(marks(ed), "a>c");
+            ed.redo();
+            ed.undo();
+            ed.undo();
+            EXPECT_EQ(marks(ed), "a>bc");
+            ed.redo();
+            EXPECT_EQ(marks(ed), "a>c");
+        }
+
+        TEST(UncertainConnectionEditor, MarkingOneEndTicksOnlyThatEnd) {
+            // What the box menu shows: one tick per doubted end, nothing else.
+            HypergraphEditor ed(fork());
+            ed.setConnectionEndUncertain(theEdge(ed), named(ed, "c"), true);
+            EXPECT_TRUE(HypergraphEditor::isConnectionEndUncertain(theEdge(ed), named(ed, "c")));
+            EXPECT_FALSE(HypergraphEditor::isConnectionEndUncertain(theEdge(ed), named(ed, "b")));
+            EXPECT_FALSE(HypergraphEditor::isConnectionEndUncertain(theEdge(ed), named(ed, "a")));
+
+            ed.setConnectionEndUncertain(theEdge(ed), named(ed, "c"), false);
+            EXPECT_FALSE(theEdge(ed)->hasUncertainEnds());
+        }
+
         TEST(UncertainConnectionEditor, UnmarkingOneEndOfAWhollyDashedConnectionKeepsTheOthers) {
             HypergraphEditor ed(fork());
             ed.setHyperedgeContinuous(theEdge(ed), false);
             ed.setConnectionEndUncertain(theEdge(ed), named(ed, "b"), false);
 
             auto e = theEdge(ed);
-            EXPECT_TRUE(e->isContinuous());
+            EXPECT_FALSE(e->allEndsUncertain());
             EXPECT_TRUE(e->isSourceUncertain(named(ed, "a").get()));
             EXPECT_FALSE(e->isTargetUncertain(named(ed, "b").get()));
             EXPECT_TRUE(e->isTargetUncertain(named(ed, "c").get()));
@@ -180,8 +247,7 @@ namespace app_logic {
             HypergraphEditor ed(fork());
             for (const char* name : { "a", "b", "c" })
                 ed.setConnectionEndUncertain(theEdge(ed), named(ed, name), true);
-            EXPECT_FALSE(theEdge(ed)->isContinuous());
-            EXPECT_FALSE(theEdge(ed)->hasUncertainEnds());
+            EXPECT_TRUE(theEdge(ed)->allEndsUncertain());
             for (const char* name : { "a", "b", "c" })
                 EXPECT_TRUE(HypergraphEditor::isConnectionEndUncertain(theEdge(ed), named(ed, name)));
         }

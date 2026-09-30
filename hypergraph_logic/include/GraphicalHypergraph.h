@@ -116,6 +116,17 @@ namespace hypergraph_logic {
 		//
 		void refreshUncertainPorts();
 
+		// ── setHyperedgeOrder ─────────────────────────────────────────────────────
+		//
+		// Replaces the left-to-right order of the hyperedges leaving layer (the
+		// order computeLayout's MIP chooses) with order, which must hold exactly
+		// the same hyperedges; otherwise std::invalid_argument is thrown and
+		// nothing changes. Only the stored order changes: call computeLayout({})
+		// afterwards to redraw with it. Used to undo a change whose layout
+		// reordered the bars, reproducing the previous drawing exactly.
+		//
+		void setHyperedgeOrder(int layer, const std::vector<HyperedgePtr>& order);
+
 		// ── relocateNodeInLayer ───────────────────────────────────────────────────
 		//
 		// Allows the user to permute the nodes in a layer by providing a new

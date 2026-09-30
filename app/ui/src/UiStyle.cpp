@@ -350,6 +350,13 @@ namespace ui::style {
                 p.drawLine(QPointF(11.5, 8), QPointF(11.2, 14.5));
                 break;
             }
+            case Icon::Pause: {
+                p.setPen(Qt::NoPen);
+                p.setBrush(palette::ink_soft);
+                p.drawRoundedRect(QRectF(5.0, 4.0, 3.6, 12.0), 1.4, 1.4);
+                p.drawRoundedRect(QRectF(11.4, 4.0, 3.6, 12.0), 1.4, 1.4);
+                break;
+            }
             }
         }
 

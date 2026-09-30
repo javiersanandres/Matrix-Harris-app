@@ -311,7 +311,9 @@ namespace hypergraph_logic {
 	// connection's line style, and the uncertain marks of the nodes it still holds.
 	static void inheritLineStyle(const HyperedgePtr& to, const HyperedgePtr& from) {
 		if (!to || !from) return;
-		to->setContinuous(from->isContinuous()); // first: it clears the marks
+		// Dashed as a whole stays so, even at ends the new hyperedge adds.
+		to->setContinuous(!from->allEndsUncertain());
+		if (from->allEndsUncertain()) return;
 		for (const auto& s : to->getSources())
 			if (from->isSourceUncertain(s.get())) to->setSourceUncertain(s, true);
 		for (const auto& t : to->getTargets())

@@ -763,13 +763,109 @@ namespace hypergraph_logic {
 
 
             // ════════════════════════════════════════════════════════════════════════
-            // reduceHorizontalJogs — extended Case 1
+            // reduceHorizontalJogs — nearly vertical ports
             //
-            // A hyperedge with a single source (or single target) but several targets
-            // (or sources) on the other side can still align its lone endpoint, as
-            // long as some specific target (or source) sits within 3*MIN_VERTICAL_SEP
-            // of it -- the "straight-through" branch of a fan-out/fan-in.
+            // Any source port and target port of one hyperedge closer than
+            // MIN_BLOCK_SEP / 2 are aligned when their neighbours leave room: the
+            // "straight-through" branch of a fan-out/fan-in, but also a pair in the
+            // middle of a wider hyperedge. Pairs of a source and a target sharing the
+            // edge's leftmost or rightmost x are candidates at any distance.
             // ════════════════════════════════════════════════════════════════════════
+
+            // Lays out layers 0-1 with the given x per node (instead of Brandes-Köpf)
+            // and runs port assignment on that pair up to buildPorts. The caller then
+            // calls reduceHorizontalJogs on the returned assigner.
+            static std::unique_ptr<PortAssigner> portsAt(TestGraph& g, const std::vector<std::pair<NodePtr, double>>& xs) {
+                g.assignXCoordinates();
+                for (const auto& [n, x] : xs) g.nodeLayout()[n.get()].x = x;
+                for (auto& [n, nl] : g.nodeLayout()) { nl.source_ports.clear(); nl.target_ports.clear(); }
+                auto assigner = std::make_unique<PortAssigner>(0, g.layers(), g.nodeLayout());
+                assigner->buildPorts();
+                return assigner;
+            }
+
+            static double portX(TestGraph& g, const NodePtr& node, const HyperedgePtr& e, bool source) {
+                const NodeLayout& nl = g.nodeLayout().at(node.get());
+                for (const auto& p : source ? nl.source_ports : nl.target_ports)
+                    if (p.edge == e.get()) return p.x;
+                ADD_FAILURE() << node->getName() << " has no port for that edge";
+                return 0.0;
+            }
+
+            // {L, M, R} -> {X, Y, Z}: one hyperedge, one port per node (at its centre).
+            struct WideEdge {
+                NodePtr L, M, R, X, Y, Z;
+                HyperedgePtr e;
+            };
+            static WideEdge buildWideEdge(TestGraph& g) {
+                WideEdge w;
+                w.L = g.createNode("L", 0, 0, nullptr);
+                w.X = g.createNode("X", 1, 0, w.L);
+                w.e = findEdge(g, w.L, w.X);
+                w.M = g.createNode("M", 0, 1, nullptr);
+                w.R = g.createNode("R", 0, 2, nullptr);
+                w.Y = g.createNode("Y", 1, 1, nullptr);
+                w.Z = g.createNode("Z", 1, 2, nullptr);
+                g.addSourceToEdge(w.e, w.M);
+                g.addSourceToEdge(w.e, w.R);
+                g.addTargetToEdge(w.e, w.Y);
+                g.addTargetToEdge(w.e, w.Z);
+                return w;
+            }
+
+            TEST(ReduceJogs, NearlyVerticalPairInTheMiddleOfAHyperedgeIsAligned) {
+                // M and Y are neither the edge's only source/target nor its extremes.
+                TestGraph g("jogs_middle");
+                WideEdge w = buildWideEdge(g);
+                auto assigner = portsAt(g, { {w.L, 0}, {w.M, 400}, {w.R, 800}, {w.X, 150}, {w.Y, 410}, {w.Z, 650} });
+                assigner->reduceHorizontalJogs();
+
+                EXPECT_NEAR(portX(g, w.M, w.e, true), portX(g, w.Y, w.e, false), 1e-9);
+                // The far-apart pairs are left alone.
+                EXPECT_NEAR(portX(g, w.L, w.e, true), 0.0, 1e-9);
+                EXPECT_NEAR(portX(g, w.X, w.e, false), 150.0, 1e-9);
+                EXPECT_NEAR(portX(g, w.R, w.e, true), 800.0, 1e-9);
+                EXPECT_NEAR(portX(g, w.Z, w.e, false), 650.0, 1e-9);
+            }
+
+            TEST(ReduceJogs, OnlyPairsCloserThanHalfTheBlockSeparationAreConsidered) {
+                const double limit = MIN_BLOCK_SEP * 0.5;
+                for (double gap : { limit - 1.0, limit + 1.0 }) {
+                    TestGraph g("jogs_threshold");
+                    WideEdge w = buildWideEdge(g);
+                    auto assigner = portsAt(g, { {w.L, 0}, {w.M, 400}, {w.R, 800}, {w.X, 150}, {w.Y, 400 + gap}, {w.Z, 650} });
+                    assigner->reduceHorizontalJogs();
+
+                    const double m = portX(g, w.M, w.e, true), y = portX(g, w.Y, w.e, false);
+                    if (gap < limit) EXPECT_NEAR(m, y, 1e-9) << "gap " << gap;
+                    else             EXPECT_NEAR(y - m, gap, 1e-9) << "gap " << gap;
+                }
+            }
+
+            TEST(ReduceJogs, SharedExtremeIsAlignedEvenWhenItsPortsAreFarApart) {
+                // P -> T share x = 0, so both are the leftmost (and rightmost) of e.
+                // P's other edge goes left (P -> U), so e's port sits on P's right;
+                // T's other edge comes from the right (W -> T), so e's port sits on
+                // T's left: the two ports start more than MIN_BLOCK_SEP / 2 apart.
+                TestGraph g("jogs_extreme");
+                NodePtr P = g.createNode("P", 0, 0, nullptr);
+                NodePtr T = g.createNode("T", 1, 0, P);
+                NodePtr U = g.createNode("U", 1, 0, P);
+                NodePtr W = g.createNode("W", 0, 1, nullptr);
+                g.addConnection(W, T);
+                ASSERT_EQ(g.layers().at(1).nodes.front(), U);
+                ASSERT_EQ(g.layers().at(0).nodes.back(), W);
+                HyperedgePtr e = findEdge(g, P, T);
+                ASSERT_NE(e, nullptr);
+
+                auto assigner = portsAt(g, { {P, 0}, {W, 200}, {U, -200}, {T, 0} });
+                ASSERT_GT(std::abs(portX(g, P, e, true) - portX(g, T, e, false)), MIN_BLOCK_SEP * 0.5)
+                    << "the setup must start with the ports further apart than a nearly vertical pair";
+                assigner->reduceHorizontalJogs();
+
+                EXPECT_NEAR(portX(g, P, e, true), portX(g, T, e, false), 1e-9);
+                checkAllInvariants(g);
+            }
 
             TEST(ReduceJogsFanOut, LoneSourceAlignsWhenCloseEnoughToATarget) {
                 // R has a single hyperedge fanning out to two targets: S (its only

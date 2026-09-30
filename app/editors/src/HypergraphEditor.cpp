@@ -3,10 +3,10 @@
 namespace app_logic {
 	using namespace hypergraph_logic;
 
-	HypergraphEditor::HypergraphEditor(GraphicalHypergraph&& graph)
+	HypergraphEditor::HypergraphEditor(GraphicalHypergraph&& graph, InitialLayout layout)
 		: graph_(std::move(graph))
 	{
-		graph_.computeLayout();
+		if (layout == InitialLayout::Compute) graph_.computeLayout();
 	}
 
 	// Though none of this operations should throw under normal circumstances,

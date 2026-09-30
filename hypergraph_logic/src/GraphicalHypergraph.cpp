@@ -2,6 +2,7 @@
 #include "LayoutTypes.h"
 
 #include <algorithm>
+#include <unordered_set>
 
 namespace hypergraph_logic {
 
@@ -238,6 +239,21 @@ namespace hypergraph_logic {
 			for (auto& port : layout.target_ports)
 				port.uncertain = real && port.edge && port.edge->isTargetUncertain(node);
 		}
+	}
+
+	void GraphicalHypergraph::setHyperedgeOrder(int layer, const std::vector<HyperedgePtr>& order) {
+		auto it = layers_.find(layer);
+		if (it == layers_.end())
+			throw std::invalid_argument("setHyperedgeOrder: la capa no existe.");
+		auto& current = it->second.outgoing_edges;
+		std::unordered_set<Hyperedge*> remaining;
+		for (const auto& e : current) remaining.insert(e.get());
+		if (order.size() != current.size())
+			throw std::invalid_argument("setHyperedgeOrder: el orden no contiene las mismas conexiones.");
+		for (const auto& e : order)
+			if (!e || remaining.erase(e.get()) == 0)
+				throw std::invalid_argument("setHyperedgeOrder: el orden no contiene las mismas conexiones.");
+		current = order;
 	}
 
 	void GraphicalHypergraph::relocateNodeInLayer(const NodePtr& node, double new_x_coordinate, std::set<int>* out_altered_layers) {

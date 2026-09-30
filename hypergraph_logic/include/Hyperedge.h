@@ -83,17 +83,21 @@ namespace hypergraph_logic {
 		//
 		int getLayer() const noexcept;
 
-		// ── isContinuous / setContinuous ──────────────────────────────────────────────────────────────
+		// ── isContinuous / setContinuous / allEndsUncertain ───────────────────────────────────────────
 		//
-		// Whether the whole connection is drawn with a continuous (true, the default) or a
-		// discontinuous, dashed (false) line. It is a property of the original hyperedge only:
-		// a segment reports its origin's value (true if the origin is gone), and setContinuous
-		// throws std::logic_error on a segment.
+		// The line style is kept entirely in the uncertain ends (see below): a property of the
+		// original hyperedge only, which a segment reports from its origin.
 		//
-		// Setting it decides for the whole connection, so it also clears every uncertain end
-		// (see below).
+		// isContinuous: no end is uncertain, so the whole connection is drawn continuous.
+		// allEndsUncertain: every end is uncertain, so it is drawn dashed from end to end.
+		// Anything in between is drawn partly dashed. Note that !isContinuous() does NOT mean
+		// "dashed as a whole": ask allEndsUncertain() for that.
+		//
+		// setContinuous decides for the whole connection: true clears every uncertain end,
+		// false marks them all. It throws std::logic_error on a segment.
 		//
 		bool isContinuous() const noexcept;
+		bool allEndsUncertain() const noexcept;
 		void setContinuous(bool continuous);
 
 		// ── Uncertain ends ────────────────────────────────────────────────────────────────────────────
@@ -113,6 +117,16 @@ namespace hypergraph_logic {
 		void setSourceUncertain(const NodePtr& node, bool uncertain);
 		void setTargetUncertain(const NodePtr& node, bool uncertain);
 		bool hasUncertainEnds() const noexcept;
+
+		// ── setUncertainEnds ──────────────────────────────────────────────────────────────────────────
+		//
+		// Replaces the marks with exactly these ends, as they were recorded -- without the rule
+		// in setSourceUncertain/setTargetUncertain that doubting the only end on a side doubts
+		// the whole connection. For restoring a state (copies, files, undo/redo), not for user
+		// edits. Throws like the setters above (segment, or a node not on that side), leaving
+		// the marks unchanged.
+		//
+		void setUncertainEnds(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets);
 
 		// ====================================================================
 		// Adjacency
@@ -224,7 +238,6 @@ namespace hypergraph_logic {
 		bool is_segment_;
 		WeakHyperedgePtr origin_;
 		int layer_;  // Layer this hyperedge originates from (set by Hypergraph)
-		bool continuous_ = true;  // Line style of the whole connection (originals only)
 		std::set<const Node*> uncertain_sources_;  // Uncertain ends (originals only)
 		std::set<const Node*> uncertain_targets_;
 

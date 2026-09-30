@@ -6,6 +6,7 @@ add_executable(app_logic_tests
     test_editors.cpp
     test_project.cpp
     test_uncertain_connections.cpp
+    test_history.cpp
 )
 
 target_include_directories(app_logic_tests

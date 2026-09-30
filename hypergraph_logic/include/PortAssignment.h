@@ -35,8 +35,10 @@ namespace port_assignment_internal {
 
 		// ── Jog reduction ─────────────────────────────────────────────────────────
 		//
-		// Tries to align source and target ports of single-endpoint or shared-extreme
-		// edges so that the connecting vertical segment has no horizontal jog.
+		// Tries to align, on every edge, the source and target ports that are nearly
+		// vertical to each other (closer than MIN_BLOCK_SEP / 2) and those of a source
+		// and a target sharing the edge's leftmost or rightmost x, closest pairs first,
+		// so that the connecting vertical segment has no horizontal jog.
 		// Returns the minimum port spacing remaining after adjustments.
 		double reduceHorizontalJogs() const;
 

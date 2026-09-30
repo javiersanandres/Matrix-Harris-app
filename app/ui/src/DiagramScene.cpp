@@ -436,14 +436,13 @@ namespace ui {
         // Each entry names what it will do, with an icon of the result. A
         // connection that is partly dashed (doubtful at some boxes) offers both.
         style::addMenuSection(menu, QStringLiteral("Estilo"));
-        const bool all_continuous = edge->isContinuous() && !edge->hasUncertainEnds();
-        if (!all_continuous) {
+        if (!edge->isContinuous()) {
             QAction* solid = menu->addAction(style::icon(style::Icon::LineSolid), QStringLiteral("Usar línea continua"),
                 [this, edge] { onSetLineStyle(edge, true); });
-            if (edge->hasUncertainEnds())
+            if (!edge->allEndsUncertain())
                 solid->setToolTip(QStringLiteral("Quita también las marcas de conexión dudosa"));
         }
-        if (edge->isContinuous()) {
+        if (!edge->allEndsUncertain()) {
             menu->addAction(style::icon(style::Icon::LineDashed), QStringLiteral("Usar línea discontinua"),
                 [this, edge] { onSetLineStyle(edge, false); });
         }

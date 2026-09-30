@@ -42,17 +42,32 @@ namespace hypergraph_logic {
 
 	bool Hyperedge::isContinuous() const noexcept {
 		const Hyperedge* owner = styleOwner();
-		return owner ? owner->continuous_ : true;
+		return owner ? owner->uncertain_sources_.empty() && owner->uncertain_targets_.empty() : true;
+	}
+
+	bool Hyperedge::allEndsUncertain() const noexcept {
+		const Hyperedge* owner = styleOwner();
+		if (!owner) return false;
+		for (const auto& s : owner->sources_)
+			if (!owner->uncertain_sources_.count(s.lock().get())) return false;
+		for (const auto& t : owner->targets_)
+			if (!owner->uncertain_targets_.count(t.lock().get())) return false;
+		return true;
 	}
 
 	void Hyperedge::setContinuous(bool continuous) {
 		if (is_segment_) {
 			throw std::logic_error("El estilo de línea solo se puede cambiar en la conexión completa.");
 		}
-		continuous_ = continuous;
 		// A decision for the whole connection overrides the per-end ones.
-		uncertain_sources_.clear();
-		uncertain_targets_.clear();
+		if (continuous) {
+			uncertain_sources_.clear();
+			uncertain_targets_.clear();
+		}
+		else {
+			for (const auto& src : sources_) uncertain_sources_.insert(src.lock().get());
+			for (const auto& tgt : targets_) uncertain_targets_.insert(tgt.lock().get());
+		}
 	}
 
 	bool Hyperedge::isSourceUncertain(const Node* node) const noexcept {
@@ -87,6 +102,23 @@ namespace hypergraph_logic {
 		if (targets_.size() == 1) return setContinuous(!uncertain);
 		if (uncertain) uncertain_targets_.insert(node.get());
 		else           uncertain_targets_.erase(node.get());
+	}
+
+	void Hyperedge::setUncertainEnds(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets) {
+		if (is_segment_) {
+			throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+		}
+		std::set<const Node*> new_sources, new_targets;
+		for (const auto& s : sources) {
+			if (!containsSource(s)) throw std::invalid_argument("La caja no está por encima en esta conexión.");
+			new_sources.insert(s.get());
+		}
+		for (const auto& t : targets) {
+			if (!containsTarget(t)) throw std::invalid_argument("La caja no está por debajo en esta conexión.");
+			new_targets.insert(t.get());
+		}
+		uncertain_sources_ = std::move(new_sources);
+		uncertain_targets_ = std::move(new_targets);
 	}
 
 	bool Hyperedge::hasUncertainEnds() const noexcept {

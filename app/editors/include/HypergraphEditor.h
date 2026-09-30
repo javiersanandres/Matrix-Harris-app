@@ -19,9 +19,11 @@ namespace app_logic {
 
 		// ── HypergraphEditor ──────────────────────────────────────────────────────
 		//
-		// Takes ownership of the supplied graph (moved in). The undo and redo stacks
-		// start empty.
-		explicit HypergraphEditor(GraphicalHypergraph&& graph);
+		// Takes ownership of the supplied graph (moved in) and lays it out unless
+		// told to keep the layout it carries (see InitialLayout). The undo and
+		// redo stacks start empty.
+		explicit HypergraphEditor(GraphicalHypergraph&& graph,
+			InitialLayout layout = InitialLayout::Compute);
 
 		// ── Node-creation API (specific to regular graphs) ────────────────────────
 
@@ -79,49 +81,22 @@ namespace app_logic {
 		// ── takeSnapshot() — required by HypergraphEditorBase ─────────────────────
 		//
 		// Clones the current live graph and returns it by value. Called at the start
-		// of every mutating method before the mutation is attempted. The returned
-		// clone is only committed to past_ if the mutation succeeds.
+		// of every structural mutation before it is attempted. The returned clone is
+		// only committed to past_ if the mutation succeeds.
 		GraphicalHypergraph takeSnapshot() {
 			return graph_.clone();
 		}
 
-		// ── commitSnapshot() — required by HypergraphEditorBase ───────────────────
+		// ── installSnapshot() — required by HypergraphEditorBase ──────────────────
 		//
-		// Receives a ready-made snapshot (produced by takeSnapshot() before the
-		// mutation ran) and pushes it onto past_. Enforces the MAX_HISTORY cap and
-		// clears future_ so that a new mutation after a sequence of undos discards
-		// all redo states.
-		//
-		// Only called after a mutation has fully succeeded — never on failure.
-		void commitSnapshot(GraphicalHypergraph&& snapshot) {
-			past_.push_back(std::move(snapshot));
-			if (static_cast<int>(past_.size()) > MAX_HISTORY)
-				past_.pop_front();
-			future_.clear();
-			notifyMutated();
-		}
-
-		// ── restoreSnapshot() — required by HypergraphEditorBase ──────────────────
-		//
-		// Pops the top of src (the stack being restored from), saves the current
-		// graph to dst (the opposite stack), and replaces the live graph with the
-		// popped snapshot. Enforces the MAX_HISTORY cap on dst.
-		// undo() → restoreSnapshot(past_, future_)
-		// redo() → restoreSnapshot(future_, past_)
-		void restoreSnapshot(std::deque<GraphicalHypergraph>& src,
-			std::deque<GraphicalHypergraph>& dst)
-		{
-			dst.push_back(graph_.clone());
-			if (static_cast<int>(dst.size()) > MAX_HISTORY)
-				dst.pop_front();
-			graph_ = std::move(src.back());
-			src.pop_back();
-			notifyMutated();
+		// Makes snapshot the live graph (undo/redo of a structural change).
+		void installSnapshot(GraphicalHypergraph&& snapshot) {
+			graph_ = std::move(snapshot);
 		}
 
 		GraphicalHypergraph graph_;
-		std::deque<GraphicalHypergraph> past_;
-		std::deque<GraphicalHypergraph> future_;
+		std::deque<HistoryEntry<GraphicalHypergraph>> past_;
+		std::deque<HistoryEntry<GraphicalHypergraph>> future_;
 	};
 
 } // namespace app_logic

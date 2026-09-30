@@ -82,7 +82,11 @@ namespace hypergraph_logic {
 
             nlohmann::json j;
             g.toJSON(j);
-            for (auto& e : j.at("edges")) e.erase("continuous"); // as saved before line styles existed
+            for (auto& e : j.at("edges")) { // as saved before line styles existed
+                e.erase("continuous");
+                e.erase("uncertain_sources");
+                e.erase("uncertain_targets");
+            }
             GraphicalHypergraph loaded = GraphicalHypergraph::fromJSON(j);
             EXPECT_TRUE(edgeBetween(loaded, byName(loaded, "a"), byName(loaded, "b"))->isContinuous());
         }
@@ -129,22 +133,47 @@ namespace hypergraph_logic {
         // ── Uncertain ends ("conexión dudosa") ────────────────────────────────
 
         TEST(UncertainEnds, MarkedPerEndAndClearedByAWholeLineStyle) {
+            // a -> {b, c}
             GraphicalHypergraph g("marks");
             auto a = g.createNode("a", 0, 0, nullptr);
             auto b = g.createNode("b", 1, 0, a);
             auto c = g.createNode("c", 1, 1, nullptr);
+            auto x = g.createNode("x", 1, 2, nullptr);
             auto e = edgeBetween(g, a, b);
+            g.addTargetToEdge(e, c);
             EXPECT_FALSE(e->hasUncertainEnds());
+            EXPECT_TRUE(e->isContinuous());
 
             e->setTargetUncertain(b, true);
             EXPECT_TRUE(e->isTargetUncertain(b.get()));
+            EXPECT_FALSE(e->isTargetUncertain(c.get()));
             EXPECT_FALSE(e->isSourceUncertain(a.get()));
-            EXPECT_TRUE(e->hasUncertainEnds());
+            EXPECT_FALSE(e->isContinuous());     // partly dashed...
+            EXPECT_FALSE(e->allEndsUncertain()); // ...not as a whole
 
-            EXPECT_THROW(e->setSourceUncertain(c, true), std::invalid_argument); // c is not in it
+            EXPECT_THROW(e->setSourceUncertain(x, true), std::invalid_argument); // x is not in it
             EXPECT_THROW(e->setTargetUncertain(a, true), std::invalid_argument); // a is a source
 
             e->setContinuous(true); // a decision for the whole connection wins
+            EXPECT_FALSE(e->hasUncertainEnds());
+            e->setContinuous(false);
+            EXPECT_TRUE(e->allEndsUncertain());
+        }
+
+        TEST(UncertainEnds, DoubtingTheOnlyEndOnASideDoubtsTheWhole) {
+            // a -> {b, c}: a is the only source, so doubting it doubts every end;
+            // clearing it clears them all.
+            GraphicalHypergraph g("lone");
+            auto a = g.createNode("a", 0, 0, nullptr);
+            auto b = g.createNode("b", 1, 0, a);
+            auto c = g.createNode("c", 1, 1, nullptr);
+            auto e = edgeBetween(g, a, b);
+            g.addTargetToEdge(e, c);
+            e->setTargetUncertain(c, true);
+
+            e->setSourceUncertain(a, true);
+            EXPECT_TRUE(e->allEndsUncertain());
+            e->setSourceUncertain(a, false);
             EXPECT_FALSE(e->hasUncertainEnds());
         }
 
@@ -190,7 +219,7 @@ namespace hypergraph_logic {
                     uncertain_ports += p.uncertain;
                 }
             }
-            EXPECT_EQ(uncertain_ports, 1); // only x's port on that connection
+            EXPECT_EQ(uncertain_ports, 2); // x is its only source: both real ends are doubted
 
             // Clearing the mark reaches the ports without relaying out.
             long_edge->setSourceUncertain(x, false);
@@ -200,9 +229,12 @@ namespace hypergraph_logic {
         }
 
         TEST(UncertainEnds, SavedLoadedAndCloned) {
+            // a -> {b, c} with only b doubted: it must come back partly dashed.
             GraphicalHypergraph g("saved");
             auto a = g.createNode("a", 0, 0, nullptr);
             auto b = g.createNode("b", 1, 0, a);
+            auto c = g.createNode("c", 1, 1, nullptr);
+            g.addTargetToEdge(edgeBetween(g, a, b), c);
             edgeBetween(g, a, b)->setTargetUncertain(b, true);
             g.computeLayout();
 
@@ -211,14 +243,18 @@ namespace hypergraph_logic {
             GraphicalHypergraph loaded = GraphicalHypergraph::fromJSON(j);
             auto le = edgeBetween(loaded, byName(loaded, "a"), byName(loaded, "b"));
             EXPECT_TRUE(le->isTargetUncertain(byName(loaded, "b").get()));
-            EXPECT_TRUE(le->isContinuous());
+            EXPECT_FALSE(le->isTargetUncertain(byName(loaded, "c").get()));
+            EXPECT_FALSE(le->isSourceUncertain(byName(loaded, "a").get()));
             bool port_marked = false;
             for (const auto& p : loaded.getNodeLayout().at(byName(loaded, "b").get()).target_ports)
                 port_marked = port_marked || p.uncertain;
             EXPECT_TRUE(port_marked);
 
             GraphicalHypergraph copy = g.clone();
-            EXPECT_TRUE(edgeBetween(copy, byName(copy, "a"), byName(copy, "b"))->isTargetUncertain(byName(copy, "b").get()));
+            auto ce = edgeBetween(copy, byName(copy, "a"), byName(copy, "b"));
+            EXPECT_TRUE(ce->isTargetUncertain(byName(copy, "b").get()));
+            EXPECT_FALSE(ce->isTargetUncertain(byName(copy, "c").get()));
+            EXPECT_FALSE(ce->isSourceUncertain(byName(copy, "a").get()));
         }
 
         TEST(UncertainEnds, ANodeLeavingTheConnectionLosesItsMark) {
@@ -237,14 +273,18 @@ namespace hypergraph_logic {
         }
 
         TEST(UncertainEnds, BoxInsertedIntoAConnectionKeepsTheMarksOfItsEnds) {
+            // a -> {b, c} with b doubted; m inserted: a -> m -> {b, c}.
             GraphicalHypergraph g("insert");
             auto a = g.createNode("a", 0, 0, nullptr);
             auto b = g.createNode("b", 1, 0, a);
+            auto c = g.createNode("c", 1, 1, nullptr);
             auto edge = edgeBetween(g, a, b);
+            g.addTargetToEdge(edge, c);
             edge->setTargetUncertain(b, true);
 
             auto m = g.createNodeInEdge(NodeAttributes("m"), edge);
             EXPECT_TRUE(edgeBetween(g, m, b)->isTargetUncertain(b.get()));
+            EXPECT_FALSE(edgeBetween(g, m, c)->isTargetUncertain(c.get()));
             EXPECT_FALSE(edgeBetween(g, a, m)->hasUncertainEnds());
         }
 

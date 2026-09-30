@@ -135,11 +135,12 @@ namespace hypergraph_logic {
 
 			auto new_orig = std::make_shared<Hyperedge>(new_sources, new_targets);
 			new_orig->setLayer(orig->getLayer());
-			new_orig->setContinuous(orig->isContinuous());
+			std::vector<NodePtr> uncertain_sources, uncertain_targets;
 			for (const auto& s : orig->getSources())
-				if (orig->isSourceUncertain(s.get())) new_orig->setSourceUncertain(node_map.at(s.get()), true);
+				if (orig->isSourceUncertain(s.get())) uncertain_sources.push_back(node_map.at(s.get()));
 			for (const auto& t : orig->getTargets())
-				if (orig->isTargetUncertain(t.get())) new_orig->setTargetUncertain(node_map.at(t.get()), true);
+				if (orig->isTargetUncertain(t.get())) uncertain_targets.push_back(node_map.at(t.get()));
+			new_orig->setUncertainEnds(uncertain_sources, uncertain_targets);
 			edge_map[orig.get()] = new_orig;
 			copy.all_hyperedges_[new_orig] = {};
 
@@ -263,7 +264,7 @@ namespace hypergraph_logic {
 			entry["origin"] = is_segment ? json(origin_id) : json(nullptr);
 			entry["layer"] = e->getLayer();
 			if (!is_segment) {
-				entry["continuous"] = e->isContinuous();
+				entry["continuous"] = !e->allEndsUncertain(); // false: dashed as a whole
 				json uncertain_sources = json::array(), uncertain_targets = json::array();
 				for (const auto& s : e->getSources())
 					if (e->isSourceUncertain(s.get())) uncertain_sources.push_back(node_id.at(s.get()));
@@ -422,11 +423,15 @@ namespace hypergraph_logic {
 			auto e = std::make_shared<Hyperedge>(sources, targets);
 			e->setLayer(entry.at("layer").get<int>());
 			// Files saved before line styles existed have only continuous lines.
-			e->setContinuous(entry.value("continuous", true));
-			if (entry.contains("uncertain_sources"))
-				for (int sid : entry.at("uncertain_sources")) e->setSourceUncertain(node_by_id.at(sid), true);
-			if (entry.contains("uncertain_targets"))
-				for (int tid : entry.at("uncertain_targets")) e->setTargetUncertain(node_by_id.at(tid), true);
+			if (!entry.value("continuous", true)) e->setContinuous(false);
+			else {
+				std::vector<NodePtr> uncertain_sources, uncertain_targets;
+				if (entry.contains("uncertain_sources"))
+					for (int sid : entry.at("uncertain_sources")) uncertain_sources.push_back(node_by_id.at(sid));
+				if (entry.contains("uncertain_targets"))
+					for (int tid : entry.at("uncertain_targets")) uncertain_targets.push_back(node_by_id.at(tid));
+				e->setUncertainEnds(uncertain_sources, uncertain_targets);
+			}
 
 			int id = entry.at("id").get<int>();
 			edge_by_id[id] = e;

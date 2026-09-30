@@ -366,14 +366,14 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
 
         // Create one scene per regular editor.
         for (int i = 0; i < project_->getDiagramCount(); ++i) {
-            project_->getEditor(i).setOnMutated([this] { project_->markUnsaved(); });
+            project_->getEditor(i).setOnMutated([this] { onEditorMutated(); });
             DiagramScene* scene = createSceneForEditor(i);
             scenes_.push_back(scene);
             zoom_levels_.push_back(0.0);
             tab_bar_->addTab(scene,
                 QString::fromStdString(project_->getDiagramName(i)));
         }
-        project_->getJointEditor().setOnMutated([this] { project_->markUnsaved(); });
+        project_->getJointEditor().setOnMutated([this] { onEditorMutated(); });
 
         // Joint scene.
         joint_scene_ = new DiagramScene(&project_->getJointEditor(), this);
@@ -548,8 +548,9 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     }
 
     void MainWindow::onTabRenamed(int index, const QString& new_name) {
+        // Undoable like any change in the diagram (and the title follows).
         project_->getEditor(index).setName(new_name.toStdString());
-        project_->markUnsaved();
+        updateUndoRedoActions();
         updateWindowTitle();
     }
 
@@ -587,6 +588,12 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         action_rehacer_->setEnabled(can_redo);
     }
 
+    void MainWindow::onEditorMutated() {
+        // Direct when already on the GUI thread; queued to it otherwise (the
+        // minimisation worker). A queued call is dropped if the window is gone.
+        QMetaObject::invokeMethod(this, [this] { updateWindowTitle(); }, Qt::AutoConnection);
+    }
+
     void MainWindow::updateWindowTitle() {
         QString title = QString::fromStdString(project_->getName());
         if (project_->hasUnsavedChanges()) title += QStringLiteral(" *");
@@ -619,7 +626,10 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         updateUndoRedoActions();
         updateWindowTitle();
         updateStatusBar();
-        // Tab bar miniatures update automatically (shared scenes).
+        // Tab bar miniatures update automatically (shared scenes); names may
+        // have changed through undo/redo of a rename.
+        for (int i = 0; i < project_->getDiagramCount(); ++i)
+            tab_bar_->setTabName(i, QString::fromStdString(project_->getDiagramName(i)));
     }
 
     // ============================================================================
@@ -636,7 +646,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
 
     void MainWindow::onNuevoDiagrama() {
         int new_index = project_->addDiagram();
-        project_->getEditor(new_index).setOnMutated([this] { project_->markUnsaved(); });
+        project_->getEditor(new_index).setOnMutated([this] { onEditorMutated(); });
         DiagramScene* scene = createSceneForEditor(new_index);
         scenes_.push_back(scene);
         zoom_levels_.push_back(0.0); // 0 means "fit on first view"

@@ -185,8 +185,10 @@ QPushButton#secondary:hover { background: #F1F2F7; }
         column->setSpacing(18);
 
         auto* top = new QHBoxLayout;
+        top_ = top;
         top->setSpacing(16);
-        top->addWidget(new BadgeWidget(badge, card), 0, Qt::AlignTop);
+        emblem_ = new BadgeWidget(badge, card);
+        top->addWidget(emblem_, 0, Qt::AlignTop);
 
         text_column_ = new QVBoxLayout;
         text_column_->setSpacing(6);
@@ -199,10 +201,37 @@ QPushButton#secondary:hover { background: #F1F2F7; }
         top->addLayout(text_column_, 1);
         column->addLayout(top);
 
-        buttons_ = new QHBoxLayout;
+        // In a widget of its own, hidden until a button is added, so a dialog
+        // without buttons does not keep an empty row (and its spacing).
+        buttons_host_ = new QWidget(card);
+        buttons_ = new QHBoxLayout(buttons_host_);
+        buttons_->setContentsMargins(0, 0, 0, 0);
         buttons_->setSpacing(8);
         buttons_->addStretch();
-        column->addLayout(buttons_);
+        buttons_host_->hide();
+        column->addWidget(buttons_host_);
+    }
+
+    void StyledDialog::setEmblem(QWidget* emblem) {
+        emblem->setParent(emblem_->parentWidget());
+        top_->replaceWidget(emblem_, emblem);
+        delete emblem_;
+        emblem_ = emblem;
+    }
+
+    QPushButton* StyledDialog::makeButton(const QString& text, ButtonStyle style) {
+        auto* b = new QPushButton(text, buttons_host_);
+        b->setObjectName(style == ButtonStyle::Primary ? "primary"
+            : style == ButtonStyle::Danger ? "danger" : "secondary");
+        b->setCursor(Qt::PointingHandCursor);
+        b->setAutoDefault(false);
+        buttons_->addWidget(b);
+        buttons_host_->show();
+        return b;
+    }
+
+    QPushButton* StyledDialog::addActionButton(const QString& text, ButtonStyle style) {
+        return makeButton(text, style);
     }
 
     void StyledDialog::setMessage(const QString& text) {
@@ -226,11 +255,7 @@ QPushButton#secondary:hover { background: #F1F2F7; }
     QPushButton* StyledDialog::addButton(const QString& text, int result, ButtonStyle style,
         bool is_default, bool is_escape)
     {
-        auto* b = new QPushButton(text, this);
-        b->setObjectName(style == ButtonStyle::Primary ? "primary"
-            : style == ButtonStyle::Danger ? "danger" : "secondary");
-        b->setCursor(Qt::PointingHandCursor);
-        b->setAutoDefault(false);
+        auto* b = makeButton(text, style);
         if (is_default) {
             b->setDefault(true);
             b->setFocus();
@@ -240,7 +265,6 @@ QPushButton#secondary:hover { background: #F1F2F7; }
             choice_ = result;
             accept();
         });
-        buttons_->addWidget(b);
         return b;
     }
 

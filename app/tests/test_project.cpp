@@ -377,7 +377,8 @@ namespace app_logic {
                 EXPECT_EQ(p.getRecentColours()[0], red);
                 EXPECT_EQ(p.getRecentColours()[1], blue);
                 EXPECT_EQ(p.getRecentColours()[2], green);
-                EXPECT_TRUE(p.hasUnsavedChanges());
+                // A convenience kept with the next save, not a change of its own.
+                EXPECT_FALSE(p.hasUnsavedChanges());
             }
 
             TEST(Project, AddRecentColourKeepsAtMostMaxColours) {

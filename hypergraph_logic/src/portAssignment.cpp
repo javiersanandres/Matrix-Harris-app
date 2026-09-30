@@ -258,10 +258,11 @@ namespace port_assignment_internal {
 
     // ── Reduce horizontal jogs ──────────────────────────────────────────────────────────────
     //
-    // For hyperedges consisting of just one source and one target or with two nodes sharing the
-    // rightmost or leftmost position, which ports can be aligned without creating a conflict with 
-    // the neighbour ports, it is desirable to align them to prevent from creating an unnecessary 
-    // horizontal jog. This gives the hypergraph a cleaner look.
+    // A source port and a target port of the same hyperedge that are nearly on one vertical line,
+    // or that belong to a source and a target sharing the edge's leftmost or rightmost position,
+    // are aligned when that is possible without crossing or crowding their neighbour ports: this
+    // removes an unnecessary horizontal jog and gives the hypergraph a cleaner look. Candidates
+    // from every edge of the layer pair are aligned closest first (see below).
     double PortAssigner::reduceHorizontalJogs() const {
         double min_spacing = MIN_VERTICAL_SEP;
 
@@ -326,92 +327,101 @@ namespace port_assignment_internal {
                 [edge](const Port& p) { return p.edge == edge; }) - ports.begin());
             };
 
-        // We loop over the edges, there are three cases to consider:
-        //  1) The edge has only one source or one target, so we can try some alignment.
-        //  2) The edge has two leftmost nodes, one source and one target, so we can align those two ports.
-        //  3) The edge has two rightmost nodes, one source and one target, so we can align those two ports.
-        // 
-        // We will also keep track of the adjusted ports to arrange them symmetrically at the end.
-        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_src;
-        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_tgt;
+        // ── Step 1: collect the candidate pairs of every edge ──────────────────
+        //
+        // A candidate is one source port and one target port of the same edge
+        // that we would like to see on one vertical line. Two kinds:
+        //
+        //  a) Nearly vertical ports: closer than MIN_BLOCK_SEP / 2. Two nodes of
+        //     a layer are at least MIN_BLOCK_SEP apart (plus half their widths)
+        //     and ports lie inside their node, so two ports of one edge in the
+        //     same layer are more than MIN_BLOCK_SEP apart: a port has at most
+        //     one partner this close, and one sweep over both sides sorted by x
+        //     finds every such pair.
+        //
+        //  b) Shared extremes: a source and a target that are both the edge's
+        //     leftmost (or both its rightmost) node, i.e. at the same x. Their
+        //     ports may be further apart than (a) allows -- orderPorts pushes
+        //     them towards the node's side and the two nodes may differ in width
+        //     or port count -- but aligning them still straightens the edge's end.
+        //
+        // alignPort decides whether a candidate can actually be aligned.
+        struct Candidate {
+            Hyperedge* edge;
+            Node* src_node;
+            Node* tgt_node;
+            double distance; // |source port x - target port x| before aligning
+        };
+        std::vector<Candidate> candidates;
+
+        auto portX = [&](Node* node, Hyperedge* e, bool source) {
+            const auto& ports = source ? node_layout_.at(node).source_ports : node_layout_.at(node).target_ports;
+            return ports[findPortIndex(ports, e)].x;
+            };
+
         for (const auto& edge : upper_.outgoing_edges) {
             Hyperedge* e = edge.get();
+            const size_t first = candidates.size();
+            auto addCandidate = [&](Node* src_node, Node* tgt_node) {
+                for (size_t k = first; k < candidates.size(); ++k)
+                    if (candidates[k].src_node == src_node && candidates[k].tgt_node == tgt_node) return;
+                candidates.push_back({ e, src_node, tgt_node,
+                    std::abs(portX(src_node, e, true) - portX(tgt_node, e, false)) });
+                };
 
-            const auto& lv = leftmost_nodes_.at(e);
-            const auto& rv = rightmost_nodes_.at(e);
-
-            // Case 1: one source, one target.
-            if (edge->getSources().size() == 1 || edge->getTargets().size() == 1) {
-                Node* src_node = nullptr, * tgt_node = nullptr;
-                std::vector<Port>* src_ports = nullptr, * tgt_ports = nullptr;
-                int si = 0, ti = 0;
-
-                if (edge->getSources().size() == 1) {
-                    src_node = edge->getSources()[0].get();
-                    src_ports = &node_layout_.at(src_node).source_ports;
-                    si = findPortIndex(*src_ports, e);
+            // a) Sweep the edge's source and target ports in ascending x.
+            std::vector<std::pair<double, Node*>> src_side, tgt_side;
+            for (const auto& s : edge->getSources()) src_side.push_back({ portX(s.get(), e, true), s.get() });
+            for (const auto& t : edge->getTargets()) tgt_side.push_back({ portX(t.get(), e, false), t.get() });
+            std::sort(src_side.begin(), src_side.end());
+            std::sort(tgt_side.begin(), tgt_side.end());
+            size_t i = 0, j = 0;
+            while (i < src_side.size() && j < tgt_side.size()) {
+                const double sx = src_side[i].first, tx = tgt_side[j].first;
+                if (std::abs(sx - tx) < MIN_BLOCK_SEP * 0.5) {
+                    addCandidate(src_side[i].second, tgt_side[j].second);
+                    ++i; ++j; // each has no other partner this close
                 }
-                if (edge->getTargets().size() == 1) {
-                    tgt_node = edge->getTargets()[0].get();
-                    tgt_ports = &node_layout_.at(tgt_node).target_ports;
-                    ti = findPortIndex(*tgt_ports, e);
-                }
-                if (!tgt_node && src_ports->size() == 1) {
-                    for (const auto& t : edge->getTargets()) {
-                        if (std::abs(node_layout_.at(t.get()).x - src_ports->front().x) >= MIN_BLOCK_SEP * 0.5) continue;
-                        tgt_node = t.get();
-                        tgt_ports = &node_layout_.at(tgt_node).target_ports;
-                        ti = findPortIndex(*tgt_ports, e);
-                        break; // Only one target can meet the distance requirement
-                    }
-                }
-                if (!src_node && tgt_ports->size() == 1) {
-                    for (const auto& s : edge->getSources()) {
-                        if (std::abs(node_layout_.at(s.get()).x - tgt_ports->front().x) >= 3 * MIN_BLOCK_SEP * 0.5) continue;
-                        src_node = s.get();
-                        src_ports = &node_layout_.at(src_node).source_ports;
-                        si = findPortIndex(*src_ports, e);
-                        break; // Only one target can meet the distance requirement
-                    }
-                }
-
-                if (src_node && tgt_node) {
-                    if (alignPort(src_node, tgt_node, *src_ports, si, *tgt_ports, ti)) {
-                        adjusted_src[src_node].insert(&(*src_ports)[si]);
-                        adjusted_tgt[tgt_node].insert(&(*tgt_ports)[ti]);
-                    }
-                    continue;
-                }
+                else if (sx < tx) ++i;
+                else              ++j;
             }
 
-            // Case 2: two leftmost nodes.
-            if (lv.size() == 2) {
-                bool front_is_src = edge->containsSource(lv.front()->shared_from_this());
-                Node* src_node = front_is_src ? lv.front() : lv.back();
-                Node* tgt_node = front_is_src ? lv.back() : lv.front();
-                auto& src_ports = node_layout_.at(src_node).source_ports;
-                auto& tgt_ports = node_layout_.at(tgt_node).target_ports;
-                int si = findPortIndex(src_ports, e);
-                int ti = findPortIndex(tgt_ports, e);
-                if (alignPort(src_node, tgt_node, src_ports, si, tgt_ports, ti)) {
-                    adjusted_src[src_node].insert(&src_ports[si]);
-                    adjusted_tgt[tgt_node].insert(&tgt_ports[ti]);
-                }
+            // b) Shared leftmost / rightmost node: one source and one target at the
+            //    same x (two nodes of one layer never share it).
+            for (const auto* extremes : { &leftmost_nodes_.at(e), &rightmost_nodes_.at(e) }) {
+                if (extremes->size() != 2) continue;
+                const bool front_is_src = edge->containsSource(extremes->front()->shared_from_this());
+                addCandidate(front_is_src ? extremes->front() : extremes->back(),
+                             front_is_src ? extremes->back() : extremes->front());
             }
+        }
 
-            // Case 3: two rightmost nodes.
-            if (rv.size() == 2) {
-                bool front_is_src = edge->containsSource(rv.front()->shared_from_this());
-                Node* src_node = front_is_src ? rv.front() : rv.back();
-                Node* tgt_node = front_is_src ? rv.back() : rv.front();
-                auto& src_ports = node_layout_.at(src_node).source_ports;
-                auto& tgt_ports = node_layout_.at(tgt_node).target_ports;
-                int si = findPortIndex(src_ports, e);
-                int ti = findPortIndex(tgt_ports, e);
-                if (alignPort(src_node, tgt_node, src_ports, si, tgt_ports, ti)) {
-                    adjusted_src[src_node].insert(&src_ports[si]);
-                    adjusted_tgt[tgt_node].insert(&tgt_ports[ti]);
-                }
+        // ── Step 2: align them, closest first ──────────────────────────────────
+        //
+        // Aligning a port narrows the room of its neighbours on the same node,
+        // so the order matters when candidates compete for a node. The nearly
+        // aligned pairs go first: theirs are the most visible jogs and the
+        // cheapest to remove. Ties keep the edges' order in the layer. A port
+        // is aligned at most once: a later candidate that would pull an already
+        // aligned port elsewhere is skipped.
+        std::stable_sort(candidates.begin(), candidates.end(),
+            [](const Candidate& a, const Candidate& b) { return a.distance < b.distance; });
+
+        // We keep track of the adjusted ports to arrange the others symmetrically at the end.
+        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_src;
+        std::unordered_map<Node*, std::unordered_set<Port*>> adjusted_tgt;
+        std::unordered_set<Port*> aligned;
+        for (const Candidate& c : candidates) {
+            auto& src_ports = node_layout_.at(c.src_node).source_ports;
+            auto& tgt_ports = node_layout_.at(c.tgt_node).target_ports;
+            const int si = findPortIndex(src_ports, c.edge);
+            const int ti = findPortIndex(tgt_ports, c.edge);
+            if (aligned.count(&src_ports[si]) || aligned.count(&tgt_ports[ti])) continue;
+            if (alignPort(c.src_node, c.tgt_node, src_ports, si, tgt_ports, ti)) {
+                aligned.insert(&src_ports[si]);
+                aligned.insert(&tgt_ports[ti]);
+                adjusted_src[c.src_node].insert(&src_ports[si]);
+                adjusted_tgt[c.tgt_node].insert(&tgt_ports[ti]);
             }
         }
 
@@ -1280,8 +1290,12 @@ namespace port_assignment_internal {
         for (int side = 0; side < 2; ++side) {
             bool is_top_side = (side == 0);
             for (const auto& n : ctx.layers.at(scan_layers[side]).nodes) {
+                Hyperedge* edge = is_top_side ? ctx.node_layout.at(ctx.chains[idx].members.front()).target_ports.front().edge :
+                    ctx.node_layout.at(ctx.chains[idx].members.back()).source_ports.front().edge;
                 auto& ports = is_top_side ? ctx.node_layout.at(n.get()).source_ports : ctx.node_layout.at(n.get()).target_ports;
                 for (const Port& p : ports) {
+                    if(is_top_side ? !ctx.assigners[edge->getLayer()]->edgeOrderedBefore(edge, p.edge) :
+                        !ctx.assigners[edge->getLayer()]->edgeOrderedBefore(p.edge, edge)) continue;
                     if (p.x < chain_x) left_bound = std::max(left_bound, p.x);
                     else if (p.x > chain_x) right_bound = std::min(right_bound, p.x);
                 }

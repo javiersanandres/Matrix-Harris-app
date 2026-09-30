@@ -1,33 +1,30 @@
 #pragma once
 
-#include <QPropertyAnimation>
+#include <QElapsedTimer>
 #include <QWidget>
+
+class QTimer;
 
 namespace ui {
 
     // ============================================================================
     // BusySpinner
     //
-    // A small "busy" indicator: a ring of dots that rotates continuously, each
-    // one fading out along the ring behind the leading dot -- the classic
-    // iOS/macOS activity-indicator look. Pure QPainter drawing, no image assets,
-    // so it's trivial to recolor or resize, and reusable anywhere the app needs
-    // to show "working, no progress percentage available" rather than a
-    // determinate progress bar.
+    // A "working, no percentage available" indicator in the application's
+    // colours: a faint ring with an indigo-to-violet arc that keeps turning while
+    // it stretches and shrinks, the way modern apps show activity. Pure QPainter
+    // drawing, no image assets. Sized like the badges of StyledDialog (48 x 48),
+    // so it can stand in for one (see StyledDialog::setEmblem).
     //
-    // Animates only while actually visible: starts on showEvent(), stops on
-    // hideEvent(), so a spinner sitting in a hidden/closed dialog never wastes
-    // timer ticks in the background.
+    // Animates only while actually visible: the frame timer starts on
+    // showEvent() and stops on hideEvent(), so a spinner in a hidden or closed
+    // dialog never wastes timer ticks in the background.
     // ============================================================================
     class BusySpinner : public QWidget {
         Q_OBJECT
-            Q_PROPERTY(int angle READ angle WRITE setAngle)
 
     public:
         explicit BusySpinner(QWidget* parent = nullptr);
-
-        int angle() const { return angle_; }
-        void setAngle(int angle);
 
         QSize sizeHint() const override;
 
@@ -37,11 +34,10 @@ namespace ui {
         void hideEvent(QHideEvent* event) override;
 
     private:
-        static constexpr int kDotCount = 12;
         static constexpr int kDiameter = 48;
 
-        int angle_ = 0;
-        QPropertyAnimation* animation_;
+        QTimer* frame_timer_;
+        QElapsedTimer clock_; // animation time since the spinner was shown
     };
 
 } // namespace ui
