@@ -2,6 +2,7 @@
 #include "LayoutTypes.h"
 
 #include <algorithm>
+#include <climits>
 #include <unordered_set>
 
 namespace hypergraph_logic {
@@ -210,7 +211,7 @@ namespace hypergraph_logic {
 
 		assignXCoordinates();
 		for (const auto& layer : mip_layers) {
-			orderHyperedges(layer);
+			orderHyperedges(layer, static_cast<int>(mip_layers.size()));
 		}
 		assignPorts();
 		assignYCoordinates();
@@ -224,7 +225,7 @@ namespace hypergraph_logic {
 
 		assignXCoordinates();
 		for (const auto& [layer_idx, _] : layers_) {
-			orderHyperedges(layer_idx);
+			orderHyperedges(layer_idx, static_cast<int>(layers_.size()));
 		}
 		assignPorts();
 		assignYCoordinates();
@@ -310,7 +311,9 @@ namespace hypergraph_logic {
 			if (minimize_crossings) {
 				// Avoid being too aggressive with crossing minimisation, since the user
 				// is making a manual adjustment and may not want the layout to change too much.
-				Hypergraph::minimizeCrossings(3, node->getLayer() + 1);
+				// The layers below are re-sorted under their parents first, so that the
+				// subgraphs follow the swap instead of pulling the nodes back.
+				Hypergraph::minimizeCrossings(3, node->getLayer() + 1, -1, CrossingSeed::FollowParents);
 				if (out_altered_layers) {
 					// We need to add those layers where the span of hyperedges could have changed.
 					// Since the node moved and many others all the way down, we need to collect all
@@ -412,21 +415,156 @@ namespace hypergraph_logic {
 		return desired_layer;
 	}
 
+	const NodeLayout* GraphicalHypergraph::validLayout(const Node* node) const {
+		auto it = node_layout_.find(const_cast<Node*>(node));
+		if (it == node_layout_.end()) return nullptr;
+		const auto owner = it->second.node.lock();
+		return owner.get() == node ? &it->second : nullptr;
+	}
+
+	std::optional<double> GraphicalHypergraph::guessX(
+		const Node* node, const std::unordered_map<const Node*, double>& guessed) const
+	{
+		auto known = [&](const Node* n) -> std::optional<double> {
+			if (const NodeLayout* layout = validLayout(n)) return layout->x;
+			if (auto it = guessed.find(n); it != guessed.end()) return it->second;
+			return std::nullopt;
+		};
+		// Average known x of a group of neighbours, and how many had one.
+		auto average = [&](const std::vector<NodePtr>& nodes) -> std::optional<double> {
+			double sum = 0.0;
+			int count = 0;
+			for (const auto& n : nodes)
+				if (auto x = known(n.get())) { sum += *x; ++count; }
+			if (count == 0) return std::nullopt;
+			return sum / count;
+		};
+
+		if (!node->isDummy()) {
+			auto parents = node->getParents();
+			auto children = node->getChildren();
+			auto up = average(parents), down = average(children);
+			if (up && down) return (*up + *down) / 2.0;
+			return up ? up : down;
+		}
+
+		// A dummy: find the nearest known ends of the chain it belongs to.
+		std::optional<double> top_x, bottom_x;
+		int top_layer = 0, bottom_layer = 0;
+		for (const Node* up = node;;) {
+			auto parents = up->getParents();
+			if (parents.empty()) break; // It's impossible for a dummy to not have any parents but just in case.
+			if (auto x = average(parents)) { top_x = x; top_layer = parents.front()->getLayer(); break; }
+			if (parents.size() != 1 || !parents.front()->isDummy()) break;
+			up = parents.front().get();
+		}
+		for (const Node* down = node;;) {
+			auto children = down->getChildren();
+			if (children.empty()) break;
+			if (auto x = average(children)) { bottom_x = x; bottom_layer = children.front()->getLayer(); break; }
+			if (children.size() != 1 || !children.front()->isDummy()) break;
+			down = children.front().get();
+		}
+
+		if (top_x && bottom_x && bottom_layer != top_layer) {
+			const double t = static_cast<double>(node->getLayer() - top_layer) / (bottom_layer - top_layer);
+			return *top_x + t * (*bottom_x - *top_x);
+		}
+		return top_x ? top_x : bottom_x;
+	}
+
+	void GraphicalHypergraph::placeUnpositionedNodes(int first_layer, int last_layer) {
+		std::unordered_map<const Node*, double> guessed;
+
+		for (auto& [layer, data] : layers_) {
+			if (layer < first_layer) continue;
+			if (layer > last_layer) break;
+
+			auto& nodes = data.nodes;
+			if (std::all_of(nodes.begin(), nodes.end(), [&](const NodePtr& n) { return validLayout(n.get()); }))
+				continue;
+
+			// Leftmost parent position in the layer above, as it stands now (INT_MAX: root).
+			std::unordered_map<const Node*, int> upper_pos;
+			if (auto upper = layers_.find(layer - 1); upper != layers_.end())
+				for (int i = 0; i < static_cast<int>(upper->second.nodes.size()); i++)
+					upper_pos[upper->second.nodes[i].get()] = i;
+			auto leftmostParent = [&](const Node* n) {
+				int key = INT_MAX;
+				for (const auto& parent : n->getParents())
+					if (auto it = upper_pos.find(parent.get()); it != upper_pos.end())
+						key = std::min(key, it->second);
+				return key;
+			};
+			auto xOf = [&](const Node* n) -> std::optional<double> {
+				if (const NodeLayout* layout = validLayout(n)) return layout->x;
+				if (auto it = guessed.find(n); it != guessed.end()) return it->second;
+				return std::nullopt;
+			};
+
+			// Placed nodes keep their relative order; the rest are inserted among them.
+			std::vector<NodePtr> order;
+			std::vector<NodePtr> by_x, by_parent;
+			for (const auto& n : nodes) {
+				if (validLayout(n.get())) { order.push_back(n); continue; }
+				if (auto x = guessX(n.get(), guessed)) { guessed[n.get()] = *x; by_x.push_back(n); }
+				else by_parent.push_back(n);
+			}
+
+			// 1. Guessed x: before the first node further right.
+			for (const auto& n : by_x) {
+				const double x = guessed.at(n.get());
+				auto at = std::find_if(order.begin(), order.end(), [&](const NodePtr& other) {
+					auto other_x = xOf(other.get());
+					return other_x && *other_x > x;
+				});
+				order.insert(at, n);
+			}
+
+			// 2. Nothing to go on: under the leftmost parent, or after the left-hand
+			//    neighbour for a root.
+			for (const auto& n : by_parent) {
+				const int key = leftmostParent(n.get());
+				auto at = order.begin();
+				if (key == INT_MAX) {
+					// Right after the nearest node on its left that is already in place
+					// (at the front when there is none).
+					auto original = std::find(nodes.begin(), nodes.end(), n);
+					while (original != nodes.begin()) {
+						--original;
+						auto neighbour = std::find(order.begin(), order.end(), *original);
+						if (neighbour != order.end()) { at = neighbour + 1; break; }
+					}
+				}
+				else {
+					at = std::find_if(order.begin(), order.end(), [&](const NodePtr& other) {
+						const int other_key = leftmostParent(other.get());
+						return other_key != INT_MAX && other_key > key;
+					});
+				}
+				order.insert(at, n);
+			}
+
+			nodes = std::move(order);
+		}
+	}
+
 	int GraphicalHypergraph::choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const {
 		if (!node) return -1;
 
-		auto node_it = node_layout_.find(node.get());
-		if (node_it == node_layout_.end()) return -1;   // never laid out before
-		const double x = node_it->second.x;
+		std::optional<double> x;
+		if (const NodeLayout* layout = validLayout(node.get())) x = layout->x;
+		else x = guessX(node.get(), {});
+		if (!x) return -1;                              // nothing to go on
 
 		auto layer_it = layers_.find(new_layer);
 		if (layer_it == layers_.end()) return -1;       // brand new layer
 
 		const auto& existing_nodes = layer_it->second.nodes;
 		for (size_t i = 0; i < existing_nodes.size(); ++i) {
-			auto sibling_it = node_layout_.find(existing_nodes[i].get());
-			if (sibling_it == node_layout_.end()) continue;
-			if (sibling_it->second.x > x) return static_cast<int>(i);
+			const NodeLayout* sibling = validLayout(existing_nodes[i].get());
+			if (!sibling) continue;
+			if (sibling->x > *x) return static_cast<int>(i);
 		}
 		return -1;
 	}

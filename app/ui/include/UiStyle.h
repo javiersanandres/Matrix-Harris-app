@@ -61,6 +61,7 @@ namespace ui::style {
         Pause,             // two rounded bars
         Move,              // a piece of diagram with a four-way arrow
         TakeOut,           // a piece of diagram leaving through a dashed frame
+        Add,               // a plus in a soft circle (filled when hovered)
     };
 
     QIcon icon(Icon which);

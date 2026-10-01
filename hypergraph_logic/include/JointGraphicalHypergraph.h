@@ -194,6 +194,16 @@ namespace hypergraph_logic {
 		//
 		void removeHypergraph(const std::string& id);
 
+		// ── removeComponent ───────────────────────────────────────────────────────
+		//
+		// Takes the connected component that contains box out of the joint, mixed
+		// or not: all its boxes and connections go and layers left empty are closed
+		// up. A diagram left without any box in the joint stops counting as added,
+		// so it can be added again (unless boxes of unknown origin remain, which
+		// could be its). Throws std::invalid_argument if box is not in the joint.
+		//
+		void removeComponent(const Node* box);
+
 		// ── Moving diagrams and connected components ──────────────────────────────
 		//
 		// A diagram that is not mixed, or any connected component (mixed or not),
@@ -354,6 +364,12 @@ namespace hypergraph_logic {
 		// the group's current horizontal place; a missing top_layer, its layers.
 		void moveGroup(const std::unordered_set<Node*>& group,
 			std::optional<double> click_x, std::optional<int> top_layer);
+
+		// Takes a closed group of boxes (no connection to any box outside it) out
+		// of the joint, with every hyperedge touching it, then closes up empty
+		// layers and lays the joint out again. Diagrams that had boxes in the
+		// group and have none left stop counting as added.
+		void removeGroup(const std::unordered_set<Node*>& doomed);
 
 		// Sets every real box's layer override from the depth rule: its own
 		// layer when it sits deeper than the rule would put it, -1 otherwise.

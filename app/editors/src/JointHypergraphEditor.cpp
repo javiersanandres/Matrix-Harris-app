@@ -38,6 +38,12 @@ namespace app_logic {
 		commitSnapshot(std::move(saved));
 	}
 
+	void JointHypergraphEditor::removeComponent(const NodePtr& box) {
+		auto saved = takeSnapshot();
+		joint_->removeComponent(box.get());
+		commitSnapshot(std::move(saved));
+	}
+
 	void JointHypergraphEditor::moveHypergraph(const std::string& id, double click_x) {
 		auto saved = takeSnapshot();
 		joint_->moveHypergraph(id, click_x);

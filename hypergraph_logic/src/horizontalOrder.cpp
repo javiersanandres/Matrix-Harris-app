@@ -49,8 +49,10 @@ namespace horizontal_overlapping_internal {
         // Both HiGHS and Gurobi return whatever incumbent they've found so
         // far when the limit is hit, not a hard failure -- solve() below
         // accepts that "good enough" solution the same way it would accept a
-        // proven optimum.
+        // proven optimum. We set the maximum time for a single layer MIP to
+        // be 1.0 seconds and 5.0 for all the layers to be computed.
         constexpr double kSolveTimeLimitSeconds = 1.0;
+        constexpr double kSolveAllLayersTimeLimitSeconds = 5.0;
 
         // Incrementally-built row-wise sparse constraint, plus the finished bounds.
         // One instance == one constraint "lo <= sum(idx[i]*val[i]) <= hi".
@@ -75,7 +77,7 @@ namespace horizontal_overlapping_internal {
         };
 
         // ── HiGHS backend ──────────────────────────────────────────────────────
-        MipSolveResult solveWithHighs(const MipModel& m) {
+        MipSolveResult solveWithHighs(const MipModel& m, int total_mip_layers) {
             MipSolveResult result;
 
             HighsModel model;
@@ -105,7 +107,7 @@ namespace horizontal_overlapping_internal {
 
             Highs highs;
             highs.setOptionValue("output_flag", false);
-            highs.setOptionValue("time_limit", kSolveTimeLimitSeconds);
+            highs.setOptionValue("time_limit", std::min(kSolveTimeLimitSeconds, kSolveAllLayersTimeLimitSeconds / total_mip_layers));
             if (highs.passModel(model) != HighsStatus::kOk) return result;
 
             // Warm start from the layer's existing hyperedge order (see
@@ -144,14 +146,14 @@ namespace horizontal_overlapping_internal {
             return usable;
         }
 
-        MipSolveResult solveWithGurobi(const MipModel& m) {
+        MipSolveResult solveWithGurobi(const MipModel& m, int total_mip_layers) {
             MipSolveResult result;
             try {
                 GRBEnv env(true);
                 env.set(GRB_IntParam_OutputFlag, 0);
                 env.start();
                 GRBModel model(env);
-                model.set(GRB_DoubleParam_TimeLimit, kSolveTimeLimitSeconds);
+                model.set(GRB_DoubleParam_TimeLimit, std::min(kSolveTimeLimitSeconds, kSolveAllLayersTimeLimitSeconds / total_mip_layers));
 
                 int n = static_cast<int>(m.col_lower.size());
                 std::vector<GRBVar> vars(n);
@@ -215,9 +217,11 @@ namespace horizontal_overlapping_internal {
 
     HorizontalOrderSolver::HorizontalOrderSolver(
         int layer,
+        int total_mip_layers,
         std::map<int, LayerData>& layers,
         const std::unordered_map<Node*, NodeLayout>& node_layout)
         : layer_(layer)
+        , total_mip_layers_(total_mip_layers)
         , layer_data_(layers.at(layer))
         , node_layout_(node_layout)
     {
@@ -405,11 +409,11 @@ namespace horizontal_overlapping_internal {
         MipSolveResult result;
         switch (backend) {
         case ILPBackendOverride::kForceHighs:
-            result = solveWithHighs(model);
+            result = solveWithHighs(model, total_mip_layers_);
             break;
         case ILPBackendOverride::kForceGurobi:
 #ifdef GUROBI_AVAILABLE
-            result = solveWithGurobi(model);
+            result = solveWithGurobi(model, total_mip_layers_);
 #endif
             // No fallback here on purpose: a caller that explicitly forced
             // Gurobi wants to know Gurobi failed, not get a HiGHS number back
@@ -419,11 +423,11 @@ namespace horizontal_overlapping_internal {
         default:
 #ifdef GUROBI_AVAILABLE
             if (gurobiUsable()) {
-                result = solveWithGurobi(model);
+                result = solveWithGurobi(model, total_mip_layers_);
             }
 #endif
             if (!result.success) {
-                result = solveWithHighs(model);
+                result = solveWithHighs(model, total_mip_layers_);
             }
             break;
         }
@@ -475,9 +479,9 @@ namespace horizontal_overlapping_internal {
 namespace hypergraph_logic {
     using namespace horizontal_overlapping_internal;
 
-    void GraphicalHypergraph::orderHyperedges(int layer) {
+    void GraphicalHypergraph::orderHyperedges(int layer, int total_mip_layers) {
         if (layers_.find(layer) == layers_.end()) return;
         if (layers_.at(layer).outgoing_edges.size() < 2) return;
-        HorizontalOrderSolver(layer, layers_, node_layout_).solve();
+        HorizontalOrderSolver(layer, total_mip_layers, layers_, node_layout_).solve();
     }
 } // namespace hypergraph_logic

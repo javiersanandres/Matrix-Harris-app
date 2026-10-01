@@ -170,7 +170,6 @@ static bool buildState(const ParsedInstance& inst, SiftState& S) {
         S.blocks.emplace_back(std::vector<int>{i});
     }
     S.pi.resize(n, 0);
-    S.fixed_position_count = 0;
     return true;
 }
 
@@ -863,9 +862,8 @@ int main(int argc, char* argv[]) {
         for (int round = 0; round < SIFTING_ROUNDS; ++round) {
             int chi = 0;
             sifting_internal::BlockList snap = B_after;
-            for (int i = S_after.fixed_position_count;
-                i < static_cast<int>(B_after.size()); ++i)
-                chi += siftingStep(S_after, B_after, snap[i]);
+            for (int bid : snap)
+                if (S_after.blocks[bid].movable) chi += siftingStep(S_after, B_after, bid);
             if (chi >= 0) break;
         }
         int crossings_after = countTotalCrossings(S_after, B_after);

@@ -3,6 +3,7 @@
 #include "Node.h"
 #include "Hyperedge.h"
 
+#include <climits>
 #include <map>
 #include <set>
 #include <unordered_map>
@@ -18,6 +19,27 @@ namespace hypergraph_logic {
 	struct LayerData {
 		std::vector<NodePtr> nodes;                  // Nodes in this layer (in order)
 		std::vector<HyperedgePtr> outgoing_edges;    // Hyperedges from this layer to the next
+	};
+
+	// How crossing minimization seeds its initial order (see GlobalSifter::buildBlockOrder).
+	//   - KeepOrder: every layer starts in its current order, so the user's mental map is kept
+	//     and sifting only has to fix what is actually wrong.
+	//   - FollowParents: every layer in range is first re-sorted so each node sits under its
+	//     leftmost parent (roots stay right after their left-hand neighbour). Used when the user
+	//     reorders a layer by hand and the subgraphs below are expected to follow.
+	enum class CrossingSeed { KeepOrder, FollowParents };
+
+	// The range of layers an operation placed nodes at (new dummies, new nodes, relocated
+	// nodes): crossing minimization after the operation only needs to cover [min, max], since
+	// deeper rows at most lost nodes, which never adds crossings. See "Reporting convention".
+	struct LayerSpan {
+		int min = INT_MAX;
+		int max = INT_MIN;
+		void add(int layer) {
+			if (layer < min) min = layer;
+			if (layer > max) max = layer;
+		}
+		bool empty() const { return min > max; }
 	};
 
 	// ============================================================================
@@ -46,13 +68,14 @@ namespace hypergraph_logic {
 		//
 		// Many methods below accept one or both of:
 		//
-		//   int* out_min_new_layer (default nullptr, protected/internal methods only):
-		//     Caller initializes to INT_MAX before the call (or reuses a running value across
-		//     several calls in the same operation). Every place that places a node via
-		//     addNodeToLayer — whether a brand-new dummy or an existing node being relocated —
-		//     merges its layer in via std::min, never overwrites, never raises it back up. Used
-		//     internally to determine where a subsequent crossing-minimization pass should start;
-		//     never exposed on a public method.
+		//   LayerSpan* out_new_layers (default nullptr, protected/internal methods only):
+		//     Caller starts from an empty span (or reuses a running one across several calls in
+		//     the same operation). Every place that places a node via addNodeToLayer — whether a
+		//     brand-new dummy or an existing node being relocated — widens it to include that
+		//     layer, never shrinks it. Used internally to decide where a subsequent crossing-
+		//     minimization pass should start (min) and where it can stop (max); never exposed on
+		//     a public method. Numbers are the ones at insertion time: a later cleanUp() that
+		//     drops an empty layer shifts the layers below it up by one.
 		//
 		//   std::set<int>* out_altered_layers (default nullptr, available on every public method
 		//     and most protected ones):
@@ -488,7 +511,7 @@ namespace hypergraph_logic {
 		// The node's internal layer field is updated to match. No-ops if the node is already present
 		// in that layer.
 		//
-		void addNodeToLayer(int layer, int position, const NodePtr& node, int* out_min_new_layer = nullptr);
+		void addNodeToLayer(int layer, int position, const NodePtr& node, LayerSpan* out_new_layers = nullptr);
 
 		// ── removeNodeFromLayer (single) ──────────────────────────────────────────────────────────────
 		//
@@ -586,7 +609,7 @@ namespace hypergraph_logic {
 		// Returns the value of edgeIsShort(edge): the source layer k >= 0 if the edge is short, or -1 if
 		// it needed to be split.
 		//
-		int settleEdgePlacement(const HyperedgePtr& edge, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		int settleEdgePlacement(const HyperedgePtr& edge, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── collectSegmentDummies ─────────────────────────────────────────────────────────────────────
 		//
@@ -620,7 +643,7 @@ namespace hypergraph_logic {
 		//
 		// Returns the same value as settleEdgePlacement.
 		//
-		int settleEdgePlacementAndCollectDummies(const HyperedgePtr& edge, std::vector<Node*>& seed_nodes, int& min_layer, int& max_layer, bool include_real_sources = true, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		int settleEdgePlacementAndCollectDummies(const HyperedgePtr& edge, std::vector<Node*>& seed_nodes, int& min_layer, int& max_layer, bool include_real_sources = true, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 
 		// ── settleAndMinimizeIfSplit ──────────────────────────────────────────────────────────────────
@@ -630,7 +653,7 @@ namespace hypergraph_logic {
 		// are placed via minimizeCrossingsForNodes; if it turned out short, nothing further is done,
 		// since a short edge introduces no new dummy nodes to place.
 		//
-		void settleAndMinimizeIfSplit(const HyperedgePtr& edge, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		void settleAndMinimizeIfSplit(const HyperedgePtr& edge, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── collapseToShortLayer ──────────────────────────────────────────────────────────────────────
 		//
@@ -648,26 +671,27 @@ namespace hypergraph_logic {
 		// moved to the correct layer (a no-op if it is already there); if it is long, it is (re-)split
 		// via splitLongEdge, which itself dissolves any stale segments before rebuilding them.
 		//
-		void resettleEdge(const HyperedgePtr& edge, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		void resettleEdge(const HyperedgePtr& edge, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── minimizeCrossingsAfterRelocation ──────────────────────────────────────────────────────────
 		//
 		// Called right after applyRelocationAndPropagate to run the disruptive, many-rounds sifting pass
-		// that such a relocation warrants. The floor of the sifting range (start_layer) is pulled up to
-		// no deeper than one layer below the shallowest of reference_nodes, so that any new dummy nodes
-		// introduced by the relocation are covered even if start_layer was already set from an earlier,
-		// unrelated adjustment.
+		// that such a relocation warrants, over the layers the operation placed nodes at (touched).
+		// The floor of the range is pulled up to no deeper than one layer below the shallowest of
+		// reference_nodes, so that any new dummy nodes introduced by the relocation are covered even
+		// if touched was already widened by an earlier, unrelated adjustment. The range stops at
+		// touched.max: below it, nothing was placed.
 		//
-		void minimizeCrossingsAfterRelocation(const std::vector<NodePtr>& reference_nodes, int start_layer);
+		void minimizeCrossingsAfterRelocation(const std::vector<NodePtr>& reference_nodes, const LayerSpan& touched, int sifting_rounds = 10);
 
 		// ── minimizeCrossingsForRelocatedTargets ──────────────────────────────────────────────────────
 		//
 		// Called after relocating the targets of original_edge, when the caller has no more specific
 		// start_layer of its own to offer: recomputes the shallowest layer among the parents of
-		// original_edge's (now possibly relocated) targets, and runs global sifting from there if that
-		// layer is shallower than any target's current layer.
+		// original_edge's (now possibly relocated) targets, and runs global sifting from there down to
+		// the deepest layer the relocation placed nodes at (touched.max).
 		//
-		void minimizeCrossingsForRelocatedTargets(const HyperedgePtr& original_edge);
+		void minimizeCrossingsForRelocatedTargets(const HyperedgePtr& original_edge, const LayerSpan& touched);
 
 		// ============================================================================
 		// Helper methods for connection management
@@ -703,7 +727,7 @@ namespace hypergraph_logic {
 		// destroyed and recreated; anything left over from the old split that isn't reused is torn
 		// down.
 		//
-		void splitLongEdge(const HyperedgePtr& long_edge, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		void splitLongEdge(const HyperedgePtr& long_edge, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── dissolveSegments ─────────────────────────────────────────────────────────────────────────
 		//
@@ -740,7 +764,7 @@ namespace hypergraph_logic {
 		// children) and be destroyed with nothing put in its place, silently discarding the very
 		// connection the caller just built.
 		//
-		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children, const HyperedgePtr& edge_to_skip = nullptr, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		void removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children, const HyperedgePtr& edge_to_skip = nullptr, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── ConnectionBlock ───────────────────────────────────────────────────────────────────────────
 		//
@@ -767,7 +791,7 @@ namespace hypergraph_logic {
 		// This is the per-edge work behind removeTransitiveConnections and
 		// removeConnectionsMadeRedundantThrough.
 		//
-		bool removeConnectionPairs(const std::vector<ConnectionBlock>& blocks, const HyperedgePtr& edge_to_skip = nullptr, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		bool removeConnectionPairs(const std::vector<ConnectionBlock>& blocks, const HyperedgePtr& edge_to_skip = nullptr, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── removePairsFromEdge ───────────────────────────────────────────────────────────────────────
 		//
@@ -778,7 +802,7 @@ namespace hypergraph_logic {
 		// Like removeSourcesFromHyperedge, it also drops the real nodes' parent/child links for the
 		// removed connections. Returns the new edge, if one was created.
 		//
-		HyperedgePtr removePairsFromEdge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources, const std::unordered_set<Node*>& targets, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		HyperedgePtr removePairsFromEdge(const HyperedgePtr& edge, const std::unordered_set<Node*>& sources, const std::unordered_set<Node*>& targets, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── removeDuplicateConnections ────────────────────────────────────────────────────────────────
 		//
@@ -794,7 +818,7 @@ namespace hypergraph_logic {
 		//
 		bool removeDuplicateConnections(const NodePtr& node,
 			const std::unordered_set<HyperedgePtr, HyperedgePtrHash>& yielding_edges,
-			int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+			LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── removeConnectionsMadeRedundantThrough ─────────────────────────────────────────────────────
 		//
@@ -806,7 +830,7 @@ namespace hypergraph_logic {
 		//   3. u == node and v is a strict descendant of one of node's children.
 		// Must only be called while the layering is consistent.
 		//
-		bool removeConnectionsMadeRedundantThrough(const NodePtr& node, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		bool removeConnectionsMadeRedundantThrough(const NodePtr& node, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── resolveOwnRedundantTargets ────────────────────────────────────────────────────────────────
 		//
@@ -823,7 +847,7 @@ namespace hypergraph_logic {
 		// a trivial self-match. Returns nullptr if edge survived (possibly with some targets removed),
 		// in which case the caller's normal edge->addTarget(target) is still required.
 		//
-		HyperedgePtr resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		HyperedgePtr resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── resolveTargetLayer ───────────────────────────────────────────────────────────────────────
 		//
@@ -850,7 +874,7 @@ namespace hypergraph_logic {
 		// Callers use this return value to skip redundant edge-splitting when the targets of a newly
 		// created edge have already been moved by relocation.
 		//
-		bool relocateNodes(const std::vector<NodePtr>& nodes, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		bool relocateNodes(const std::vector<NodePtr>& nodes, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── choosePositionForRelocatedNode ───────────────────────────────────────────────────────────
 		//
@@ -862,6 +886,16 @@ namespace hypergraph_logic {
 		virtual int choosePositionForRelocatedNode(int /*new_layer*/, const NodePtr& /*node*/) const {
 			return -1;
 		}
+
+		// ── placeUnpositionedNodes ───────────────────────────────────────────────────────────────────
+		//
+		// Hook run right before every crossing minimization over [first_layer, last_layer]. Nodes
+		// that were appended to a layer without any real position (new dummies, new parents...)
+		// sit at its end only by accident; since the sifter keeps the current orders as its
+		// starting point, subclasses that know where nodes were drawn (GraphicalHypergraph) move
+		// those nodes to a sensible spot first. Every other node keeps its relative order.
+		//
+		virtual void placeUnpositionedNodes(int /*first_layer*/, int /*last_layer*/) {}
 
 		// ── renumberLayersFrom ────────────────────────────────────────────────────────────
 		//
@@ -897,7 +931,7 @@ namespace hypergraph_logic {
 		//
 		// A cleanUp call at the end removes any layers that have become empty.
 		//
-		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr);
+		void applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& relocations, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
 		// ── compactLayerNumbers ─────────────────────────────────────────────────────────
 		//
@@ -972,8 +1006,10 @@ namespace hypergraph_logic {
 
 		// ── minimizeCrossings ────────────────────────────────────────────────────────────────────────
 		//
-		// Runs the global sifting algorithm over all layers from start_layer to the deepest layer
-		// in the graph, writing the optimised node order back to LayerData::nodes.
+		// Runs the global sifting algorithm over all layers from start_layer to end_layer (the
+		// deepest layer when end_layer is -1), writing the optimised node order back to
+		// LayerData::nodes. The layers right above and below the range are only read: their
+		// order, including every dummy chain reaching into them, stays as it is.
 		//
 		// This is the heavy-weight crossing minimization path. It is called after operations that
 		// cause widespread structural disruption — such as node relocation with propagation — where
@@ -984,7 +1020,8 @@ namespace hypergraph_logic {
 		//
 		// Returns the crossing count after sifting.
 		//
-		int minimizeCrossings(int sifting_rounds, int start_layer);
+		int minimizeCrossings(int sifting_rounds, int start_layer, int end_layer = -1,
+			CrossingSeed seed = CrossingSeed::KeepOrder);
 
 		// ── minimizeCrossingsILP ────────────────────────────────────────────────
 		//

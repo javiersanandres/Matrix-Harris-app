@@ -210,6 +210,25 @@ namespace app_logic {
             EXPECT_EQ(order(), "AB");
         }
 
+        TEST(History, RemovingABlockFromTheJointIsUndoable) {
+            JointHypergraphEditor jed(JointGraphicalHypergraph::create("j"));
+            GraphicalHypergraph a("a"), b("b");
+            a.createNode("A", 0, 0, nullptr);
+            b.createNode("B", 0, 0, nullptr);
+            jed.addHypergraph(a, false);
+            jed.addHypergraph(b, false);
+
+            jed.removeComponent(named(jed, "A"));
+            EXPECT_EQ(named(jed, "A"), nullptr);
+            EXPECT_EQ(jed.getGraph().getIncorporatedIds().count(a.getId()), 0u);
+
+            jed.undo();
+            ASSERT_NE(named(jed, "A"), nullptr);
+            EXPECT_TRUE(jed.getGraph().isSeparable(a.getId()));
+            jed.redo();
+            EXPECT_EQ(named(jed, "A"), nullptr);
+        }
+
         // ── Saved state ─────────────────────────────────────────────────────────
 
         TEST(SavedState, UndoingEveryChangeGoesBackToTheSavedState) {

@@ -473,6 +473,7 @@ namespace hypergraph_logic {
 		for (int id = 0; id < static_cast<int>(bk.g_.nodes.size()); id++) {
 			NodeLayout layout;
 			layout.x = x[id];
+			layout.node = bk.g_.nodes[id]->weak_from_this();
 			node_layout_[bk.g_.nodes[id]] = layout;
 		}
 	}

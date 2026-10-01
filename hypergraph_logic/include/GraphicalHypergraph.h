@@ -3,6 +3,8 @@
 #include "Hypergraph.h"
 #include <nlohmann/json.hpp>
 #include <functional>
+#include <memory>
+#include <optional>
 #include <string>
 
 using json = nlohmann::json;
@@ -43,6 +45,10 @@ namespace hypergraph_logic {
 	// All layout data associated with a single node.
 	struct NodeLayout {
 		double x = 0.0;                 // Assigned x coordinate of the node centre by Brandes-Köpf.
+		// The node this entry was laid out for. The map is keyed by raw pointer and entries of
+		// deleted nodes are not erased, so a new node allocated at the same address would look
+		// already laid out: an entry only counts while this is alive and is that very node.
+		std::weak_ptr<Node> node;
 		std::vector<Port> source_ports; // Ports for edges leaving this node (going downward).
 		std::vector<Port> target_ports; // Ports for edges arriving at this node (from above).
 	};
@@ -273,7 +279,7 @@ namespace hypergraph_logic {
 		// Solves the MIP for the given layer to find the vertical ordering of
 		// hyperedge horizontal bars that minimises the number of crossings.
 		//
-		void orderHyperedges(int layer);
+		void orderHyperedges(int layer, int total_mip_layers = 1.0);
 
 		// ── Stage 3.5: settle dummy chains before any port jog/conflict logic ─────
 		//
@@ -343,9 +349,9 @@ namespace hypergraph_logic {
 		// there instead of always at the end.
 		//
 		// Looks up the node's x in node_layout_ as it stood *before* this relocation (i.e. from the
-		// last completed computeLayout() call). If the node has no recorded x yet (e.g. it has never
-		// been through computeLayout before — new nodes are not routed through this hook, but this
-		// guards against it defensively anyway), falls back to -1 (append), matching the base class.
+		// last completed computeLayout() call). If the node has no valid x (it has never been through
+		// computeLayout), its x is guessed from its neighbours (guessX); with nothing to go on either,
+		// falls back to -1 (append), matching the base class.
 		//
 		// Position is chosen as the index of the first node already in new_layer whose recorded x is
 		// strictly greater than this node's x — i.e. nodes are kept in ascending-x order, and among
@@ -354,6 +360,40 @@ namespace hypergraph_logic {
 		// arbitrary.
 		//
 		int choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const override;
+
+		// ── placeUnpositionedNodes (override) ─────────────────────────────────────
+		//
+		// Goes through [first_layer, last_layer] top-down. Nodes with a valid layout
+		// (see validLayout) keep their relative order; every other node is moved:
+		//   1. If an x can be guessed for it (guessX), it is inserted before the first
+		//      node of the layer whose x (laid out or guessed) is greater.
+		//   2. Otherwise, it goes under its leftmost parent: before the first node whose
+		//      leftmost parent is further right. A root with no guess stays right after
+		//      its left-hand neighbour.
+		// Guesses made on a layer feed the ones below, so a chain of new dummies is
+		// laid along one straight line.
+		//
+		void placeUnpositionedNodes(int first_layer, int last_layer) override;
+
+		// ── validLayout ───────────────────────────────────────────────────────────
+		//
+		// The node's layout entry, or nullptr when it has none or the entry belongs
+		// to a deleted node that happened to live at the same address.
+		//
+		const NodeLayout* validLayout(const Node* node) const;
+
+		// ── guessX ────────────────────────────────────────────────────────────────
+		//
+		// An x for a node with no valid layout, from neighbours whose x is known
+		// (laid out, or already in `guessed`):
+		//   - A dummy: walk up through single-parent dummies with no known x until
+		//     some parents have one, and likewise down through single-child dummies;
+		//     interpolate linearly between both ends by layer (just one end if only
+		//     one is found), i.e. where the straight line would go.
+		//   - Any other node: the average x of its parents and children.
+		// nullopt when no neighbour gives anything.
+		//
+		std::optional<double> guessX(const Node* node, const std::unordered_map<const Node*, double>& guessed) const;
 
 	private:
 		// ── ID generation ─────────────────────────────────────────────────────────

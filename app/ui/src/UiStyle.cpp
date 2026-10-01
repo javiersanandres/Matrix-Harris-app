@@ -386,6 +386,16 @@ namespace ui::style {
                 p.drawLine(QPointF(10.0, 9.0), QPointF(10.0, 12.0));
                 break;
             }
+            case Icon::Add: {
+                const bool hot = c.mode == QIcon::Active || c.mode == QIcon::Selected;
+                p.setPen(Qt::NoPen);
+                p.setBrush(hot ? palette::accent : palette::accent_soft);
+                p.drawEllipse(QPointF(10, 10), 8.0, 8.0);
+                p.setPen(c.pen(hot ? QColor(Qt::white) : palette::accent, 1.8));
+                p.drawLine(QPointF(10, 6), QPointF(10, 14));
+                p.drawLine(QPointF(6, 10), QPointF(14, 10));
+                break;
+            }
             case Icon::Pause: {
                 p.setPen(Qt::NoPen);
                 p.setBrush(palette::ink_soft);

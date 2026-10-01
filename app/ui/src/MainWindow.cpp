@@ -1,5 +1,4 @@
 #include "MainWindow.h"
-#include "AddHypergraphDialog.h"
 #include "AppDialogs.h"
 #include "NodeDialogs.h"
 #include "NodeVisuals.h"
@@ -381,50 +380,32 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             this, &MainWindow::onGraphChanged);
         connectHint(joint_scene_);
         attachColourStore(joint_scene_);
+        joint_scene_->setDiagramCatalog([this] {
+            std::vector<DiagramScene::DiagramInfo> diagrams;
+            for (int i = 0; i < project_->getDiagramCount(); ++i)
+                diagrams.push_back({ project_->getEditor(i).getId(),
+                                     QString::fromStdString(project_->getDiagramName(i)) });
+            return diagrams;
+        });
         connect(joint_scene_, &DiagramScene::addHypergraphRequested,
-            this, [this](double click_x) {
-                // Build entry list.
-                const auto& ids = project_->getJointEditor().getGraph()
-                    .getIncorporatedIds();
-                std::vector<AddHypergraphDialog::DiagramEntry> entries;
+            this, [this](const QString& diagram_id, double click_x) {
+                // The joint places the diagram by where the user clicked, among
+                // the diagrams already there.
                 for (int i = 0; i < project_->getDiagramCount(); ++i) {
-                    const auto& g = project_->getEditor(i).getGraph();
-                    entries.push_back({
-                        project_->getDiagramName(i),
-                        g.getId(),
-                        ids.count(g.getId()) > 0
-                        });
-                }
-                if (entries.empty()) {
-                    dialogs::showInfo(this, QStringLiteral("No hay esquemas que añadir"),
-                        QStringLiteral("Crea primero algún esquema: después podrás incorporarlo aquí."));
-                    return;
-                }
-
-                AddHypergraphDialog dlg(entries, this);
-                dlg.exec();
-                std::string selected_id = dlg.selectedId();
-                if (selected_id.empty()) return;
-
-                // Find the corresponding editor; the joint places the diagram
-                // by where the user clicked, among the diagrams already there.
-                for (int i = 0; i < project_->getDiagramCount(); ++i) {
-                    if (project_->getEditor(i).getId() == selected_id) {
-                        GraphicalHypergraph& g = const_cast<GraphicalHypergraph&>(
-                            project_->getEditor(i).getGraph());
-                        try {
-                            // The others make room and the new diagram fades in.
-                            const auto from = joint_scene_->nodeCenters();
-                            project_->getJointEditor().addHypergraph(g, click_x);
-                            joint_scene_->rebuildAnimated(from);
-                            onGraphChanged();
-                        }
-                        catch (const std::exception& e) {
-                            dialogs::showError(this, QStringLiteral("No se ha podido añadir el esquema"),
-                                QString::fromStdString(e.what()));
-                        }
-                        return;
+                    if (project_->getEditor(i).getId() != diagram_id.toStdString()) continue;
+                    GraphicalHypergraph& g = const_cast<GraphicalHypergraph&>(project_->getEditor(i).getGraph());
+                    try {
+                        // The others make room and the new diagram fades in.
+                        const auto from = joint_scene_->nodeCenters();
+                        project_->getJointEditor().addHypergraph(g, click_x);
+                        joint_scene_->rebuildAnimated(from);
+                        onGraphChanged();
                     }
+                    catch (const std::exception& e) {
+                        dialogs::showError(this, QStringLiteral("No se ha podido añadir el esquema"),
+                            QString::fromStdString(e.what()));
+                    }
+                    return;
                 }
             });
 

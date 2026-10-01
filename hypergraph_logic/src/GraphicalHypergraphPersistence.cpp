@@ -177,6 +177,7 @@ namespace hypergraph_logic {
 		for (const auto& [raw, layout] : node_layout_) {
 			NodeLayout new_layout;
 			new_layout.x = layout.x;
+			new_layout.node = node_map.at(raw);
 			for (const auto& port : layout.source_ports)
 				new_layout.source_ports.push_back({ edge_map.at(port.edge).get(), port.x, port.y, port.uncertain });
 			for (const auto& port : layout.target_ports)
@@ -551,6 +552,7 @@ namespace hypergraph_logic {
 			Node* raw = node_by_id.at(nid).get();
 			NodeLayout& nl = g.node_layout_[raw];
 			nl.x = ne.at("x").get<double>();
+			nl.node = node_by_id.at(nid);
 
 			for (const auto& port : ne.at("source_ports"))
 				nl.source_ports.push_back({

@@ -70,8 +70,10 @@ namespace ui {
     // are dimmed. Clicks on anything that is not a candidate are ignored. A menu
     // entry whose operation has no candidate at all is disabled.
     //
-    // Background click: if state == Idle, shows "Nueva caja" (regular) or the
-    // AddHypergraphDialog (joint). If state != Idle, cancels the operation.
+    // Background click: if state == Idle, shows "Nueva caja" (regular) or
+    // "Administrar esquemas" (joint: every diagram of the project, to add it
+    // where the user clicked or take it out). If state != Idle, cancels the
+    // operation.
     // ============================================================================
     class DiagramScene : public QGraphicsScene {
         Q_OBJECT
@@ -103,6 +105,14 @@ namespace ui {
         void setColourStore(std::function<QList<QColor>()> recent,
             std::function<void(const QColor&)> remember);
 
+        // The project's diagrams, for the joint diagram's "Administrar esquemas"
+        // menu. Set by MainWindow.
+        struct DiagramInfo {
+            std::string id;
+            QString name;
+        };
+        void setDiagramCatalog(std::function<std::vector<DiagramInfo>()> catalog);
+
         // ── Layout transitions ────────────────────────────────────────────────────
         //
         // Where every box is drawn right now (centre, scene coordinates).
@@ -116,10 +126,10 @@ namespace ui {
         // ── Moving a whole piece of the joint diagram ─────────────────────────────
         //
         // A diagram (not mixed with others) or a connected block, chosen from a
-        // box or connection menu: it lifts off the canvas and follows the mouse,
-        // with a guide showing where it would land (see JointGraphicalHypergraph's
-        // placement); a click (or releasing a drag) drops it there, Esc or a right
-        // click puts it back.
+        // box or connection menu: it is picked up by a grip at its top middle,
+        // which hops under the mouse and follows it, with a guide showing where
+        // it would land (see JointGraphicalHypergraph's placement); a click (or
+        // releasing a drag) drops it there, Esc or a right click puts it back.
         bool isMovingPiece() const { return piece_move_.has_value(); }
 
         // ── Signals emitted to MainWindow ────────────────────────────────────────
@@ -132,9 +142,10 @@ namespace ui {
         // DiagramScene connects this to call relocateNodeInLayer on the editor.
         void nodeRelocated(hypergraph_logic::Node* node, double new_scene_x, double new_scene_y);
 
-        // Emitted when the user clicks the background of the joint diagram.
-        // MainWindow handles this because it has access to the full diagram list.
-        void addHypergraphRequested(double click_x);
+        // Emitted when the user asks to add a diagram to the joint, from the
+        // "Administrar esquemas" menu opened at click_x. MainWindow handles it,
+        // since it owns the diagrams.
+        void addHypergraphRequested(const QString& diagram_id, double click_x);
 
         // Tells the user what the pending operation expects next; an empty hint
         // means no operation is pending any more.
@@ -178,6 +189,9 @@ namespace ui {
         std::function<QList<QColor>()> recent_colours_;
         std::function<void(const QColor&)> remember_colour_;
 
+        // ── Project diagrams (see setDiagramCatalog) ──────────────────────────────
+        std::function<std::vector<DiagramInfo>()> diagram_catalog_;
+
         // ── Dragging one box (see NodeItem) ───────────────────────────────────────
         struct BoxDrag {
             NodeItem* item = nullptr;
@@ -196,12 +210,14 @@ namespace ui {
             std::unordered_set<hypergraph_logic::Node*> nodes;
             std::vector<std::pair<double, double>> regions; // the others'
             QGraphicsItemGroup* piece = nullptr;      // its items, lifted
-            QPointF grab;                             // cursor when it was lifted
-            QPointF offset;                           // how far it has been moved
+            QPointF grab;                             // its grip (top middle), before moving
+            QPointF offset;                           // cursor - grab: how far it is moved
+            double snap = 0.0;                        // 0 -> 1 while the grip hops under the cursor
             double center_x = 0.0;                    // of its span, before moving
             int top_layer = 0;
             int bottom_layer = 0;
             double top_row_y = 0.0;                   // scene y of its first row
+            QRectF bounds;                            // its boxes, before moving
         };
         std::optional<PieceMove> piece_move_;
         bool swallow_context_menu_ = false; // the right click that put a piece back
@@ -221,8 +237,12 @@ namespace ui {
         };
         PieceChoice pieceChoiceFor(hypergraph_logic::Node* box) const;
         void addMoveEntries(QMenu* menu, const PieceChoice& choice, hypergraph_logic::Node* box);
-        void addTakeOutEntry(QMenu* menu, const PieceChoice& choice);
+        void addRemoveBlockEntry(QMenu* menu, hypergraph_logic::Node* box);
         void onRemoveDiagram(const std::string& diagram_id);
+        void onRemoveBlock(hypergraph_logic::Node* box);
+        // The doomed boxes and their connections shrink away, then apply()
+        // changes the graph and the rest glides together (or back, if it throws).
+        void takeOut(const std::unordered_set<hypergraph_logic::Node*>& doomed, std::function<void()> apply);
 
         // ── Guides drawn over the diagram while something moves ───────────────────
         //
@@ -237,6 +257,7 @@ namespace ui {
             QGraphicsEllipseItem* dot_bottom = nullptr;
             QGraphicsItem* chip = nullptr;          // label (ChipItem)
             std::vector<QGraphicsPathItem*> regions; // other pieces (piece move)
+            QGraphicsPathItem* ghost = nullptr;     // where a moved piece lands
         };
         std::optional<Guides> guides_;
         void createGuides();  // hidden until placed
@@ -289,7 +310,7 @@ namespace ui {
         void showNodeContextMenu(NodeItem* item, const QPointF& scene_pos);
         void showEdgeContextMenu(HyperedgeItem* item, const QPointF& scene_pos);
         void showBackgroundContextMenu(const QPointF& scene_pos);
-        void showJointBackgroundMenu(const QPointF& scene_pos);
+        void showJointBackgroundMenu(const QPointF& scene_pos); // "Administrar esquemas"
 
         // ── Slot-like private methods called from context menus ───────────────────
 
@@ -311,7 +332,6 @@ namespace ui {
 
         // Background / joint operations
         void onCreateRootNode(const QPointF& scene_pos);
-        void onAddHypergraph(const QPointF& scene_pos);
 
         // Node attribute dialogs. createNodeWithDialog asks for the new node's
         // attributes (pre-filled with default_name) and, if accepted, runs create

@@ -46,7 +46,15 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         using Hypergraph::Hypergraph;
 
         // Layer management
-        void pub_addNodeToLayer(int layer, int pos, const NodePtr& n, int* out_min_new_layer = nullptr) { addNodeToLayer(layer, pos, n, out_min_new_layer); }
+        // The wrappers keep the former "shallowest new layer" int* interface: the span's min is
+        // merged into it the way the internals used to do it themselves.
+        static LayerSpan* spanFor(int* out, LayerSpan& span) { return out ? &span : nullptr; }
+        static void mergeMin(int* out, const LayerSpan& span) {
+            if (out && !span.empty() && span.min < *out) *out = span.min;
+        }
+        void pub_addNodeToLayer(int layer, int pos, const NodePtr& n, int* out_min_new_layer = nullptr) {
+            LayerSpan span; addNodeToLayer(layer, pos, n, spanFor(out_min_new_layer, span)); mergeMin(out_min_new_layer, span);
+        }
         void pub_removeNodeFromLayer(int layer, const NodePtr& n) { removeNodeFromLayer(layer, n); }
         void pub_removeNodeFromLayer(int layer, const std::unordered_set<Node*>& ns) { removeNodeFromLayer(layer, ns); }
         void pub_addHyperedgeToLayer(int layer, const HyperedgePtr& e, std::set<int>* out_altered_layers = nullptr) { addHyperedgeToLayer(layer, e, out_altered_layers); }
@@ -54,7 +62,9 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         void pub_removeHyperedgeFromLayer(int layer, const std::unordered_set<Hyperedge*>& es) { removeHyperedgeFromLayer(layer, es); }
 
         // Edge management
-        void pub_splitLongEdge(const HyperedgePtr& e, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) { splitLongEdge(e, out_min_new_layer, out_altered_layers); }
+        void pub_splitLongEdge(const HyperedgePtr& e, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
+            LayerSpan span; splitLongEdge(e, spanFor(out_min_new_layer, span), out_altered_layers); mergeMin(out_min_new_layer, span);
+        }
         void pub_dissolveSegments(const std::unordered_set<Hyperedge*>& es) { dissolveSegments(es); }
         void pub_resyncSegmentEndpoints(const HyperedgePtr& seg, const std::vector<NodePtr>& new_sources, const std::vector<NodePtr>& new_targets, std::set<int>* out_altered_layers = nullptr) {
             resyncSegmentEndpoints(seg, new_sources, new_targets, out_altered_layers);
@@ -67,33 +77,42 @@ namespace hypergraph_logic::hypergraph_tests::internals {
         }
         int pub_edgeIsShort(const HyperedgePtr& e) { return edgeIsShort(e); }
         int pub_settleEdgePlacement(const HyperedgePtr& e, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            return settleEdgePlacement(e, out_min_new_layer, out_altered_layers);
+            LayerSpan span;
+            const int k = settleEdgePlacement(e, spanFor(out_min_new_layer, span), out_altered_layers);
+            mergeMin(out_min_new_layer, span);
+            return k;
         }
         void pub_collectSegmentDummies(const HyperedgePtr& e, std::vector<Node*>& out_nodes, int& min_layer, int& max_layer, bool include_real_sources = true) {
             collectSegmentDummies(e, out_nodes, min_layer, max_layer, include_real_sources);
         }
         int pub_settleEdgePlacementAndCollectDummies(const HyperedgePtr& e, std::vector<Node*>& seed_nodes, int& min_layer, int& max_layer, bool include_real_sources = true, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            return settleEdgePlacementAndCollectDummies(e, seed_nodes, min_layer, max_layer, include_real_sources, out_min_new_layer, out_altered_layers);
+            LayerSpan span;
+            const int k = settleEdgePlacementAndCollectDummies(e, seed_nodes, min_layer, max_layer, include_real_sources, spanFor(out_min_new_layer, span), out_altered_layers);
+            mergeMin(out_min_new_layer, span);
+            return k;
         }
         void pub_settleAndMinimizeIfSplit(const HyperedgePtr& e, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            settleAndMinimizeIfSplit(e, out_min_new_layer, out_altered_layers);
+            LayerSpan span; settleAndMinimizeIfSplit(e, spanFor(out_min_new_layer, span), out_altered_layers); mergeMin(out_min_new_layer, span);
         }
         void pub_collapseToShortLayer(const HyperedgePtr& e, int k, std::set<int>* out_altered_layers = nullptr) {
             collapseToShortLayer(e, k, out_altered_layers);
         }
         void pub_resettleEdge(const HyperedgePtr& e, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            resettleEdge(e, out_min_new_layer, out_altered_layers);
+            LayerSpan span; resettleEdge(e, spanFor(out_min_new_layer, span), out_altered_layers); mergeMin(out_min_new_layer, span);
         }
 
         // Relocation
         void pub_applyRelocationAndPropagate(const NodePtr& n, int layer, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            applyRelocationAndPropagate({ {n, layer} }, out_min_new_layer, out_altered_layers);
+            LayerSpan span; applyRelocationAndPropagate({ {n, layer} }, spanFor(out_min_new_layer, span), out_altered_layers); mergeMin(out_min_new_layer, span);
         }
         void pub_applyRelocationAndPropagate(const std::vector<std::pair<NodePtr, int>>& r, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            applyRelocationAndPropagate(r, out_min_new_layer, out_altered_layers);
+            LayerSpan span; applyRelocationAndPropagate(r, spanFor(out_min_new_layer, span), out_altered_layers); mergeMin(out_min_new_layer, span);
         }
         bool pub_relocateNodes(const std::vector<NodePtr>& nodes, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            return relocateNodes(nodes, out_min_new_layer, out_altered_layers);
+            LayerSpan span;
+            const bool moved = relocateNodes(nodes, spanFor(out_min_new_layer, span), out_altered_layers);
+            mergeMin(out_min_new_layer, span);
+            return moved;
         }
         int pub_resolveTargetLayer(const NodePtr& n) { return resolveTargetLayer(n); }
         void pub_renumberLayersFrom(int from_layer) { renumberLayersFrom(from_layer); }
@@ -103,14 +122,17 @@ namespace hypergraph_logic::hypergraph_tests::internals {
 
         // Transitive connections
         void pub_removeTransitiveConnections(const std::vector<NodePtr>& parents, const std::vector<NodePtr>& children, const HyperedgePtr& edge_to_skip = nullptr, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            removeTransitiveConnections(parents, children, edge_to_skip, out_min_new_layer, out_altered_layers);
+            LayerSpan span; removeTransitiveConnections(parents, children, edge_to_skip, spanFor(out_min_new_layer, span), out_altered_layers); mergeMin(out_min_new_layer, span);
         }
         bool pub_removeConnectionPairs(const std::vector<ConnectionBlock>& blocks) {
             return removeConnectionPairs(blocks);
         }
         using Hypergraph::ConnectionBlock;
         HyperedgePtr pub_resolveOwnRedundantTargets(const HyperedgePtr& edge, const NodePtr& target, int* out_min_new_layer = nullptr, std::set<int>* out_altered_layers = nullptr) {
-            return resolveOwnRedundantTargets(edge, target, out_min_new_layer, out_altered_layers);
+            LayerSpan span;
+            HyperedgePtr result = resolveOwnRedundantTargets(edge, target, spanFor(out_min_new_layer, span), out_altered_layers);
+            mergeMin(out_min_new_layer, span);
+            return result;
         }
 
         // Traversal / search

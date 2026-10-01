@@ -292,7 +292,6 @@ static bool buildState(const ParsedInstance& inst, SiftState& S) {
         S.blocks.emplace_back(std::vector<int>{i});
     }
     S.pi.resize(n, 0);
-    S.fixed_position_count = 0;
     return true;
 }
 
@@ -375,12 +374,11 @@ static SingleRunResult runSifting(SiftState S, BlockList B) {
     sortAdjacencies(S, B);
 
     auto t0 = std::chrono::high_resolution_clock::now();
-    int numblocks = static_cast<int>(B.size());
     for (int round = 0; round < SIFTING_ROUNDS; ++round) {
         int chi = 0;
         BlockList snap = B;
-        for (int i = S.fixed_position_count; i < numblocks; ++i)
-            chi += siftingStep(S, B, snap[i]);
+        for (int bid : snap)
+            if (S.blocks[bid].movable) chi += siftingStep(S, B, bid);
         if (chi >= 0) break;
     }
     auto t1 = std::chrono::high_resolution_clock::now();

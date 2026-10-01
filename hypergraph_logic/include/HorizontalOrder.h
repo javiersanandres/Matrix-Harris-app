@@ -32,6 +32,7 @@ namespace horizontal_overlapping_internal {
     struct HorizontalOrderSolver {
 
         HorizontalOrderSolver(int layer,
+            int total_mip_layers,
             std::map<int, LayerData>& layers,
             const std::unordered_map<Node*, NodeLayout>& node_layout);
 
@@ -43,6 +44,7 @@ namespace horizontal_overlapping_internal {
 
     private:
         int layer_;
+        int total_mip_layers_;
         LayerData& layer_data_;
         const std::unordered_map<Node*, NodeLayout>& node_layout_;
 

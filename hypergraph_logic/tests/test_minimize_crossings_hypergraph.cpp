@@ -3,6 +3,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <optional>
 #include <unordered_set>
 #include <vector>
 
@@ -24,6 +25,14 @@ namespace hypergraph_logic {
                 int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer) {
 					return GraphicalHypergraph::minimizeCrossingsForNodes(nodes, start_layer, end_layer);
                 }
+                int sift(int rounds, int start_layer, int end_layer = -1, CrossingSeed seed = CrossingSeed::KeepOrder) {
+                    return Hypergraph::minimizeCrossings(rounds, start_layer, end_layer, seed);
+                }
+                void placeUnpositioned(int first, int last) { placeUnpositionedNodes(first, last); }
+                std::optional<double> guess(const Node* n) const { return guessX(n, {}); }
+                bool hasValidLayout(const Node* n) const { return validLayout(n) != nullptr; }
+                void forgetLayout(Node* n) { node_layout_.erase(n); }
+                void setLayoutOwner(Node* key, const NodePtr& owner) { node_layout_[key].node = owner; }
             };
 
             // ============================================================================
@@ -198,14 +207,18 @@ namespace hypergraph_logic {
                 EXPECT_TRUE(sifter.S_.node_to_g1.count(C.get()));
             }
 
-            TEST_F(BuildG1_StartLayer, StartLayerOne_FixedPositionCountSetToAnchorSize) {
+            TEST_F(BuildG1_StartLayer, StartLayerOne_OnlyAnchorBlocksAreFixed) {
                 GlobalSifter sifter(1, lastLayer(G), G.layers());
-                EXPECT_EQ(sifter.S_.fixed_position_count, 1);
+                for (const auto& blk : sifter.S_.blocks) {
+                    const bool in_anchor = sifter.S_.g1_nodes[blk.upper()].g1_layer == 0;
+                    EXPECT_EQ(blk.movable, !in_anchor);
+                }
             }
 
-            TEST_F(BuildG1_StartLayer, StartLayerZero_FixedPositionCountIsZero) {
+            TEST_F(BuildG1_StartLayer, StartLayerZero_EveryBlockIsMovable) {
                 GlobalSifter sifter(0, lastLayer(G), G.layers());
-                EXPECT_EQ(sifter.S_.fixed_position_count, 0);
+                for (const auto& blk : sifter.S_.blocks)
+                    EXPECT_TRUE(blk.movable);
             }
 
             // ============================================================================
@@ -459,20 +472,15 @@ namespace hypergraph_logic {
                 }
             }
 
-            TEST_F(BuildBlockOrder_Base, AnchorBlocksAppearFirst) {
+            TEST_F(BuildBlockOrder_Base, AnchorBlocksAreFixedAndKeepTheirOrder) {
                 // start_layer=1 -> anchor layer=0, which has nodes A and B.
                 GlobalSifter sifter(1, lastLayer(G), G.layers());
-
-                int fpc = sifter.S_.fixed_position_count;
-                ASSERT_GE(static_cast<int>(sifter.B_.size()), fpc);
-
-                std::unordered_set<int> anchor_bids;
-                for (int g1_idx : sifter.S_.g1_layers.at(0))
-                    anchor_bids.insert(sifter.S_.g1_nodes[g1_idx].block_id);
-
-                for (int i = 0; i < fpc; ++i)
-                    EXPECT_TRUE(anchor_bids.count(sifter.B_[i]))
-                    << "B[" << i << "] = " << sifter.B_[i] << " is not an anchor block";
+                const int a = sifter.S_.g1_nodes[sifter.S_.node_to_g1.at(A.get())].block_id;
+                const int b = sifter.S_.g1_nodes[sifter.S_.node_to_g1.at(B.get())].block_id;
+                EXPECT_FALSE(sifter.S_.blocks[a].movable);
+                EXPECT_FALSE(sifter.S_.blocks[b].movable);
+                sifter.runSifting(5);
+                EXPECT_LT(sifter.S_.pi[a], sifter.S_.pi[b]);
             }
 
             // ============================================================================
@@ -766,6 +774,248 @@ namespace hypergraph_logic {
                 G.minimizeCrossingsForNodes({ B.get() }, 0, 1);
 				EXPECT_EQ(positionInLayer(G, B.get()), 1)
                     << "B should have moved right to reduce crossings with A->B edge";
+            }
+
+            // ============================================================================
+            // Seed order: the block list reproduces every layer, ranges, placement
+            // ============================================================================
+
+            // Crossings of the layers exactly as they are (no barycenter, orders kept).
+            static int layerCrossings(TestGraph& G) {
+                GlobalSifter sifter(0, lastLayer(G), G.layers(), false);
+                return sifter.countCrossings();
+            }
+
+            static std::vector<Node*> layerNodes(TestGraph& G, int layer) {
+                std::vector<Node*> out;
+                for (const auto& n : G.layers().at(layer).nodes) out.push_back(n.get());
+                return out;
+            }
+
+            static Node* dummyAt(TestGraph& G, int layer) {
+                for (const auto& n : G.layers().at(layer).nodes)
+                    if (n->isDummy()) return n.get();
+                return nullptr;
+            }
+
+            // A -> a1 -> a2 -> a3 -> Z, plus a long edge B -> Z beside it: no crossings.
+            struct ChainBesidePath {
+                TestGraph G{ "chain" };
+                NodePtr A, B, a1, a2, a3, Z;
+                ChainBesidePath() {
+                    A = G.createNode("A", 0, 0, nullptr);
+                    B = G.createNode("B", 0, 1, nullptr);
+                    a1 = G.createNode("a1", 1, 0, A);
+                    a2 = G.createNode("a2", 2, 0, a1);
+                    a3 = G.createNode("a3", 3, 0, a2);
+                    Z = G.createNode("Z", 4, 0, a3);
+                    G.addConnection(B, Z);
+                }
+            };
+
+            TEST(SeedOrder, BlockListReproducesLayersWithDummyChains) {
+                ChainBesidePath g;
+                ASSERT_EQ(layerCrossings(g.G), 0);
+                // A chain must not be forced to the left of blocks starting on deeper layers.
+                for (int layer = 2; layer <= 3; ++layer)
+                    EXPECT_FALSE(g.G.layers().at(layer).nodes.front()->isDummy()) << "layer " << layer;
+            }
+
+            TEST(SeedOrder, ChainThroughAnchorIsNotForcedLeft) {
+                ChainBesidePath g;
+                const auto before2 = layerNodes(g.G, 2), before3 = layerNodes(g.G, 3);
+                g.G.sift(10, 2);
+                EXPECT_EQ(layerCrossings(g.G), 0);
+                EXPECT_EQ(layerNodes(g.G, 2), before2);
+                EXPECT_EQ(layerNodes(g.G, 3), before3);
+            }
+
+            TEST(SeedOrder, RangeLeavesTheLayerBelowUntouched) {
+                // L0: A B, L1: b1 a1 (crossed), L2: b2 a2.
+                TestGraph G("range");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr b1 = G.createNode("b1", 1, 0, B);
+                NodePtr a2 = G.createNode("a2", 2, 0, a1);
+                NodePtr b2 = G.createNode("b2", 2, 0, b1);
+                G.layers().at(0).nodes = { A, B };
+                G.layers().at(1).nodes = { b1, a1 };
+                G.layers().at(2).nodes = { b2, a2 };
+                const int before = layerCrossings(G);
+                ASSERT_GT(before, 0);
+
+                G.sift(10, 0, 0); // only layer 0 may move; layer 1 is read, never changed
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), a1.get() }));
+                EXPECT_EQ(layerNodes(G, 2), (std::vector<Node*>{ b2.get(), a2.get() }));
+                EXPECT_LE(layerCrossings(G), before);
+            }
+
+            TEST(SeedOrder, ChainReachingTheLayerBelowTheRangeIsFixed) {
+                ChainBesidePath g;
+                GlobalSifter sifter(0, 1, g.G.layers(), false);
+                Node* d1 = dummyAt(g.G, 1);
+                ASSERT_NE(d1, nullptr);
+                const Block& chain = sifter.S_.blocks[sifter.S_.g1_nodes[sifter.S_.node_to_g1.at(d1)].block_id];
+                EXPECT_GT(chain.g1_nodes.size(), 1u) << "d1 and d2 should form one chain";
+                EXPECT_FALSE(chain.movable);
+                const Block& a1 = sifter.S_.blocks[sifter.S_.g1_nodes[sifter.S_.node_to_g1.at(g.a1.get())].block_id];
+                EXPECT_TRUE(a1.movable);
+            }
+
+            TEST(SeedOrder, FollowParentsKeepsRootsAfterTheirLeftNeighbour) {
+                TestGraph G("roots");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr b1 = G.createNode("b1", 1, 1, B);
+                NodePtr R = G.createNode("R", 1, 0, nullptr); // a root at layer 1
+                ASSERT_EQ(R->getLayer(), 1);
+                G.layers().at(0).nodes = { A, B };
+
+                G.layers().at(1).nodes = { R, b1, a1 };
+                GlobalSifter first(1, lastLayer(G), G.layers(), false, CrossingSeed::FollowParents);
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ R.get(), a1.get(), b1.get() }));
+
+                G.layers().at(1).nodes = { b1, R, a1 };
+                GlobalSifter second(1, lastLayer(G), G.layers(), false, CrossingSeed::FollowParents);
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ a1.get(), b1.get(), R.get() }));
+            }
+
+            TEST(SeedOrder, BarycenterNeverWorsensTheOrderItStartsFrom) {
+                // A crossed start with a chain passing through: A B / b1 a1 d1 / b2 a2 d2 / Z.
+                ChainBesidePath g;
+                auto& L1 = g.G.layers().at(1).nodes;
+                auto& L2 = g.G.layers().at(2).nodes;
+                std::reverse(L1.begin(), L1.end());
+                std::reverse(L2.begin(), L2.end());
+                GlobalSifter kept(0, lastLayer(g.G), g.G.layers(), false);
+                const int start = kept.countCrossings();
+                GlobalSifter seeded(0, lastLayer(g.G), g.G.layers(), true);
+                EXPECT_LE(seeded.countCrossings(), start);
+            }
+
+            TEST(SeedOrder, HubsAreSortedByTheBarycenterOfAllTheirEndpoints) {
+                // upper: u0 u1 u2, lower: v1 v2.
+                // H1: {u0, u2} -> {v2} (pulled right by u2 and v2), H2: {u1} -> {v1}.
+                // Leftmost parent alone would put H1 first (u0 < u1) and cost 2 crossings;
+                // the barycenter puts H2 first, with a single crossing (u0->H1 vs u1->H2).
+                TestGraph G("hubs");
+                NodePtr u0 = G.createNode("u0", 0, 0, nullptr);
+                NodePtr u1 = G.createNode("u1", 0, 1, nullptr);
+                NodePtr u2 = G.createNode("u2", 0, 2, nullptr);
+                NodePtr v2 = G.createNode("v2", 1, 0, u0);
+                NodePtr v1 = G.createNode("v1", 1, 0, u1);
+                HyperedgePtr h1 = findEdgeWithSourceAndTarget(G, u0, v2);
+                ASSERT_NE(h1, nullptr);
+                G.addSourceToEdge(h1, u2);
+                G.layers().at(0).nodes = { u0, u1, u2 };
+                G.layers().at(1).nodes = { v1, v2 };
+
+                GlobalSifter sifter(0, lastLayer(G), G.layers(), false);
+                const auto& hubs = sifter.S_.g1_layers.at(1);
+                ASSERT_EQ(hubs.size(), 2u);
+                const int u1_g1 = sifter.S_.node_to_g1.at(u1.get());
+                EXPECT_EQ(sifter.S_.g1_in[hubs[0]], (std::vector<int>{ u1_g1 })) << "H2 should come first";
+                EXPECT_EQ(sifter.countCrossings(), 1);
+            }
+
+            TEST(Placement, UnpositionedNodeGoesUnderItsParent) {
+                TestGraph G("place");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr C = G.createNode("C", 0, 2, nullptr);
+                NodePtr a = G.createNode("a", 1, 0, A);
+                NodePtr b = G.createNode("b", 1, 1, B);
+                NodePtr c = G.createNode("c", 1, 2, C);
+                G.layers().at(0).nodes = { A, B, C };
+                G.layers().at(1).nodes = { a, b, c };
+                G.computeLayout();
+
+                // b loses its position and sits at the end, as a freshly appended node would.
+                G.layers().at(1).nodes = { a, c, b };
+                G.forgetLayout(b.get());
+                G.placeUnpositioned(0, lastLayer(G));
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ a.get(), b.get(), c.get() }));
+            }
+
+            TEST(Placement, NewDummiesFollowTheStraightLine) {
+                ChainBesidePath g;
+                g.G.computeLayout();
+                Node* d1 = dummyAt(g.G, 1);
+                Node* d2 = dummyAt(g.G, 2);
+                Node* d3 = dummyAt(g.G, 3);
+                ASSERT_TRUE(d1 && d2 && d3);
+                const double xb = g.G.getX(g.B), x3 = g.G.getNodeLayout().at(d3).x;
+                g.G.forgetLayout(d1);
+                g.G.forgetLayout(d2);
+
+                // B (layer 0) and d3 (layer 3) are the nearest known ends of the chain:
+                // d1 and d2 sit 1/3 and 2/3 of the way along the straight line.
+                auto x1 = g.G.guess(d1);
+                ASSERT_TRUE(x1.has_value());
+                EXPECT_NEAR(*x1, xb + (x3 - xb) / 3.0, 1e-9);
+                auto x2 = g.G.guess(d2);
+                ASSERT_TRUE(x2.has_value());
+                EXPECT_NEAR(*x2, xb + 2.0 * (x3 - xb) / 3.0, 1e-9);
+            }
+
+            TEST(Placement, LayoutOfAnotherNodeAtTheSameAddressIsIgnored) {
+                TestGraph G("stale");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr a = G.createNode("a", 1, 0, A);
+                G.computeLayout();
+                EXPECT_TRUE(G.hasValidLayout(a.get()));
+                G.setLayoutOwner(a.get(), A); // as if the entry had been written for another node
+                EXPECT_FALSE(G.hasValidLayout(a.get()));
+                EXPECT_FALSE(G.hasValidLayout(nullptr));
+            }
+
+            // ============================================================================
+            // Crossing minimization ranges after operations (LayerSpan)
+            // ============================================================================
+
+            TEST(OperationRange, NewNodeWithDummiesLeavesDeeperLayersAlone) {
+                // L0: P B, B -> b1 -> b2, and a crossing further down: u -> z, v -> w.
+                TestGraph G("cap");
+                NodePtr P = G.createNode("P", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr b1 = G.createNode("b1", 1, 0, B);
+                NodePtr b2 = G.createNode("b2", 2, 0, b1);
+                NodePtr u = G.createNode("u", 3, 0, b2);
+                NodePtr v = G.createNode("v", 3, 1, b2);
+                NodePtr w = G.createNode("w", 4, 0, v);
+                NodePtr z = G.createNode("z", 4, 1, u);
+                G.layers().at(0).nodes = { P, B };
+                G.layers().at(3).nodes = { u, v };
+                G.layers().at(4).nodes = { w, z };
+
+                // A child of P two layers down, no position given: its dummy (layer 1) and the
+                // node itself (layer 2) are placed; layers 3 and 4 are none of its business.
+                G.createNode("n", 2, -1, P);
+                EXPECT_EQ(layerNodes(G, 3), (std::vector<Node*>{ u.get(), v.get() }));
+                EXPECT_EQ(layerNodes(G, 4), (std::vector<Node*>{ w.get(), z.get() }));
+            }
+
+            TEST(OperationRange, RootMovedBelowTheLastLayerIsMinimized) {
+                // L0: Q A R, A -> a1 -> a2, and c is a child of both Q and R.
+                TestGraph G("below");
+                NodePtr Q = G.createNode("Q", 0, 0, nullptr);
+                NodePtr A = G.createNode("A", 0, 1, nullptr);
+                NodePtr R = G.createNode("R", 0, 2, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr a2 = G.createNode("a2", 2, 0, a1);
+                NodePtr c = G.createNode("c", 1, 1, Q);
+                G.addConnection(R, c);
+                G.layers().at(0).nodes = { Q, A, R };
+                ASSERT_EQ(lastLayer(G), 2);
+
+                // R goes to a new layer 3, so c goes to 4 and Q -> c gets dummies at 1..3. Left
+                // at the end of their layers, they would cross A -> a1 -> a2.
+                G.Hypergraph::relocateNodeToLayer(R, 3);
+                ASSERT_EQ(R->getLayer(), 3);
+                ASSERT_EQ(c->getLayer(), 4);
+                EXPECT_EQ(layerCrossings(G), 0);
             }
         } // namespace minimizeCrossings
     } // namespace graphicalhypergraph_tests

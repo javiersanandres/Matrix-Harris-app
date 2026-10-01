@@ -293,8 +293,24 @@ namespace hypergraph_logic {
 	// ============================================================================
 	void JointGraphicalHypergraph::removeHypergraph(const std::string& id) {
 		const std::unordered_set<Node*> doomed = separableNodesOf(id);
+		// Erased explicitly too: a diagram with no box at all is not caught by removeGroup.
+		incorporated_ids_.erase(id);
+		incorporated_names_.erase(id);
+		removeGroup(doomed);
+	}
 
-		// Their components are closed: every hyperedge touching them is theirs.
+	void JointGraphicalHypergraph::removeComponent(const Node* box) {
+		removeGroup(componentNodesOf(box));
+	}
+
+	void JointGraphicalHypergraph::removeGroup(const std::unordered_set<Node*>& doomed) {
+		// The diagrams the group has boxes of, before their origins go.
+		std::set<std::string> touched_ids;
+		for (Node* n : doomed)
+			for (const auto& id : graphsOf(n))
+				if (!id.empty()) touched_ids.insert(id);
+
+		// The group is closed: every hyperedge touching it is its own.
 		std::unordered_set<Hyperedge*> doomed_edges;
 		std::vector<HyperedgePtr> doomed_originals;
 		for (const auto& [orig, segs] : all_hyperedges_) {
@@ -316,8 +332,19 @@ namespace hypergraph_logic {
 		for (Node* n : doomed) { node_layout_.erase(n); origins_.erase(n); }
 		for (Hyperedge* e : doomed_edges) edge_layout_.erase(e);
 
-		incorporated_ids_.erase(id);
-		incorporated_names_.erase(id);
+		// A diagram with no box left can be added again, as long as no remaining box
+		// is of unknown origin (it could be one of its boxes).
+		std::set<std::string> remaining;
+		for (const auto& n : all_nodes_)
+			for (const auto& id : graphsOf(n.get())) remaining.insert(id);
+		if (!remaining.count(std::string())) {
+			for (const auto& id : touched_ids) {
+				if (remaining.count(id)) continue;
+				incorporated_ids_.erase(id);
+				incorporated_names_.erase(id);
+			}
+		}
+
 		cleanUp(); // layers left empty are closed up
 		computeLayout({});
 	}

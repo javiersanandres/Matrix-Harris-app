@@ -5,6 +5,7 @@
 #include <limits>
 #include <stdexcept>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 // ============================================================================
@@ -199,6 +200,48 @@ namespace hypergraph_logic {
 
             EXPECT_NO_THROW(j->addHypergraph(deep, kFarRight));
             EXPECT_EQ(j->getLayerCount(), 3);
+        }
+
+        TEST(JointDiagrams, RemovingAMixedBlockTakesEveryDiagramInIt) {
+            auto j = JointGraphicalHypergraph::create("j");
+            auto a = chain("a"), b = chain("b"), c = chain("c");
+            j->addHypergraph(a, kFarRight);
+            j->addHypergraph(b, kFarRight);
+            j->addHypergraph(c, kFarRight);
+            j->addConnection(named(*j, "a1"), named(*j, "b2")); // a and b: one block
+            j->computeLayout();
+
+            j->removeComponent(named(*j, "b1").get());
+            EXPECT_EQ(layerNames(*j, 0), (std::vector<std::string>{ "c1" }));
+            EXPECT_EQ(layerNames(*j, 1), (std::vector<std::string>{ "c2" }));
+            // Neither a nor b has a box left: both can be added again; c stays.
+            EXPECT_EQ(j->getIncorporatedIds(), (std::unordered_set<std::string>{ c.getId() }));
+            EXPECT_NO_THROW(j->addHypergraph(a, kFarLeft));
+            EXPECT_TRUE(j->isSeparable(c.getId()));
+        }
+
+        TEST(JointDiagrams, RemovingOneBlockOfADiagramKeepsTheRestOfIt) {
+            // One diagram made of two separate chains: two blocks.
+            auto j = JointGraphicalHypergraph::create("j");
+            GraphicalHypergraph g("two");
+            auto x1 = g.createNode("x1", 0, 0, nullptr);
+            g.createNode("x2", 1, 0, x1);
+            auto y1 = g.createNode("y1", 0, 1, nullptr);
+            g.createNode("y2", 1, 1, y1);
+            j->addHypergraph(g, kFarLeft);
+            ASSERT_EQ(j->getComponents().size(), 2u);
+
+            j->removeComponent(named(*j, "x2").get());
+            EXPECT_EQ(layerNames(*j, 0), (std::vector<std::string>{ "y1" }));
+            EXPECT_EQ(j->getIncorporatedIds().count(g.getId()), 1u); // y1, y2 are still its
+            EXPECT_TRUE(j->isSeparable(g.getId()));
+            EXPECT_THROW(j->addHypergraph(g, kFarRight), std::invalid_argument);
+        }
+
+        TEST(JointDiagrams, RemovingTheBlockOfABoxOutsideTheJointIsRefused) {
+            auto j = JointGraphicalHypergraph::create("j");
+            Node stranger(NodeAttributes("x"));
+            EXPECT_THROW(j->removeComponent(&stranger), std::invalid_argument);
         }
 
         // ── Moving ──────────────────────────────────────────────────────────────

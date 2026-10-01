@@ -71,6 +71,11 @@ namespace sifting_internal {
 		std::vector<int> I_minus; // cross-ref: I_minus[i] = position of upper() in the vector N_plus(N_minus[i])
 		std::vector<int> I_plus;  // cross-ref: I_plus[i]  = position of lower() in the vector N_minus(N_plus[i])
 
+		// False for blocks that reach the layers around the range (the anchor above,
+		// end_layer+1 below): they are never sifted themselves, so their relative order
+		// stays as it is, but any other block may still be swapped past them.
+		bool movable = true;
+
 		Block(std::vector<int> nodes) : g1_nodes(std::move(nodes)) {}
 	};
 
@@ -86,7 +91,6 @@ namespace sifting_internal {
 		std::unordered_map<Node*, int> node_to_g1;  // original Node* -> G1 index
 		std::vector<Block> blocks;
 		std::vector<int> pi;                        // pi[block_id] = position in B
-		int fixed_position_count = 0;               // number of blocks with fixed position (anchors)
 	};
 
 	// ── GlobalSifter ──────────────────────────────────────────────────────────────
@@ -94,12 +98,11 @@ namespace sifting_internal {
 	// Encapsulates all state and algorithms required to run a full global-sifting
 	// crossing-reduction pass over a range of layers [start_layer, end_layer].
 	struct GlobalSifter {
-		// sifting_rounds is only used to decide whether to run the Efficient
-		// Barycenter seeding pass below (when order && sifting_rounds > 10); it has
-		// no other effect here and is not stored. The actual sifting rounds are
-		// still driven by the sifting_rounds argument passed to runSifting().
-		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order = true, int sifting_rounds = 0);
-
+		// order: run the Efficient Barycenter pass after building the block order. Only the
+		// global minimization (minimizeCrossingsILP) asks for it; every other call keeps the
+		// current orders as its starting point.
+		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order = true,
+			CrossingSeed seed = CrossingSeed::KeepOrder);
 #ifdef GS_TEST
 		// No-op constructor for unit tests. Skips the full pipeline so tests can
 		// set S_ and B_ directly. layers_ is bound to a local dummy that is never
@@ -119,29 +122,38 @@ namespace sifting_internal {
 		// ── buildBlockOrder ──────────────────────────────────────────────────────────────────────────────
 		//
 		// As they suggest in the paper, to aim for better results in the sifting phase, it is
-		// important to have some good initial order. They also suggest a topological sort of
-		// blocks based on the lexicographical order determined by the layer number and the
-		// position of the block in that layer. My implementation takes this into account.
+		// important to have some good initial order: a topological sort of the blocks based on
+		// the lexicographical order determined by the layer number and the position of the block
+		// in that layer.
 		//
-		// The key to understand the initialization policy developed here is to understand
-		// how we locate nodes in layers when we have to relocate them. This happens in many
-		// situations, all which involve relocation of nodes or splitting of edges. In that
-		// case, what we do is adding the new nodes at the very end of the layer they belong to.
-		// This means that many crossings will appear because the targets are located far away
-		// from their sources. In order to mitigate this, we want to have an initial order where
-		// sources and targets are as close as possible.
-		// In this sense, we process the first layer with the seed order given by the original
-		// order of the nodes in LayerData, and then we sort each subsequent layer based on the
-		// order of the upper layer, with the function sortLayer. The hubs are located between
-		// the upper and lower layer and they are sorted with the function sortHubs based on the
-		// order of the upper and lower layers.
+		// The block list B fixes every layer's order at once (a layer reads its nodes in the order
+		// their blocks appear in B), so B has to be built so that it reproduces all of them. Simply
+		// appending blocks layer by layer does not: a dummy chain would be appended at its top
+		// layer and therefore land to the left of every block starting deeper, whatever that
+		// layer's order said. Instead, each G1 row (node rows and hub rows alike) contributes the
+		// rules "block of its i-th element before block of its (i+1)-th element", and B is a
+		// topological sort of those rules, ties broken by (top row, position in it). Rules can
+		// only contradict each other around guessed positions (two chains swapping sides between
+		// two layers); the stuck block with the smallest key is then taken first anyway, and
+		// sifting sorts out the rest.
 		//
-		// This initialization policy ensures, for example, that whenever the client wants to change
-		// the order between two nodes in the same layer, the minimizeCrossings function will not
-		// oppose to this change by taking the nodes back to their original order (where they get less
-		// crossings), but it will try to find a good order where the subgraph of the first node goes
-		// before the subgraph of the second node. This is the intended behaviour.
-		void buildBlockOrder(bool no_restriction = true);
+		// What the rows contain depends on the seed:
+		//   - KeepOrder: every layer as it currently is. Nodes that never had a position have
+		//     already been placed by Hypergraph::placeUnpositionedNodes, so the current orders
+		//     are the user's mental map and sifting only fixes what is actually wrong.
+		//   - FollowParents: every layer in [start_layer, end_layer] is first re-sorted so that
+		//     each node sits under its leftmost parent (sortByParents). This is what we want when
+		//     the client swaps two nodes of a layer by hand: minimizeCrossings does not take them
+		//     back to their original order, it rather tries to find a good order where the
+		//     subgraph of the first node goes before the subgraph of the second one.
+		// Hub rows are always sorted with sortHubs from the rows around them.
+		void buildBlockOrder(CrossingSeed seed = CrossingSeed::KeepOrder);
+
+		// ── buildBlockListFromRows ───────────────────────────────────────────────────────────────────
+		//
+		// The second half of buildBlockOrder: B as a topological sort of the current G1 row orders
+		// (see above). Also used by runEfficientBarycenter, which sorts the rows themselves.
+		void buildBlockListFromRows();
 
 		// ── runEfficientBarycenter ─────────────────────────────────────────────────────────────────────────
 		//
@@ -149,9 +161,15 @@ namespace sifting_internal {
 		// Graph Drawing by A. A. K. Ismaeel. This way, the block order produced by
 		// buildBlockOrder() is re-seeded and improved, which could potentially result
 		// in a better performance of Global Sifting.
+		// It works on the real G1 rows: every node present in a row (chain dummies
+		// passing through included) is sorted by the average position of its
+		// neighbours, positions being normalized by row size so rows of different
+		// sizes are comparable. Nodes of blocks that are not movable keep their
+		// place. B is then rebuilt from the rows (buildBlockListFromRows), and the
+		// result is only kept if it has fewer crossings than the order it started from.
 		void runEfficientBarycenter(int max_iterations = 100);
 
-		// Run up to sifting_rounds rounds of the global sifting sweep.
+		// Run up to sifting_rounds rounds of the global sifting sweep (movable blocks only).
 		void runSifting(int sifting_rounds);
 
 		// Solve an ILP to minimize crossings.
@@ -196,9 +214,8 @@ namespace sifting_internal {
 		// anchors: they appear in G1 but are never moved by the sifter.
 		// Nodes at end_layer_ + 1 (if any) are also included because the edges
 		// between end_layer_ and end_layer_ + 1 carry crossing information that is
-		// needed to evaluate swaps on end_layer_. Since we will only make use of the
-		// end_layer_ parameter for siftNodes function, it is not needed to declared 
-		// them as fixed anchors, they will surely not be moved by the sifter.
+		// needed to evaluate swaps on end_layer_. They are fixed too, since that
+		// layer is never written back.
 		void buildG1();
 
 		// ── Chain detection ───────────────────────────────────────────────────────
@@ -215,28 +232,32 @@ namespace sifting_internal {
 		//
 		// 1) Identify dummy chains -> one block each.
 		// 2) Every remaining G1 node -> singleton block.
+		// 3) Blocks reaching the anchor layer or end_layer_+1 are marked as not movable.
+		//    A chain crossing the range border is kept whole: its dummies inside the
+		//    range cannot be sifted, but other blocks can still move around them.
 		void buildBlocks();
 
 		// ── Layer and hub sorting ─────────────────────────────────────────────────
 		//
-		// We sort the original nodes in each layer based on the position of their
-		// parents in the upper layer, with ties broken by the original position in
-		// the LayerData. In order to do this, given some node A in the lower layer,
-		// we compute left(A) = minimum position of the parents of A in the upper
-		// layer. Then, we sort the nodes in the lower layer based on left(A) values
-		// in ascending order.
+		// sortByParents (FollowParents seed only) sorts the nodes of a layer based on
+		// the position of their parents in the upper layer: given some node A, left(A)
+		// = minimum position of the parents of A, and nodes are stably sorted by it.
+		// A root (no parent in the upper layer) takes the key of its left-hand
+		// neighbour, so it stays right after it instead of drifting to either end.
 		//
-		// We sort the hubs lexicographically based on the minimum position of their
-		// parents in the upper layer and in case of ties, based on the minimum
-		// position of their children in the lower layer. This order is well defined
-		// due to imposed restrictions on the hypergraph structure: if two hyperedges
-		// share a source, then they cannot share a target, and vice versa. Therefore,
-		// if two hubs share a parent, they cannot share a child, so there cannot be
-		// ties in both the upper and lower layer positions.
-		static std::unordered_map<Node*, int> sortLayer(
+		// We sort the hubs by their barycenter: the average position of all their
+		// endpoints (parents in the upper layer and children in the lower one), each
+		// position normalized by its row size so both rows weigh the same, and every
+		// endpoint counting once, since a side with more edges has more to cross.
+		// Ties are broken lexicographically by the minimum position of their parents
+		// and then by the minimum position of their children. This tie-break is well
+		// defined due to imposed restrictions on the hypergraph structure: if two
+		// hyperedges share a source, then they cannot share a target, and vice versa.
+		// Therefore, if two hubs share a parent, they cannot share a child, so there
+		// cannot be ties in both the upper and lower layer positions.
+		static void sortByParents(
 			const std::unordered_map<Node*, int>& upper_pos,
-			std::vector<NodePtr>& lower,
-			std::vector<HyperedgePtr>& edges);
+			std::vector<NodePtr>& lower);
 
 		void sortHubs(
 			const std::unordered_map<Node*, int>& upper_pos,
@@ -276,6 +297,7 @@ namespace sifting_internal {
 
 		// ── Sifting step ──────────────────────────────────────────────────────────
 		//
+		// Only called for movable blocks.
 		// Places A at the front of B', sweeps it right one swap at a time, records
 		// the position p* with the minimum cumulative crossing delta, then rotates
 		// A to p*.

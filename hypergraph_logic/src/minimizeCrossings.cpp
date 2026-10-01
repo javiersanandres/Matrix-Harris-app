@@ -1,6 +1,7 @@
 #include "GlobalSifting.h"
 #include <algorithm>
 #include <numeric>
+#include <optional>
 #include <unordered_map>
 #include <unordered_set>
 #include <set>
@@ -8,6 +9,7 @@
 #include <vector>
 #include <stdexcept>
 #include <climits>
+#include <queue>
 
 // ==================================================================================
 // Implementation of the Global Sifting algorithm as described in the paper below:
@@ -32,25 +34,15 @@ namespace sifting_internal {
 	// ── GlobalSifter: construction ────────────────────────────────────────────────
 
 	GlobalSifter::GlobalSifter(int start_layer, int end_layer,
-		std::map<int, LayerData>& layers, bool order, int sifting_rounds)
+		std::map<int, LayerData>& layers, bool order, CrossingSeed seed)
 		: start_layer_(start_layer)
 		, end_layer_(end_layer)
 		, layers_(layers)
 	{
 		buildG1();
 		buildBlocks();
-		buildBlockOrder(order);
-		// Only worth the extra pass when we're free to reorder every layer (no
-		// restriction) and there's a large-enough sifting budget ahead of us that
-		// a stronger seed will actually pay for itself.
-		if (order) {
-			if (sifting_rounds >= 10) {
-				runEfficientBarycenter();
-			}
-			else {
-				runEfficientBarycenter(10);
-			}
-		}
+		buildBlockOrder(seed);
+		if (order) runEfficientBarycenter();
 		sortAdjacencies();
 	}
 
@@ -58,10 +50,6 @@ namespace sifting_internal {
 
 	void GlobalSifter::buildG1() {
 		int anchor_layer = std::max(0, start_layer_ - 1);
-
-		if (start_layer_ >= 1) {
-			S_.fixed_position_count = static_cast<int>(layers_.at(anchor_layer).nodes.size());
-		}
 
 		// We also include the layer just below end_layer_ (if any) because the edges
 		// between end_layer_ and end_layer_+1 carry crossing information needed to
@@ -184,38 +172,42 @@ namespace sifting_internal {
 			}
 		}
 
+		// Blocks reaching the anchor layer (only when there is one, i.e. start_layer_ >= 1)
+		// or end_layer_+1 (only when it was read) are never sifted.
+		const int fixed_top = start_layer_ >= 1 ? 2 * (start_layer_ - 1) : INT_MIN;
+		const int fixed_bottom = layers_.count(end_layer_ + 1) > 0 ? 2 * (end_layer_ + 1) : INT_MAX;
+		for (auto& blk : S_.blocks) {
+			for (int g1_idx : blk.g1_nodes) {
+				const int row = S_.g1_nodes[g1_idx].g1_layer;
+				if (row == fixed_top || row == fixed_bottom) { blk.movable = false; break; }
+			}
+		}
+
 		S_.pi.resize(S_.blocks.size(), 0);
 	}
 
 	// ── Layer and hub sorting ─────────────────────────────────────────────────────
 
-	std::unordered_map<Node*, int> GlobalSifter::sortLayer(
+	void GlobalSifter::sortByParents(
 		const std::unordered_map<Node*, int>& upper_pos,
-		std::vector<NodePtr>& lower,
-		std::vector<HyperedgePtr>& edges)
+		std::vector<NodePtr>& lower)
 	{
 		std::unordered_map<Node*, int> left_of;
-		for (const auto& n : lower)
-			left_of[n.get()] = INT_MAX;
-
-		for (const auto& edge : edges) {
-			int min_src_pos = INT_MAX;
-			for (const auto& src : edge->getSources())
-				min_src_pos = std::min(min_src_pos, upper_pos.at(src.get()));
-			for (const auto& tgt : edge->getTargets())
-				left_of[tgt.get()] = std::min(left_of.at(tgt.get()), min_src_pos);
+		int previous_key = -1; // a root at the very left keeps its place
+		for (const auto& n : lower) {
+			int key = INT_MAX;
+			for (const auto& parent : n->getParents())
+				if (auto it = upper_pos.find(parent.get()); it != upper_pos.end())
+					key = std::min(key, it->second);
+			if (key == INT_MAX) key = previous_key; // root: stick to the left-hand neighbour
+			left_of[n.get()] = key;
+			previous_key = key;
 		}
 
 		std::stable_sort(lower.begin(), lower.end(),
 			[&](const NodePtr& a, const NodePtr& b) {
 				return left_of.at(a.get()) < left_of.at(b.get());
 			});
-
-		std::unordered_map<Node*, int> lower_pos;
-		for (int i = 0; i < static_cast<int>(lower.size()); i++)
-			lower_pos[lower[i].get()] = i;
-
-		return lower_pos;
 	}
 
 	void GlobalSifter::sortHubs(
@@ -223,84 +215,125 @@ namespace sifting_internal {
 		const std::unordered_map<Node*, int>& lower_pos,
 		int layer)
 	{
+		auto row = S_.g1_layers.find(layer);
+		if (row == S_.g1_layers.end()) return;
+		std::vector<int>& hub_indices = row->second;
 
-		if (!S_.g1_layers.contains(layer)) {
-			return;
+		// (barycenter, leftmost parent, leftmost child) for every hub. Positions are
+		// normalized by row size so both rows weigh the same, and every endpoint counts
+		// once: a side with more edges crosses more, so it pulls harder.
+		struct HubKey { double bary; int min_parent; int min_child; };
+		const double upper_size = static_cast<double>(std::max<size_t>(upper_pos.size(), 1));
+		const double lower_size = static_cast<double>(std::max<size_t>(lower_pos.size(), 1));
+		std::unordered_map<int, HubKey> keys;
+		for (int hub : hub_indices) {
+			HubKey key{ 0.0, INT_MAX, INT_MAX };
+			double sum = 0.0;
+			int count = 0;
+			for (int p : S_.g1_in[hub]) {
+				const int pos = upper_pos.at(S_.g1_nodes[p].original);
+				key.min_parent = std::min(key.min_parent, pos);
+				sum += (pos + 0.5) / upper_size;
+				++count;
+			}
+			for (int c : S_.g1_out[hub]) {
+				const int pos = lower_pos.at(S_.g1_nodes[c].original);
+				key.min_child = std::min(key.min_child, pos);
+				sum += (pos + 0.5) / lower_size;
+				++count;
+			}
+			key.bary = count > 0 ? sum / count : 0.0;
+			keys[hub] = key;
 		}
-		std::vector<int>& hub_indices = S_.g1_layers.at(layer);
 
 		std::sort(hub_indices.begin(), hub_indices.end(),
 			[&](int idx_a, int idx_b) {
-				int min_parent_a = INT_MAX;
-				for (const auto& p : S_.g1_in[idx_a])
-					min_parent_a = std::min(min_parent_a, upper_pos.at(S_.g1_nodes[p].original));
-				int min_parent_b = INT_MAX;
-				for (const auto& p : S_.g1_in[idx_b])
-					min_parent_b = std::min(min_parent_b, upper_pos.at(S_.g1_nodes[p].original));
-				if (min_parent_a != min_parent_b) return min_parent_a < min_parent_b;
-
-				int min_child_a = INT_MAX;
-				for (const auto& c : S_.g1_out[idx_a])
-					min_child_a = std::min(min_child_a, lower_pos.at(S_.g1_nodes[c].original));
-				int min_child_b = INT_MAX;
-				for (const auto& c : S_.g1_out[idx_b])
-					min_child_b = std::min(min_child_b, lower_pos.at(S_.g1_nodes[c].original));
-
-				return min_child_a < min_child_b;
+				const HubKey& a = keys.at(idx_a);
+				const HubKey& b = keys.at(idx_b);
+				if (a.bary != b.bary) return a.bary < b.bary;
+				if (a.min_parent != b.min_parent) return a.min_parent < b.min_parent;
+				return a.min_child < b.min_child;
 			});
 	}
 
 	// ── buildBlockOrder ───────────────────────────────────────────────────────────
 
-	void GlobalSifter::buildBlockOrder(bool no_restriction) {
-		int anchor_layer = std::max(0, start_layer_ - 1);
-		int num_blocks = static_cast<int>(S_.blocks.size());
-		B_.clear();
-		B_.reserve(num_blocks);
+	void GlobalSifter::buildBlockOrder(CrossingSeed seed) {
+		const int anchor_layer = std::max(0, start_layer_ - 1);
+		const int read_until = (layers_.count(end_layer_ + 1) > 0) ? end_layer_ + 1 : end_layer_;
 
-		std::unordered_set<int> visited;
-		std::unordered_map<Node*, int> upper_layer_order;
-		std::unordered_map<Node*, int> lower_layer_order;
+		// 1. Rows: every node row takes its layer's order (re-sorted under the parents first
+		//    when asked, only inside the range), and every hub row is sorted from its neighbours.
+		std::unordered_map<Node*, int> upper_pos;
+		for (auto& [layer, data] : layers_) {
+			if (layer < anchor_layer) continue;
+			if (layer > read_until) break;
 
-		// Seed order on the anchor layer
-		int pos = 0;
-		for (const auto& node : layers_.at(anchor_layer).nodes)
-			upper_layer_order[node.get()] = pos++;
+			if (seed == CrossingSeed::FollowParents && layer > anchor_layer && layer <= end_layer_)
+				sortByParents(upper_pos, data.nodes);
 
-		// Insert anchor-layer blocks first, in their original order.
-		for (const auto& node : layers_.at(anchor_layer).nodes) {
-			int node_block_id = S_.g1_nodes[S_.node_to_g1.at(node.get())].block_id;
-			B_.push_back(node_block_id);
-			visited.insert(node_block_id);
+			std::unordered_map<Node*, int> lower_pos;
+			for (int i = 0; i < static_cast<int>(data.nodes.size()); i++)
+				lower_pos[data.nodes[i].get()] = i;
+
+			if (auto row = S_.g1_layers.find(2 * layer); row != S_.g1_layers.end()) {
+				row->second.clear();
+				for (const auto& node : data.nodes)
+					row->second.push_back(S_.node_to_g1.at(node.get()));
+			}
+			if (layer > anchor_layer)
+				sortHubs(upper_pos, lower_pos, 2 * layer - 1);
+
+			upper_pos = std::move(lower_pos);
 		}
 
-		std::vector<HyperedgePtr> incoming_edges = layers_.at(anchor_layer).outgoing_edges;
-		for (auto& [layer, data] : layers_) {
-			if (layer <= anchor_layer) continue;
-			if (layer > end_layer_ + 1) break;
+		// 2. B from the rows.
+		buildBlockListFromRows();
+	}
 
-			if (no_restriction) {
-				lower_layer_order = sortLayer(upper_layer_order, data.nodes, incoming_edges);
+	// ── buildBlockListFromRows ────────────────────────────────────────────────────
+
+	void GlobalSifter::buildBlockListFromRows() {
+		// Topological sort of "left neighbour's block before right neighbour's block"
+		// over every row, ties broken by (top row, position in it).
+		const int num_blocks = static_cast<int>(S_.blocks.size());
+		std::vector<std::pair<int, int>> key(num_blocks, { INT_MAX, INT_MAX });
+		std::vector<std::vector<int>> successors(num_blocks);
+		std::vector<int> pending(num_blocks, 0);
+		for (const auto& [row, ids] : S_.g1_layers) {
+			for (int i = 0; i < static_cast<int>(ids.size()); i++) {
+				const int bid = S_.g1_nodes[ids[i]].block_id;
+				key[bid] = std::min(key[bid], std::pair<int, int>{ row, i });
+				if (i > 0) {
+					successors[S_.g1_nodes[ids[i - 1]].block_id].push_back(bid);
+					pending[bid]++;
+				}
 			}
-			else { // We are constrained to keep the original order of the nodes in this layer.
-				for (int i = 0; i < static_cast<int>(data.nodes.size()); i++)
-					lower_layer_order[data.nodes[i].get()] = i;
+		}
 
+		using Entry = std::pair<std::pair<int, int>, int>; // (key, block)
+		std::priority_queue<Entry, std::vector<Entry>, std::greater<Entry>> ready;
+		for (int bid = 0; bid < num_blocks; bid++)
+			if (pending[bid] == 0) ready.push({ key[bid], bid });
+
+		std::vector<char> placed(num_blocks, 0);
+		B_.clear();
+		B_.reserve(num_blocks);
+		while (static_cast<int>(B_.size()) < num_blocks) {
+			if (ready.empty()) {
+				// Contradicting rows (a cycle): take the stuck block with the smallest key.
+				int best = -1;
+				for (int bid = 0; bid < num_blocks; bid++)
+					if (!placed[bid] && (best < 0 || key[bid] < key[best])) best = bid;
+				ready.push({ key[best], best });
 			}
-			sortHubs(upper_layer_order, lower_layer_order, 2 * layer - 1);
-
-			for (const auto& hub_id : S_.g1_layers[2 * layer - 1]) {
-				int block_id = S_.g1_nodes.at(hub_id).block_id;
-				if (visited.insert(block_id).second) B_.push_back(block_id);
-			}
-
-			for (const auto& node : data.nodes) {
-				int block_id = S_.g1_nodes.at(S_.node_to_g1.at(node.get())).block_id;
-				if (visited.insert(block_id).second) B_.push_back(block_id);
-			}
-
-			upper_layer_order = lower_layer_order;
-			incoming_edges = data.outgoing_edges;
+			const int bid = ready.top().second;
+			ready.pop();
+			if (placed[bid]) continue;
+			placed[bid] = 1;
+			B_.push_back(bid);
+			for (int next : successors[bid])
+				if (!placed[next] && --pending[next] == 0) ready.push({ key[next], next });
 		}
 	}
 
@@ -308,63 +341,52 @@ namespace sifting_internal {
 	// ── runEfficientBarycenter ────────────────────────────────────────────────────
 
 	void GlobalSifter::runEfficientBarycenter(int max_iterations) {
-		int nb = static_cast<int>(B_.size());
-		if (nb == 0) return;
+		if (B_.empty()) return;
 
-		struct Chunk { int begin, end; };
-		std::vector<Chunk> chunks;
-		for (int i = 0; i < nb; ) {
-			int layer = S_.g1_nodes[S_.blocks[B_[i]].upper()].g1_layer;
-			int j = i + 1;
-			while (j < nb && S_.g1_nodes[S_.blocks[B_[j]].upper()].g1_layer == layer) j++;
-			chunks.push_back({ i, j });
-			i = j;
-		}
+		// The order we were given is the reference: the result is only kept if it is better.
+		const BlockList original = B_;
+		const int original_crossings = countCrossings(); // also lays every row out in B's order
 
-		// x[block_id]: current coordinate, always a rank local to the block's own chunk.
-		std::vector<double> x(S_.blocks.size(), 0.0);
-		for (const auto& ch : chunks)
-			for (int k = ch.begin; k < ch.end; k++)
-				x[B_[k]] = static_cast<double>(k - ch.begin);
+		// Normalized position of every G1 node in its row, in (0, 1), so that positions
+		// taken from rows of different sizes can be averaged together.
+		std::vector<double> x(S_.g1_nodes.size(), 0.0);
+		auto locate = [&](const std::vector<int>& ids) {
+			const double size = static_cast<double>(ids.size());
+			for (int i = 0; i < static_cast<int>(ids.size()); i++)
+				x[ids[i]] = (i + 0.5) / size;
+		};
+		for (const auto& [row, ids] : S_.g1_layers) locate(ids);
 
-		auto blockOf = [&](int g1_idx) { return S_.g1_nodes[g1_idx].block_id; };
+		auto mean = [&](const std::vector<int>& ids) -> std::optional<double> {
+			if (ids.empty()) return std::nullopt;
+			double sum = 0.0;
+			for (int id : ids) sum += x[id];
+			return sum / static_cast<double>(ids.size());
+		};
 
 		for (int iter = 0; iter < max_iterations; iter++) {
 			bool changed = false;
 
-			for (const auto& ch : chunks) {
-				// The anchor chunk (if any) is always first and must never move;
-				// its blocks are still read as neighbours below, just not reordered.
-				if (ch.begin < S_.fixed_position_count) continue;
+			for (auto& [row, ids] : S_.g1_layers) {
+				// Every node present in the row takes part, dummies of chains passing through
+				// included (their neighbours are the chain's own nodes, which keeps it straight).
+				// Nodes of blocks that are not movable keep their place.
+				std::vector<int> slots;
+				for (int i = 0; i < static_cast<int>(ids.size()); i++)
+					if (S_.blocks[S_.g1_nodes[ids[i]].block_id].movable) slots.push_back(i);
 
-				int size = ch.end - ch.begin;
+				const int size = static_cast<int>(slots.size());
+				if (size < 2) continue;
+
 				std::vector<double> bary(size);
 				for (int k = 0; k < size; k++) {
-					Block& blk = S_.blocks[B_[ch.begin + k]];
-					const std::vector<int>& parents = S_.g1_in[blk.upper()];
-					const std::vector<int>& children = S_.g1_out[blk.lower()];
-					int d_minus = static_cast<int>(parents.size());
-					int d_plus = static_cast<int>(children.size());
-
-					if (d_minus == 0 && d_plus == 0) {
-						bary[k] = x[B_[ch.begin + k]]; // isolated: don't move it
-					}
-					else if (d_minus == 0) {
-						double sum = 0.0;
-						for (int c : children) sum += x[blockOf(c)];
-						bary[k] = sum / d_plus;
-					}
-					else if (d_plus == 0) {
-						double sum = 0.0;
-						for (int p : parents) sum += x[blockOf(p)];
-						bary[k] = sum / d_minus;
-					}
-					else {
-						double sum_p = 0.0, sum_c = 0.0;
-						for (int p : parents) sum_p += x[blockOf(p)];
-						for (int c : children) sum_c += x[blockOf(c)];
-						bary[k] = sum_p / (2.0 * d_minus) + sum_c / (2.0 * d_plus);
-					}
+					const int g1_idx = ids[slots[k]];
+					const auto up = mean(S_.g1_in[g1_idx]);
+					const auto down = mean(S_.g1_out[g1_idx]);
+					if (up && down) bary[k] = (*up + *down) / 2.0;
+					else if (up)    bary[k] = *up;
+					else if (down)  bary[k] = *down;
+					else            bary[k] = x[g1_idx]; // isolated: don't move it
 				}
 
 				std::vector<int> order(size);
@@ -376,16 +398,22 @@ namespace sifting_internal {
 					if (order[k] != k) changed = true;
 				}
 
-				std::vector<int> new_chunk(size);
+				std::vector<int> sorted(size);
 				for (int k = 0; k < size; k++)
-					new_chunk[k] = B_[ch.begin + order[k]];
-				for (int k = 0; k < size; k++) {
-					B_[ch.begin + k] = new_chunk[k];
-					x[new_chunk[k]] = static_cast<double>(k);
-				}
+					sorted[k] = ids[slots[order[k]]];
+				for (int k = 0; k < size; k++)
+					ids[slots[k]] = sorted[k];
+				locate(ids);
 			}
 
 			if (!changed) break;
+		}
+
+		// Rows sorted on their own may disagree about a chain; the merge settles it.
+		buildBlockListFromRows();
+		if (countCrossings() > original_crossings) {
+			B_ = original;
+			orderLayersByBlockOrder();
 		}
 	}
 
@@ -560,13 +588,11 @@ namespace sifting_internal {
 		int numblocks = static_cast<int>(B_.size());
 
 		int current_pos = S_.pi[a_id];
-		std::rotate(B_.begin() + S_.fixed_position_count,
-			B_.begin() + current_pos,
-			B_.begin() + current_pos + 1);
+		std::rotate(B_.begin(), B_.begin() + current_pos, B_.begin() + current_pos + 1);
 		sortAdjacencies();
 
-		int chi = 0, chi_star = 0, p_star = S_.fixed_position_count;
-		for (int p = S_.fixed_position_count + 1; p < numblocks; p++) {
+		int chi = 0, chi_star = 0, p_star = 0;
+		for (int p = 1; p < numblocks; p++) {
 			chi += siftingSwap(a_id, B_[p]);
 			std::swap(B_[p - 1], B_[p]);
 			if (chi < chi_star) { chi_star = chi; p_star = p; }
@@ -583,11 +609,10 @@ namespace sifting_internal {
 	// ── runSifting ────────────────────────────────────────────────────────────────
 
 	void GlobalSifter::runSifting(int sifting_rounds) {
-		int numblocks = static_cast<int>(B_.size());
 		for (int round = 0; round < sifting_rounds; round++) {
 			BlockList snapshot = B_;
-			for (int i = S_.fixed_position_count; i < numblocks; i++)
-				siftingStep(snapshot[i]);
+			for (int bid : snapshot)
+				if (S_.blocks[bid].movable) siftingStep(bid);
 		}
 	}
 
@@ -629,7 +654,7 @@ namespace sifting_internal {
 				B_ = std::move(saved_B);
 			}
 
-			if (pos == S_.fixed_position_count) break;
+			if (pos == 0) break;
 			if (movable_set.count(B_[pos - 1])) break;
 
 			chi += siftingSwap(B_[pos - 1], a_id);
@@ -669,7 +694,7 @@ namespace sifting_internal {
 			auto it = S_.node_to_g1.find(node);
 			if (it == S_.node_to_g1.end()) continue;
 			int block_id = S_.g1_nodes[it->second].block_id;
-			if (S_.pi[block_id] >= S_.fixed_position_count)
+			if (S_.blocks[block_id].movable)
 				movable_set.insert(block_id);
 		}
 		if (movable_set.empty()) return;
@@ -680,7 +705,7 @@ namespace sifting_internal {
 				if (S_.g1_nodes[hub_g1].original != nullptr) continue;
 				int hub_bid = S_.g1_nodes[hub_g1].block_id;
 				if (movable_set.count(hub_bid)) continue;
-				if (S_.pi[hub_bid] < S_.fixed_position_count) continue;
+				if (!S_.blocks[hub_bid].movable) continue;
 				auto all_movable = [&](const std::vector<int>& nb) {
 					for (int n : nb)
 						if (!movable_set.count(S_.g1_nodes[n].block_id)) return false;
@@ -695,7 +720,7 @@ namespace sifting_internal {
 		//
 		// Stable-partition so fixed blocks keep their relative order, then movable
 		// blocks fill the tail in their current relative order.
-		std::stable_partition(B_.begin() + S_.fixed_position_count, B_.end(),
+		std::stable_partition(B_.begin(), B_.end(),
 			[&](int bid) { return !movable_set.count(bid); });
 		sortAdjacencies();
 
@@ -715,7 +740,7 @@ namespace sifting_internal {
 		// the user's mental map.
 		double combinations = 1.0;
 		for (int i = 0; i < mb; i++) {
-			combinations *= static_cast<double>(nb - S_.fixed_position_count - i);
+			combinations *= static_cast<double>(nb - i);
 			combinations /= static_cast<double>(i + 1);
 			if (combinations > 1e6) {
 				// Treat all movable blocks as one composite block and sweep it left as a
@@ -725,7 +750,7 @@ namespace sifting_internal {
 				BlockList best_B = B_;
 				int chi = 0;
 
-				for (int k = nb - mb; k > S_.fixed_position_count; k--) {
+				for (int k = nb - mb; k > 0; k--) {
 					// Move the composite block one step left: swap each of its mb elements
 					// with the fixed block that just entered on the right.
 					for (int j = k; j < mb + k; j++) {
@@ -855,13 +880,21 @@ namespace hypergraph_logic {
 
 	// ── minimizeCrossings ────────────────────────────────────────────────────────
 	//
-	// Runs the global sifting algorithm over [start_layer, last_layer], writing
-	// the optimised order back to LayerData::nodes and returning the crossing count.
-	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer) {
+	// Runs the global sifting algorithm over [start_layer, end_layer] (the last layer
+	// when end_layer is -1), writing the optimised order back to LayerData::nodes and
+	// returning the crossing count.
+	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer, int end_layer, CrossingSeed seed) {
 		if (getLayers().empty()) return 0;
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
-		GlobalSifter sifter(start_layer, last_layer, layers_, true, sifting_rounds);
-		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
+		if (end_layer < 0 || end_layer > last_layer) end_layer = last_layer;
+		if (start_layer > end_layer) return 0;
+		placeUnpositionedNodes(start_layer, end_layer);
+		// No barycenter seeding here: it would reorder every layer, and inner calls are
+		// meant to keep the current orders as much as possible.
+		GlobalSifter sifter(start_layer, end_layer, layers_, false, seed);
+		// No need to sift if we are already optimal, but the seed order may differ from
+		// the layers (FollowParents), so it is still written back.
+		if (sifter.countCrossings() == 0) { sifter.writeBack(); return 0; }
 		sifter.runSifting(sifting_rounds);
 		sifter.writeBack();
 		return sifter.countCrossings();
@@ -881,6 +914,7 @@ namespace hypergraph_logic {
 	{
 		if (getLayers().empty() || nodes.empty()) return 0;
 
+		placeUnpositionedNodes(start_layer, end_layer);
 		GlobalSifter sifter(start_layer, end_layer, layers_, false);
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.siftNodes(nodes);

@@ -54,6 +54,12 @@ namespace app_logic {
 		void removeHypergraph(const std::string& id);
 		void moveHypergraph(const std::string& id, double click_x);
 
+		// ── removeComponent ───────────────────────────────────────────────────────
+		//
+		// Takes the connected component that contains box out of the joint (see
+		// JointGraphicalHypergraph::removeComponent). Undoable.
+		void removeComponent(const NodePtr& box);
+
 		// ── Moving up/down, and moving connected components ───────────────────────
 		//
 		// See JointGraphicalHypergraph's "Moving diagrams and connected

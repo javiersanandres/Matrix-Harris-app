@@ -123,7 +123,6 @@ namespace hypergraph_logic {
                     S.blocks.emplace_back(std::vector<int>{i});
                 }
                 S.pi.resize(n, 0);
-                S.fixed_position_count = 0;
                 return S;
             }
 
@@ -140,7 +139,6 @@ namespace hypergraph_logic {
                 BlockList& B_out)
             {
                 SiftState S;
-                S.fixed_position_count = 0;
 
                 // Upper nodes (g1_layer 0)
                 for (int i = 0; i < p; ++i) {
@@ -198,7 +196,6 @@ namespace hypergraph_logic {
             // Build corresponding Siftstate to Figure 1 of the paper.
             static SiftState buildPaperState() {
                 SiftState S;
-                S.fixed_position_count = 0;
 
                 for (int i = 0; i < 3; i++) {
                     S.g1_nodes.emplace_back(nullptr, 0);
@@ -984,7 +981,7 @@ namespace hypergraph_logic {
             TEST(SiftingStep, CrossedEdges_ChiStarMatchesCounting) {
                 BlockList B;
                 SiftState S = makeTwoLayerState(2, 2, { {0,1},{1,0} }, B);
-                verifySiftingStepChi(S, B, B[S.fixed_position_count]);
+                verifySiftingStepChi(S, B, B[0]);
             }
 
             TEST(SiftingStep, CrossedEdges_CrossingsNonIncreasing) {
@@ -1032,17 +1029,22 @@ namespace hypergraph_logic {
             TEST(SiftingStep, ChiStarMatchesCountingOnComplexGraph) {
                 BlockList B;
                 SiftState S = makeTwoLayerState(3, 3, { {0,2},{1,0},{2,1} }, B);
-                verifySiftingStepChi(S, B, B[S.fixed_position_count]);
+                verifySiftingStepChi(S, B, B[0]);
             }
 
-            TEST(SiftingStep, AnchorBlocksUnmoved) {
+            TEST(SiftingStep, FixedBlocksKeepTheirRelativeOrder) {
                 BlockList B;
                 SiftState S = makeTwoLayerState(2, 2, { {0,1},{1,0} }, B);
-                S.fixed_position_count = 1; // treat block B[0] as anchor
+                // The upper layer acts as an anchor: its blocks are never sifted.
+                const int first = B[0], second = B[1];
+                S.blocks[first].movable = false;
+                S.blocks[second].movable = false;
                 sortAdjacencies(S, B);
-                int anchor = B[0];
-                siftingStep(S, B, B[1]); // sift the second block
-                EXPECT_EQ(B[0], anchor) << "anchor block must stay at position 0";
+                BlockList snapshot = B;
+                for (int bid : snapshot)
+                    if (S.blocks[bid].movable) siftingStep(S, B, bid);
+                auto pos = [&](int bid) { return std::find(B.begin(), B.end(), bid) - B.begin(); };
+                EXPECT_LT(pos(first), pos(second)) << "fixed blocks must keep their relative order";
             }
 
             // ============================================================================
@@ -1199,31 +1201,29 @@ namespace hypergraph_logic {
                 int before = countTotalCrossings(S, B);
                 sortAdjacencies(S, B);
 
-                int numblocks = static_cast<int>(B.size());
                 for (int round = 0; round < 10; round++) {
                     int chi = 0;
                     BlockList snapshot = B;
-                    for (int i = S.fixed_position_count; i < numblocks; i++)
-                        chi += siftingStep(S, B, snapshot[i]);
+                    for (int bid : snapshot)
+                        if (S.blocks[bid].movable) chi += siftingStep(S, B, bid);
                 }
 
                 EXPECT_LE(countTotalCrossings(S, B), before) << "Should be able to reduce crossings";
             }
             TEST(CrossingMinimization, PaperExample2) {
                 SiftState S = buildPaperState();
-                S.fixed_position_count = 3; // treat blocks 0,1,2 as anchors
+                for (int i = 0; i < 3; ++i) S.blocks[i].movable = false; // treat blocks 0,1,2 as anchors
                 BlockList B;
                 for (int i = 0; i < static_cast<int>(S.blocks.size()); ++i)
                     B.push_back(i);
                 int before = countTotalCrossings(S, B);
                 sortAdjacencies(S, B);
 
-                int numblocks = static_cast<int>(B.size());
                 for (int round = 0; round < 10; round++) {
                     int chi = 0;
                     BlockList snapshot = B;
-                    for (int i = S.fixed_position_count; i < numblocks; i++)
-                        chi += siftingStep(S, B, snapshot[i]);
+                    for (int bid : snapshot)
+                        if (S.blocks[bid].movable) chi += siftingStep(S, B, bid);
                 }
 
                 EXPECT_LE(countTotalCrossings(S, B), before) << "Should be able to reduce crossings";
@@ -1300,12 +1300,11 @@ namespace hypergraph_logic {
                 int before = countTotalCrossings(S, B);
                 sortAdjacencies(S, B);
 
-                int numblocks = static_cast<int>(B.size());
                 for (int round = 0; round < 10; round++) {
                     int chi = 0;
                     BlockList snapshot = B;
-                    for (int i = S.fixed_position_count; i < numblocks; i++)
-                        chi += siftingStep(S, B, snapshot[i]);
+                    for (int bid : snapshot)
+                        if (S.blocks[bid].movable) chi += siftingStep(S, B, bid);
                 }
                 EXPECT_EQ(countTotalCrossings(S, B), 0) << "Should already be optimal with good initial order";
 
