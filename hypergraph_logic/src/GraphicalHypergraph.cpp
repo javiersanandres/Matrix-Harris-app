@@ -394,22 +394,10 @@ namespace hypergraph_logic {
 		}
 
 		if (!found) {
-			// Coordinate lies outside every existing layer's span: either above the
-			// shallowest layer (new shallowest layer, once a full LAYER_GAP clear of
-			// it; closer than that it still counts as the shallowest layer) or below
-			// the deepest layer (new deepest layer).
-			const double h_shallowest = layer_layout_.at(shallowest);
-			const double shallowest_upper = h_shallowest + getLayerHeight(shallowest) / 2.0 + LAYER_GAP;
-
-			if (new_y_coordinate > shallowest_upper) {
-				desired_layer = -1;          // brand-new shallowest layer
-			}
-			else if (new_y_coordinate > h_shallowest) {
-				desired_layer = shallowest;
-			}
-			else {
-				desired_layer = deepest + 1; // brand-new deepest layer
-			}
+			// Coordinate lies outside every existing layer's span, which reaches
+			// (H + LAYER_GAP) / 2 past the shallowest and the deepest layer alike:
+			// above it asks for a new shallowest layer, below it for a new deepest.
+			desired_layer = new_y_coordinate > layer_layout_.at(shallowest) ? -1 : deepest + 1;
 		}
 
 		return desired_layer;

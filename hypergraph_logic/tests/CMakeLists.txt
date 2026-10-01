@@ -19,6 +19,7 @@ add_executable(hypergraph_logic_tests
     test_highs_outcome.cpp
     test_line_style.cpp
     test_joint_diagrams.cpp
+    test_graph_blocks.cpp
 )
 
 target_include_directories(hypergraph_logic_tests

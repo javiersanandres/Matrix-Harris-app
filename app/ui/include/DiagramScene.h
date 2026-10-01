@@ -123,13 +123,14 @@ namespace ui {
         // of anything that moved fade back in once the boxes are nearly there.
         void rebuildAnimated(const std::unordered_map<hypergraph_logic::Node*, QPointF>& from);
 
-        // ── Moving a whole piece of the joint diagram ─────────────────────────────
+        // ── Moving a whole piece of the diagram ───────────────────────────────────
         //
-        // A diagram (not mixed with others) or a connected block, chosen from a
-        // box or connection menu: it is picked up by a grip at its top middle,
-        // which hops under the mouse and follows it, with a guide showing where
-        // it would land (see JointGraphicalHypergraph's placement); a click (or
-        // releasing a drag) drops it there, Esc or a right click puts it back.
+        // A block (connected component) of any diagram, or in the joint diagram a
+        // whole diagram that is not mixed with others, chosen from a box or
+        // connection menu: it is picked up by a grip at its top middle, which hops
+        // under the mouse and follows it, with a guide showing where it would land
+        // (see GraphicalHypergraph's "Blocks"); a click (or releasing a drag)
+        // drops it there, Esc or a right click puts it back.
         bool isMovingPiece() const { return piece_move_.has_value(); }
 
         // ── Signals emitted to MainWindow ────────────────────────────────────────
@@ -203,9 +204,9 @@ namespace ui {
         void updateBoxDrag(NodeItem* item);  // landing guide in the target layer
         void endBoxDrag();
 
-        // ── Moving a piece of the joint diagram ───────────────────────────────────
+        // ── Moving a piece of the diagram ─────────────────────────────────────────
         struct PieceMove {
-            std::string diagram_id;                   // empty: a connected block
+            std::string diagram_id;                   // empty: a block (joint only otherwise)
             hypergraph_logic::Node* anchor = nullptr; // a box of the block
             std::unordered_set<hypergraph_logic::Node*> nodes;
             std::vector<std::pair<double, double>> regions; // the others'
@@ -228,9 +229,9 @@ namespace ui {
         void cancelPieceMove();
         void endPieceMove(); // leaves the moving state without touching the graph
 
-        // What the joint diagram's menus can offer for the piece around a box.
+        // What the box and connection menus can offer for the piece around a box.
         struct PieceChoice {
-            std::string diagram_id;  // the box's diagram, when it is separable
+            std::string diagram_id;  // joint only: the box's diagram, when it is separable
             QString diagram_name;
             bool move_diagram = false;
             bool move_block = false;
@@ -269,6 +270,11 @@ namespace ui {
         // Scene y of a layer's row; beyond the existing layers, one layer gap
         // per layer above the first or below the last.
         double rowSceneY(int layer) const;
+        // Scene y of the line past which a box or block opens a new layer above
+        // (or below) everything: (H + LAYER_GAP) / 2 beyond the outermost row,
+        // H being that row's tallest box (see GraphicalHypergraph::layerForY).
+        // The new-layer guides are drawn on it, right where the cursor crosses.
+        double newLayerEdgeY(bool above) const;
 
         // Where the mouse is, in scene coordinates (of the editing view).
         QPointF cursorScenePos() const;

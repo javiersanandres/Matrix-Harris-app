@@ -250,10 +250,10 @@ namespace port_assignment_internal {
         if (node->isDummy()) return false; // a dummy has only one port; nothing to cross
         if (moving_right) {
             double next_port = (idx == static_cast<int>(ports.size()) - 1) ? node_x + node->getWidth() / 2.0 : ports[idx + 1].x;
-            return next_port < other_x;
+            return next_port <= other_x;
         }
         double prev_port = (idx == 0) ? node_x - node->getWidth() / 2.0 : ports[idx - 1].x;
-        return prev_port > other_x;
+        return prev_port >= other_x;
     }
 
     // ── Reduce horizontal jogs ──────────────────────────────────────────────────────────────

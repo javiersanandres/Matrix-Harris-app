@@ -167,6 +167,7 @@ target_sources(graphical_hypergraph
         horizontalCoordinates.cpp
         portAssignment.cpp
         GraphicalHypergraph.cpp
+        GraphicalHypergraphBlocks.cpp
         GraphicalHypergraphPersistence.cpp
         JointGraphicalHypergraph.cpp
         horizontalOrder.cpp
@@ -198,7 +199,7 @@ target_link_libraries(graphical_hypergraph
 # time, not that a license is actually usable on the machine that runs the
 # binary (that's checked at runtime, in horizontalOrder.cpp itself).
 if(Gurobi_FOUND)
-    #target_compile_definitions(graphical_hypergraph PRIVATE GUROBI_AVAILABLE)
+    target_compile_definitions(graphical_hypergraph PRIVATE GUROBI_AVAILABLE)
     target_include_directories(graphical_hypergraph PRIVATE ${Gurobi_INCLUDE_DIRS})
     target_link_libraries(graphical_hypergraph PRIVATE ${Gurobi_LIBRARIES})
 endif()

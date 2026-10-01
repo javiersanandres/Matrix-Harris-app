@@ -5,6 +5,9 @@
 #include <functional>
 #include <memory>
 #include <optional>
+#include <vector>
+#include <utility>
+#include <unordered_set>
 #include <string>
 
 using json = nlohmann::json;
@@ -154,10 +157,10 @@ namespace hypergraph_logic {
 		// If there were no shallowest layers the upper bound will be computed as:
 		//				h(layer) + (H(layer) + LAYER_GAP) / 2
 		// where H(layer) is the height of the layer's tallest node. A coordinate
-		// above h(shallowest) + H(shallowest) / 2 + LAYER_GAP requests a new
-		// shallowest layer (closer than that, above h(shallowest), it still maps
-		// to the shallowest layer); anything else outside every span, a new
-		// deepest one.
+		// above every span (past h(shallowest) + (H(shallowest) + LAYER_GAP) / 2)
+		// requests a new shallowest layer, and one below every span (past
+		// h(deepest) - (H(deepest) + LAYER_GAP) / 2) a new deepest one: the same
+		// half gap on both sides.
 		// The layer is chosen by layerForY.
 		//
 		void relocateNodeToLayer(const NodePtr& node, double new_y_coordinate, 
@@ -236,6 +239,68 @@ namespace hypergraph_logic {
 		// Throws std::runtime_error if the file cannot be opened or the JSON is
 		// malformed.
 		static GraphicalHypergraph fromJSON(const std::string& path);
+
+		// ============================================================================
+		// Blocks
+		//
+		// A block is a connected component: a maximal set of boxes linked by
+		// connections (dummies included). Its span is [min(x - width/2),
+		// max(x + width/2)] over its boxes, and the occupied regions are the union
+		// of all spans, merged into disjoint closed intervals. Both are computed
+		// from the current structure and layout on every call (linear in the size
+		// of the graph), so they always match whatever operation ran last.
+		//
+		// A block has no connection to anything outside it, so it can be removed,
+		// or moved as a whole, sideways and up or down:
+		//
+		//   - click_x: placement among the other blocks' regions. An x inside a
+		//     region goes right before that region if it is in its left half,
+		//     right after it otherwise (the exact middle goes after); any other x
+		//     is used as it is (placementPoint). In every layer the block's boxes
+		//     are inserted, as one run, between the boxes centred left of that
+		//     point and the rest.
+		//   - top_layer: the layer its shallowest box ends up in, keeping the
+		//     block's own shape. A negative value opens new layers above
+		//     everything (like relocateNodeToLayer(node, -1)); a value past the
+		//     deepest layer puts the block right below everything. Layers left
+		//     empty are closed up, so the block ends up level with the content
+		//     that was at top_layer.
+		//
+		// Only the vertical move takes top_layer; only the horizontal one, click_x
+		// (the block then keeps its current horizontal place, re-evaluated with
+		// the same rule in its new layers); the three-argument form does both.
+		// Afterwards the graph is laid out again (no crossing minimization nor
+		// bar-ordering MIP: a block's own crossings do not change), and every
+		// box's layer override is refreshed so the moved boxes keep their new
+		// layers under later operations. Removing closes up the layers left
+		// empty and lays the graph out again too.
+		//
+		// A box that is not in the graph throws std::invalid_argument, and so
+		// does a vertical-only move that would leave the block where it is.
+		// ============================================================================
+
+		struct Block {
+			std::vector<Node*> nodes;  // dummies included
+			double left = 0.0;         // span (from the current layout)
+			double right = 0.0;
+		};
+
+		std::vector<Block> getBlocks() const;
+		std::vector<std::pair<double, double>> getOccupiedRegions() const;
+
+		// The regions of every block but those of group (what a group being moved
+		// is placed among), and where placement puts a group dropped at click_x
+		// given such regions. For previews of a move.
+		std::vector<std::pair<double, double>> getOccupiedRegionsExcluding(const std::unordered_set<Node*>& group) const;
+		static double placementPoint(const std::vector<std::pair<double, double>>& regions, double click_x);
+
+		// Boxes (dummies included) of the block that contains box.
+		std::unordered_set<Node*> getComponentNodes(const Node* box) const { return componentNodesOf(box); }
+
+		void moveComponent(const Node* box, double click_x);
+		void moveComponentToLayer(const Node* box, int top_layer);
+		void moveComponent(const Node* box, double click_x, int top_layer);
+		void removeComponent(const Node* box);
 
 		// ── clone ─────────────────────────────────────────────────────────────────
 		//
@@ -394,6 +459,37 @@ namespace hypergraph_logic {
 		// nullopt when no neighbour gives anything.
 		//
 		std::optional<double> guessX(const Node* node, const std::unordered_map<const Node*, double>& guessed) const;
+
+		// ── Blocks: helpers (see "Blocks") ────────────────────────────────────────
+
+		// Blocks of the current graph, ignoring some boxes.
+		std::vector<Block> blocksExcluding(const std::unordered_set<Node*>& excluded) const;
+		static std::vector<std::pair<double, double>> mergeSpans(std::vector<std::pair<double, double>> spans);
+
+		// Boxes of the block that contains box (throws if it is not in the graph).
+		std::unordered_set<Node*> componentNodesOf(const Node* box) const;
+
+		// Moves a closed group of boxes (no connection to any box outside it): its
+		// shallowest box to top_layer, placed at click_x among the rest. A missing
+		// click_x keeps the group's current horizontal place; a missing top_layer,
+		// its layers.
+		void moveGroup(const std::unordered_set<Node*>& group,
+			std::optional<double> click_x, std::optional<int> top_layer);
+
+		// Takes a closed group of boxes out of the graph, with every hyperedge
+		// touching it, then closes up empty layers and lays the graph out again.
+		void removeGroup(const std::unordered_set<Node*>& doomed);
+
+		// Called by removeGroup right before the boxes go (they are still alive
+		// and in the graph), for subclasses that keep data about boxes.
+		virtual void beforeRemovingBoxes(const std::unordered_set<Node*>& /*doomed*/) {}
+
+		// Sets every real box's layer override from the depth rule: its own
+		// layer when it sits deeper than the rule would put it, -1 otherwise.
+		void refreshLayerOverrides();
+
+		// Makes sure every box has coordinates (needed to place by x).
+		void ensureLayout();
 
 	private:
 		// ── ID generation ─────────────────────────────────────────────────────────

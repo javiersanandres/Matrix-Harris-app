@@ -229,6 +229,31 @@ namespace app_logic {
             EXPECT_EQ(named(jed, "A"), nullptr);
         }
 
+        TEST(History, MovingAndRemovingABlockOfADiagramAreUndoable) {
+            HypergraphEditor ed(GraphicalHypergraph("g"));
+            ed.createNode("A", 0, 0, nullptr);
+            ed.createNode("B", 0, 1, nullptr);
+            auto order = [&] {
+                std::string s;
+                for (const auto& n : ed.getNodesAt(0)) s += n->getName();
+                return s;
+            };
+            ASSERT_EQ(order(), "AB");
+
+            ed.moveComponent(named(ed, "B"), -std::numeric_limits<double>::infinity());
+            EXPECT_EQ(order(), "BA");
+            ed.removeComponent(named(ed, "A"));
+            EXPECT_EQ(order(), "B");
+
+            ed.undo();
+            EXPECT_EQ(order(), "BA");
+            ed.undo();
+            EXPECT_EQ(order(), "AB");
+            ed.redo();
+            ed.redo();
+            EXPECT_EQ(order(), "B");
+        }
+
         // ── Saved state ─────────────────────────────────────────────────────────
 
         TEST(SavedState, UndoingEveryChangeGoesBackToTheSavedState) {

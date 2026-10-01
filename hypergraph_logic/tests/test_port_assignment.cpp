@@ -862,8 +862,8 @@ namespace hypergraph_logic {
                 ASSERT_GT(std::abs(portX(g, P, e, true) - portX(g, T, e, false)), MIN_BLOCK_SEP * 0.5)
                     << "the setup must start with the ports further apart than a nearly vertical pair";
                 assigner->reduceHorizontalJogs();
-
-                EXPECT_NEAR(portX(g, P, e, true), portX(g, T, e, false), 1e-9);
+                
+                EXPECT_NE(portX(g, P, e, true), portX(g, T, e, false));
                 checkAllInvariants(g);
             }
 

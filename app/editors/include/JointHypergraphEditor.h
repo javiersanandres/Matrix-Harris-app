@@ -54,21 +54,12 @@ namespace app_logic {
 		void removeHypergraph(const std::string& id);
 		void moveHypergraph(const std::string& id, double click_x);
 
-		// ── removeComponent ───────────────────────────────────────────────────────
+		// ── Moving up/down ────────────────────────────────────────────────────────
 		//
-		// Takes the connected component that contains box out of the joint (see
-		// JointGraphicalHypergraph::removeComponent). Undoable.
-		void removeComponent(const NodePtr& box);
-
-		// ── Moving up/down, and moving connected components ───────────────────────
-		//
-		// See JointGraphicalHypergraph's "Moving diagrams and connected
-		// components". A component is named by any of its boxes. Undoable.
+		// See JointGraphicalHypergraph's "Moving diagrams". Undoable. Blocks are
+		// moved and removed through HypergraphEditorBase.
 		void moveHypergraphToLayer(const std::string& id, int top_layer);
 		void moveHypergraph(const std::string& id, double click_x, int top_layer);
-		void moveComponent(const NodePtr& box, double click_x);
-		void moveComponentToLayer(const NodePtr& box, int top_layer);
-		void moveComponent(const NodePtr& box, double click_x, int top_layer);
 
 		// ── canUndo / canRedo predicates ──────────────────────────────────────────
 		bool canUndo() const { return !past_.empty(); }

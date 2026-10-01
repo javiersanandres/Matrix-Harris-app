@@ -49,6 +49,7 @@ set(BENCHMARK_COMMON_SOURCES
     ${HYPERGRAPH_SRC_DIR}/Hyperedge.cpp
     ${HYPERGRAPH_SRC_DIR}/Hypergraph.cpp
     ${HYPERGRAPH_SRC_DIR}/GraphicalHypergraph.cpp
+    ${HYPERGRAPH_SRC_DIR}/GraphicalHypergraphBlocks.cpp
     ${HYPERGRAPH_SRC_DIR}/GraphicalHypergraphPersistence.cpp
     ${HYPERGRAPH_SRC_DIR}/JointGraphicalHypergraph.cpp
     ${UI_DIR}/src/HypergraphRenderer.cpp

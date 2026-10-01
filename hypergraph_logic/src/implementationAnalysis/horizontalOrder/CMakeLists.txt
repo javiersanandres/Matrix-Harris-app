@@ -49,6 +49,7 @@ add_executable(horizontalOrderResults
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hyperedge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hypergraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraph.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraphBlocks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraphPersistence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../portAssignment.cpp
 )

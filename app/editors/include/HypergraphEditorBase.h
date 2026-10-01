@@ -539,6 +539,36 @@ namespace app_logic {
 			commitSnapshot(std::move(saved));
 		}
 
+		// ── Blocks: moving and removing one ───────────────────────────────────────
+		//
+		// The block (connected component) that contains box, moved sideways to
+		// click_x, up or down to top_layer, or both, or removed with all its boxes
+		// and connections (see GraphicalHypergraph's "Blocks"; they lay the graph
+		// out themselves). Undoable.
+		void moveComponent(const NodePtr& box, double click_x) {
+			auto saved = derived().takeSnapshot();
+			derived().graph().moveComponent(box.get(), click_x);
+			commitSnapshot(std::move(saved));
+		}
+
+		void moveComponentToLayer(const NodePtr& box, int top_layer) {
+			auto saved = derived().takeSnapshot();
+			derived().graph().moveComponentToLayer(box.get(), top_layer);
+			commitSnapshot(std::move(saved));
+		}
+
+		void moveComponent(const NodePtr& box, double click_x, int top_layer) {
+			auto saved = derived().takeSnapshot();
+			derived().graph().moveComponent(box.get(), click_x, top_layer);
+			commitSnapshot(std::move(saved));
+		}
+
+		void removeComponent(const NodePtr& box) {
+			auto saved = derived().takeSnapshot();
+			derived().graph().removeComponent(box.get());
+			commitSnapshot(std::move(saved));
+		}
+
 		// ── minimizeCrossings ("Minimize (fast)") ───────────────────────────────────────
 		//
 		// Clones the graph, runs GraphicalHypergraph::minimizeCrossings + computeLayout(), 

@@ -640,10 +640,9 @@ namespace hypergraph_logic {
             // ── LayerForY ─────────────────────────────────────────────────────────────
             //
             // Layer 0: [A]   Layer 1: [B]    A -> B.
-            // Each layer's own y maps to it; far above the top layer asks for a new
-            // shallowest layer (-1), far below the bottom one for a new deepest (2).
-            // Just above the top layer, but less than a full LAYER_GAP clear of its
-            // nodes, still maps to the top layer.
+            // Each layer's own y maps to it. The top and bottom layers reach
+            // (H + LAYER_GAP) / 2 past their own y; above that asks for a new
+            // shallowest layer (-1), below it for a new deepest one (2).
 
             TEST(LayerForY, MapsLayerSpansAndNewLayers) {
                 TestGraph g("layer_for_y");
@@ -653,14 +652,17 @@ namespace hypergraph_logic {
 
                 const double y0 = g.layerLayout().at(0);
                 const double y1 = g.layerLayout().at(1);
-                const double top = y0 + NODE_HEIGHT / 2.0;
+                const double reach = (NODE_HEIGHT + LAYER_GAP) / 2.0;
 
                 EXPECT_EQ(g.layerForY(y0), 0);
                 EXPECT_EQ(g.layerForY(y1), 1);
                 EXPECT_EQ(g.layerForY((y0 + y1) / 2.0 + 1.0), 0);
                 EXPECT_EQ(g.layerForY((y0 + y1) / 2.0 - 1.0), 1);
-                EXPECT_EQ(g.layerForY(top + LAYER_GAP + 1.0), -1);
-                EXPECT_EQ(g.layerForY(top + LAYER_GAP * 0.75), 0);
+                EXPECT_EQ(g.layerForY(y0 + reach - 1.0), 0);
+                EXPECT_EQ(g.layerForY(y0 + reach + 1.0), -1);
+                EXPECT_EQ(g.layerForY(y1 - reach + 1.0), 1);
+                EXPECT_EQ(g.layerForY(y1 - reach - 1.0), 2);
+                EXPECT_EQ(g.layerForY(y0 + 10.0 * NODE_HEIGHT), -1);
                 EXPECT_EQ(g.layerForY(y1 - 10.0 * NODE_HEIGHT), 2);
             }
 

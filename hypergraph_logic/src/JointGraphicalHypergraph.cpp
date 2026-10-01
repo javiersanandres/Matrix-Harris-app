@@ -100,108 +100,18 @@ namespace hypergraph_logic {
 		return it->second;
 	}
 
-	std::vector<JointGraphicalHypergraph::Component>
-		JointGraphicalHypergraph::componentsExcluding(const std::unordered_set<Node*>& excluded) const
-	{
-		// Union-find over the boxes, joining every box of each hyperedge
-		// (originals and their segments, so dummies too).
-		std::unordered_map<Node*, int> index;
-		std::vector<Node*> nodes;
-		for (const auto& n : all_nodes_) {
-			if (excluded.count(n.get())) continue;
-			index[n.get()] = static_cast<int>(nodes.size());
-			nodes.push_back(n.get());
-		}
-		std::vector<int> parent(nodes.size());
-		for (size_t i = 0; i < parent.size(); ++i) parent[i] = static_cast<int>(i);
-		auto find = [&](int v) {
-			while (parent[v] != v) v = parent[v] = parent[parent[v]];
-			return v;
-		};
-		auto join = [&](const Hyperedge& e) {
-			int first = -1;
-			auto visit = [&](const NodePtr& n) {
-				auto it = index.find(n.get());
-				if (it == index.end()) return;
-				if (first < 0) first = it->second;
-				else parent[find(it->second)] = find(first);
-			};
-			for (const auto& s : e.getSources()) visit(s);
-			for (const auto& t : e.getTargets()) visit(t);
-		};
-		for (const auto& [orig, segs] : all_hyperedges_) {
-			join(*orig);
-			for (const auto& seg : segs) join(*seg);
-		}
-
-		std::unordered_map<int, size_t> component_of_root;
-		std::vector<Component> components;
-		for (size_t i = 0; i < nodes.size(); ++i) {
-			const int root = find(static_cast<int>(i));
-			auto [it, is_new] = component_of_root.emplace(root, components.size());
-			if (is_new) {
-				components.emplace_back();
-				components.back().left = std::numeric_limits<double>::infinity();
-				components.back().right = -std::numeric_limits<double>::infinity();
-			}
-			Component& c = components[it->second];
-			Node* n = nodes[i];
-			c.nodes.push_back(n);
-			for (const auto& id : graphsOf(n)) c.graph_ids.insert(id);
-			auto layout = node_layout_.find(n);
-			if (layout != node_layout_.end()) {
-				c.left = std::min(c.left, layout->second.x - n->getWidth() / 2.0);
-				c.right = std::max(c.right, layout->second.x + n->getWidth() / 2.0);
-			}
-		}
-		for (auto& c : components)
-			if (c.left > c.right) c.left = c.right = 0.0; // no coordinates yet
-		return components;
-	}
-
 	std::vector<JointGraphicalHypergraph::Component> JointGraphicalHypergraph::getComponents() const {
-		return componentsExcluding({});
-	}
-
-	std::vector<std::pair<double, double>>
-		JointGraphicalHypergraph::mergeSpans(std::vector<std::pair<double, double>> spans)
-	{
-		std::sort(spans.begin(), spans.end());
-		std::vector<std::pair<double, double>> merged;
-		for (const auto& s : spans) {
-			// Closed intervals: touching ones are one region.
-			if (!merged.empty() && s.first <= merged.back().second)
-				merged.back().second = std::max(merged.back().second, s.second);
-			else
-				merged.push_back(s);
+		std::vector<Component> components;
+		for (const auto& block : getBlocks()) {
+			Component c;
+			c.nodes = block.nodes;
+			c.left = block.left;
+			c.right = block.right;
+			for (Node* n : block.nodes)
+				for (const auto& id : graphsOf(n)) c.graph_ids.insert(id);
+			components.push_back(std::move(c));
 		}
-		return merged;
-	}
-
-	std::vector<std::pair<double, double>> JointGraphicalHypergraph::getOccupiedRegions() const {
-		std::vector<std::pair<double, double>> spans;
-		for (const auto& c : getComponents()) spans.emplace_back(c.left, c.right);
-		return mergeSpans(std::move(spans));
-	}
-
-	std::vector<std::pair<double, double>>
-		JointGraphicalHypergraph::getOccupiedRegionsExcluding(const std::unordered_set<Node*>& group) const
-	{
-		std::vector<std::pair<double, double>> spans;
-		for (const auto& c : componentsExcluding(group)) spans.emplace_back(c.left, c.right);
-		return mergeSpans(std::move(spans));
-	}
-
-	// Where to insert a group clicked at click_x, given the occupied regions of
-	// the others: a point x such that its boxes go between the boxes whose centre
-	// is left of x and those right of it.
-	double JointGraphicalHypergraph::placementPoint(
-		const std::vector<std::pair<double, double>>& regions, double click_x)
-	{
-		for (const auto& [lo, hi] : regions)
-			if (lo <= click_x && click_x <= hi)
-				return click_x < (lo + hi) / 2.0 ? lo : hi; // the exact middle goes right
-		return click_x;
+		return components;
 	}
 
 	bool JointGraphicalHypergraph::isSeparable(const std::string& id) const {
@@ -244,11 +154,6 @@ namespace hypergraph_logic {
 		for (const auto& n : all_nodes_) alive.insert(n.get());
 		for (auto it = origins_.begin(); it != origins_.end();)
 			it = alive.count(it->first) ? std::next(it) : origins_.erase(it);
-	}
-
-	void JointGraphicalHypergraph::ensureLayout() {
-		for (const auto& n : all_nodes_)
-			if (!node_layout_.count(n.get())) { computeLayout({}); return; }
 	}
 
 	// ============================================================================
@@ -299,54 +204,29 @@ namespace hypergraph_logic {
 		removeGroup(doomed);
 	}
 
-	void JointGraphicalHypergraph::removeComponent(const Node* box) {
-		removeGroup(componentNodesOf(box));
-	}
-
-	void JointGraphicalHypergraph::removeGroup(const std::unordered_set<Node*>& doomed) {
-		// The diagrams the group has boxes of, before their origins go.
-		std::set<std::string> touched_ids;
-		for (Node* n : doomed)
-			for (const auto& id : graphsOf(n))
-				if (!id.empty()) touched_ids.insert(id);
-
-		// The group is closed: every hyperedge touching it is its own.
-		std::unordered_set<Hyperedge*> doomed_edges;
-		std::vector<HyperedgePtr> doomed_originals;
-		for (const auto& [orig, segs] : all_hyperedges_) {
-			bool touches = false;
-			for (const auto& s : orig->getSources()) touches = touches || doomed.count(s.get());
-			for (const auto& t : orig->getTargets()) touches = touches || doomed.count(t.get());
-			if (!touches) continue;
-			doomed_originals.push_back(orig);
-			doomed_edges.insert(orig.get());
-			for (const auto& seg : segs) doomed_edges.insert(seg.get());
+	void JointGraphicalHypergraph::beforeRemovingBoxes(const std::unordered_set<Node*>& doomed) {
+		// The diagrams that have boxes in the group, and those that keep some.
+		std::set<std::string> touched_ids, remaining;
+		for (const auto& n : all_nodes_) {
+			const auto ids = graphsOf(n.get());
+			if (doomed.count(n.get())) {
+				for (const auto& id : ids)
+					if (!id.empty()) touched_ids.insert(id);
+			}
+			else {
+				remaining.insert(ids.begin(), ids.end());
+			}
 		}
-
-		for (auto& [layer, data] : layers_) {
-			std::erase_if(data.nodes, [&](const NodePtr& n) { return doomed.count(n.get()) > 0; });
-			std::erase_if(data.outgoing_edges, [&](const HyperedgePtr& e) { return doomed_edges.count(e.get()) > 0; });
-		}
-		std::erase_if(all_nodes_, [&](const NodePtr& n) { return doomed.count(n.get()) > 0; });
-		for (const auto& e : doomed_originals) all_hyperedges_.erase(e);
-		for (Node* n : doomed) { node_layout_.erase(n); origins_.erase(n); }
-		for (Hyperedge* e : doomed_edges) edge_layout_.erase(e);
+		for (Node* n : doomed) origins_.erase(n);
 
 		// A diagram with no box left can be added again, as long as no remaining box
 		// is of unknown origin (it could be one of its boxes).
-		std::set<std::string> remaining;
-		for (const auto& n : all_nodes_)
-			for (const auto& id : graphsOf(n.get())) remaining.insert(id);
-		if (!remaining.count(std::string())) {
-			for (const auto& id : touched_ids) {
-				if (remaining.count(id)) continue;
-				incorporated_ids_.erase(id);
-				incorporated_names_.erase(id);
-			}
+		if (remaining.count(std::string())) return;
+		for (const auto& id : touched_ids) {
+			if (remaining.count(id)) continue;
+			incorporated_ids_.erase(id);
+			incorporated_names_.erase(id);
 		}
-
-		cleanUp(); // layers left empty are closed up
-		computeLayout({});
 	}
 
 	// ============================================================================
@@ -362,111 +242,6 @@ namespace hypergraph_logic {
 
 	void JointGraphicalHypergraph::moveHypergraph(const std::string& id, double click_x, int top_layer) {
 		moveGroup(separableNodesOf(id), click_x, top_layer);
-	}
-
-	std::unordered_set<Node*> JointGraphicalHypergraph::componentNodesOf(const Node* box) const {
-		for (const auto& c : getComponents())
-			if (std::find(c.nodes.begin(), c.nodes.end(), box) != c.nodes.end())
-				return { c.nodes.begin(), c.nodes.end() };
-		throw std::invalid_argument("La caja no forma parte del esquema conjunto.");
-	}
-
-	void JointGraphicalHypergraph::moveComponent(const Node* box, double click_x) {
-		moveGroup(componentNodesOf(box), click_x, std::nullopt);
-	}
-
-	void JointGraphicalHypergraph::moveComponentToLayer(const Node* box, int top_layer) {
-		moveGroup(componentNodesOf(box), std::nullopt, top_layer);
-	}
-
-	void JointGraphicalHypergraph::moveComponent(const Node* box, double click_x, int top_layer) {
-		moveGroup(componentNodesOf(box), click_x, top_layer);
-	}
-
-	void JointGraphicalHypergraph::moveGroup(const std::unordered_set<Node*>& group,
-		std::optional<double> click_x, std::optional<int> top_layer)
-	{
-		if (group.empty()) return; // e.g. a diagram whose boxes were all deleted
-		ensureLayout();
-
-		// The group is closed: every hyperedge touching it (and its segments) is its own.
-		std::unordered_set<Hyperedge*> group_edges;
-		for (const auto& [orig, segs] : all_hyperedges_) {
-			bool touches = false;
-			for (const auto& s : orig->getSources()) touches = touches || group.count(s.get());
-			for (const auto& t : orig->getTargets()) touches = touches || group.count(t.get());
-			if (!touches) continue;
-			group_edges.insert(orig.get());
-			for (const auto& seg : segs) group_edges.insert(seg.get());
-		}
-
-		// Vertical shift of the group, and of everything when it opens layers above.
-		int top = std::numeric_limits<int>::max();
-		double left = std::numeric_limits<double>::infinity(), right = -left;
-		for (Node* n : group) {
-			top = std::min(top, n->getLayer());
-			auto layout = node_layout_.find(n);
-			if (layout == node_layout_.end()) continue;
-			left = std::min(left, layout->second.x - n->getWidth() / 2.0);
-			right = std::max(right, layout->second.x + n->getWidth() / 2.0);
-		}
-		const int target_top = top_layer.value_or(top);
-		if (top_layer && !click_x && target_top == top)
-			throw std::invalid_argument("Ya empieza en ese nivel.");
-		const int shift_others = std::max(0, -target_top);
-		const int shift_group = target_top - top + shift_others;
-
-		// Horizontal place among the others' regions.
-		const double wanted_x = click_x.value_or(left <= right ? (left + right) / 2.0 : 0.0);
-		const double at_x = placementPoint(getOccupiedRegionsExcluding(group), wanted_x);
-
-		// Rebuild the layers: first everything else (order kept), then the group,
-		// each layer's block inserted among the boxes centred left of at_x.
-		std::map<int, LayerData> rebuilt;
-		for (const auto& [layer, data] : layers_) {
-			LayerData& dst = rebuilt[layer + shift_others];
-			for (const auto& n : data.nodes)
-				if (!group.count(n.get())) dst.nodes.push_back(n);
-			for (const auto& e : data.outgoing_edges)
-				if (!group_edges.count(e.get())) dst.outgoing_edges.push_back(e);
-		}
-		for (const auto& [layer, data] : layers_) {
-			std::vector<NodePtr> block;
-			for (const auto& n : data.nodes)
-				if (group.count(n.get())) block.push_back(n);
-			std::vector<HyperedgePtr> edges;
-			for (const auto& e : data.outgoing_edges)
-				if (group_edges.count(e.get())) edges.push_back(e);
-			if (block.empty() && edges.empty()) continue;
-
-			LayerData& dst = rebuilt[layer + shift_group];
-			size_t before = 0;
-			for (const auto& n : dst.nodes) {
-				auto layout = node_layout_.find(n.get());
-				if (layout != node_layout_.end() && layout->second.x < at_x) ++before;
-			}
-			dst.nodes.insert(dst.nodes.begin() + static_cast<std::ptrdiff_t>(before), block.begin(), block.end());
-			dst.outgoing_edges.insert(dst.outgoing_edges.end(), edges.begin(), edges.end());
-		}
-
-		for (const auto& [layer, data] : rebuilt) {
-			for (const auto& n : data.nodes) n->setLayer(layer);
-			for (const auto& e : data.outgoing_edges) e->setLayer(layer);
-		}
-		layers_ = std::move(rebuilt);
-		cleanUp();                // layers left empty are closed up
-		refreshLayerOverrides();  // moved roots keep their new layers
-		computeLayout({});
-	}
-
-	void JointGraphicalHypergraph::refreshLayerOverrides() {
-		for (const auto& n : all_nodes_) {
-			if (n->isDummy()) continue;
-			int depth_rule_layer = 0;
-			for (const auto& p : n->getParents())
-				depth_rule_layer = std::max(depth_rule_layer, p->getLayer() + 1);
-			n->setDesiredLayer(n->getLayer() > depth_rule_layer ? n->getLayer() : -1);
-		}
 	}
 
 	// ============================================================================

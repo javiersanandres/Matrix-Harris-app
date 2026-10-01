@@ -38,12 +38,6 @@ namespace app_logic {
 		commitSnapshot(std::move(saved));
 	}
 
-	void JointHypergraphEditor::removeComponent(const NodePtr& box) {
-		auto saved = takeSnapshot();
-		joint_->removeComponent(box.get());
-		commitSnapshot(std::move(saved));
-	}
-
 	void JointHypergraphEditor::moveHypergraph(const std::string& id, double click_x) {
 		auto saved = takeSnapshot();
 		joint_->moveHypergraph(id, click_x);
@@ -59,24 +53,6 @@ namespace app_logic {
 	void JointHypergraphEditor::moveHypergraph(const std::string& id, double click_x, int top_layer) {
 		auto saved = takeSnapshot();
 		joint_->moveHypergraph(id, click_x, top_layer);
-		commitSnapshot(std::move(saved));
-	}
-
-	void JointHypergraphEditor::moveComponent(const NodePtr& box, double click_x) {
-		auto saved = takeSnapshot();
-		joint_->moveComponent(box.get(), click_x);
-		commitSnapshot(std::move(saved));
-	}
-
-	void JointHypergraphEditor::moveComponentToLayer(const NodePtr& box, int top_layer) {
-		auto saved = takeSnapshot();
-		joint_->moveComponentToLayer(box.get(), top_layer);
-		commitSnapshot(std::move(saved));
-	}
-
-	void JointHypergraphEditor::moveComponent(const NodePtr& box, double click_x, int top_layer) {
-		auto saved = takeSnapshot();
-		joint_->moveComponent(box.get(), click_x, top_layer);
 		commitSnapshot(std::move(saved));
 	}
 

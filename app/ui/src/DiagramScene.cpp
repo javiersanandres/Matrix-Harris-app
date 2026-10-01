@@ -1276,6 +1276,17 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         return it != ly.end() ? -it->second : y0 + layer * gap;
     }
 
+    double DiagramScene::newLayerEdgeY(bool above) const {
+        const auto& layers = currentGraph().getLayers();
+        if (layers.empty()) return 0.0;
+        const auto& [layer, data] = above ? *layers.begin() : *layers.rbegin();
+        double tallest = 0.0;
+        for (const auto& n : data.nodes)
+            if (!n->isDummy()) tallest = std::max(tallest, n->getHeight());
+        const double reach = (tallest + LAYER_GAP) / 2.0;
+        return above ? rowSceneY(layer) - reach : rowSceneY(layer) + reach;
+    }
+
     QPointF DiagramScene::cursorScenePos() const {
         for (QGraphicsView* v : views())
             if (v->isInteractive() && v->isVisible())
@@ -1332,34 +1343,46 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const GraphicalHypergraph& graph = currentGraph();
         const QPointF c = item->mapToScene(item->rect().center());
         const int layer = graph.layerForY(-c.y());
+        const bool new_layer = graph.getLayers().find(layer) == graph.getLayers().end();
+        const QRectF bounds = sceneRect();
+
+        if (new_layer) {
+            // A new layer opens right where the box crossed the edge of the
+            // outermost one: a slim dashed band on that line, and the label over
+            // the box (alone in its new layer, the box itself shows its spot).
+            // The row itself will sit further out, which can be off screen: too
+            // far to notice the change.
+            const double y = newLayerEdgeY(layer < 0);
+            placeBand(QRectF(bounds.left(), y - 14.0, bounds.width(), 28.0), true);
+            if (guides_)
+                for (QGraphicsItem* g : { static_cast<QGraphicsItem*>(guides_->halo), static_cast<QGraphicsItem*>(guides_->bar),
+                                          static_cast<QGraphicsItem*>(guides_->dot_top), static_cast<QGraphicsItem*>(guides_->dot_bottom) })
+                    g->setVisible(false);
+            placeChip(layer < 0 ? QStringLiteral("Nuevo nivel arriba") : QStringLiteral("Nuevo nivel abajo"),
+                QPointF(c.x(), item->mapRectToScene(item->rect()).top() - 10.0));
+            return;
+        }
         const double y = rowSceneY(layer);
 
-        // The target layer as a soft band across the diagram (dashed when the
-        // box would open a new one)...
-        const QRectF bounds = sceneRect();
-        const bool new_layer = graph.getLayers().find(layer) == graph.getLayers().end();
-        placeBand(QRectF(bounds.left(), y - 40.0, bounds.width(), 80.0), new_layer);
+        // The target layer as a soft band across the diagram...
+        placeBand(QRectF(bounds.left(), y - 40.0, bounds.width(), 80.0), false);
 
         // ...and, inside it, where the box would land among its neighbours.
         double left = -std::numeric_limits<double>::infinity();
         double right = std::numeric_limits<double>::infinity();
-        if (!new_layer) {
-            for (const auto& n : graph.getLayers().at(layer).nodes) {
-                if (n.get() == item->node()) continue;
-                const double x = graph.getNodeLayout().at(n.get()).x;
-                const double half = n->getWidth() / 2.0;
-                if (x < c.x()) left = std::max(left, x + half);
-                else           right = std::min(right, x - half);
-            }
+        for (const auto& n : graph.getLayers().at(layer).nodes) {
+            if (n.get() == item->node()) continue;
+            const double x = graph.getNodeLayout().at(n.get()).x;
+            const double half = n->getWidth() / 2.0;
+            if (x < c.x()) left = std::max(left, x + half);
+            else           right = std::min(right, x - half);
         }
         double x = c.x();
         if (std::isfinite(left) && std::isfinite(right)) x = (left + right) / 2.0;
         else if (std::isfinite(left))                    x = left + 36.0;
         else if (std::isfinite(right))                   x = right - 36.0;
         placeLandingMarker(x, y - 34.0, y + 34.0);
-        placeChip(!new_layer ? QString()
-                  : layer < 0 ? QStringLiteral("Nuevo nivel arriba") : QStringLiteral("Nuevo nivel abajo"),
-            QPointF(x, y - 40.0));
+        placeChip(QString(), QPointF(x, y - 40.0));
     }
 
     void DiagramScene::endBoxDrag() {
@@ -1376,27 +1399,31 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
     }
 
     // ============================================================================
-    // Moving a piece of the joint diagram
+    // Moving and removing a piece of the diagram
     // ============================================================================
 
     DiagramScene::PieceChoice DiagramScene::pieceChoiceFor(Node* box) const {
         PieceChoice choice;
-        if (!is_joint_ || !box) return choice;
-        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
-        const size_t everything = joint.getAllNodes().size();
+        if (!box) return choice;
+        const GraphicalHypergraph& graph = currentGraph();
+        const size_t everything = graph.getAllNodes().size();
 
         std::unordered_set<Node*> block;
-        try { block = joint.getComponentNodes(box); }
+        try { block = graph.getComponentNodes(box); }
         catch (const std::exception&) { return choice; }
 
+        // In the joint, the box's whole diagram too.
         std::unordered_set<Node*> diagram;
-        const auto ids = joint.graphsOf(box);
-        if (ids.size() == 1 && !ids.begin()->empty() && joint.isSeparable(*ids.begin())) {
-            choice.diagram_id = *ids.begin();
-            choice.diagram_name = QString::fromStdString(joint.getIncorporatedName(choice.diagram_id));
-            diagram = joint.getHypergraphNodes(choice.diagram_id);
-            // Moving everything there is would change nothing.
-            choice.move_diagram = diagram.size() < everything;
+        if (is_joint_) {
+            const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+            const auto ids = joint.graphsOf(box);
+            if (ids.size() == 1 && !ids.begin()->empty() && joint.isSeparable(*ids.begin())) {
+                choice.diagram_id = *ids.begin();
+                choice.diagram_name = QString::fromStdString(joint.getIncorporatedName(choice.diagram_id));
+                diagram = joint.getHypergraphNodes(choice.diagram_id);
+                // Moving everything there is would change nothing.
+                choice.move_diagram = diagram.size() < everything;
+            }
         }
         // The block is offered when it is something else than the whole diagram.
         choice.move_block = block.size() < everything && block != diagram;
@@ -1422,7 +1449,20 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
     }
 
     void DiagramScene::addRemoveBlockEntry(QMenu* menu, Node* box) {
-        if (!is_joint_ || !box) return;
+        if (!box) return;
+        if (!is_joint_) {
+            // In a diagram of its own the block's boxes are deleted. A box on its
+            // own already has "Eliminar caja".
+            std::unordered_set<Node*> block;
+            try { block = currentGraph().getComponentNodes(box); }
+            catch (const std::exception&) { return; }
+            const auto boxes = std::count_if(block.begin(), block.end(), [](Node* n) { return !n->isDummy(); });
+            if (boxes < 2) return;
+            QAction* a = menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar bloque"),
+                [this, box] { onRemoveBlock(box); });
+            a->setToolTip(QStringLiteral("Elimina esta caja y todas las que están unidas a ella, con sus conexiones"));
+            return;
+        }
         QAction* a = menu->addAction(style::icon(style::Icon::TakeOut), QStringLiteral("Quitar bloque"),
             [this, box] { onRemoveBlock(box); });
         a->setToolTip(QStringLiteral("Quita del esquema conjunto esta caja y todas las que están unidas a ella; "
@@ -1448,10 +1488,22 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
     }
 
     void DiagramScene::onRemoveBlock(Node* box) {
-        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
         std::unordered_set<Node*> doomed;
-        try { doomed = joint.getComponentNodes(box); }
+        try { doomed = currentGraph().getComponentNodes(box); }
         catch (const std::exception& e) { showError(e); return; }
+
+        if (!is_joint_) {
+            const auto boxes = std::count_if(doomed.begin(), doomed.end(), [](Node* n) { return !n->isDummy(); });
+            if (!dialogs::confirm(dialogParent(), QStringLiteral("¿Eliminar este bloque?"),
+                    QStringLiteral("Se eliminarán sus %1 cajas y sus conexiones. "
+                                   "Puedes deshacerlo con Ctrl+Z.").arg(boxes),
+                    QStringLiteral("Eliminar"), true))
+                return;
+            takeOut(doomed, [this, ptr = box->shared_from_this()] { regular_editor_->removeComponent(ptr); });
+            return;
+        }
+
+        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
 
         // Say what goes: how many boxes, and which diagrams they came from.
         int boxes = 0;
@@ -1524,17 +1576,18 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
     void DiagramScene::startPieceMove(const std::string& diagram_id, Node* anchor) {
         cancelInteraction();
         stopAnimations();
-        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+        const GraphicalHypergraph& graph = currentGraph();
 
         PieceMove move;
         move.diagram_id = diagram_id;
         move.anchor = anchor;
         try {
-            move.nodes = diagram_id.empty() ? joint.getComponentNodes(anchor) : joint.getHypergraphNodes(diagram_id);
+            move.nodes = diagram_id.empty() ? graph.getComponentNodes(anchor)
+                                            : joint_editor_->getGraph().getHypergraphNodes(diagram_id);
         }
         catch (const std::exception& e) { showError(e); return; }
         if (move.nodes.empty()) return;
-        move.regions = joint.getOccupiedRegionsExcluding(move.nodes);
+        move.regions = graph.getOccupiedRegionsExcluding(move.nodes);
 
         double left = std::numeric_limits<double>::infinity(), right = -left;
         move.top_layer = std::numeric_limits<int>::max();
@@ -1542,7 +1595,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         for (Node* n : move.nodes) {
             move.top_layer = std::min(move.top_layer, n->getLayer());
             move.bottom_layer = std::max(move.bottom_layer, n->getLayer());
-            const double x = joint.getNodeLayout().at(n).x;
+            const double x = graph.getNodeLayout().at(n).x;
             left = std::min(left, x - n->getWidth() / 2.0);
             right = std::max(right, x + n->getWidth() / 2.0);
         }
@@ -1642,7 +1695,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         }
         const QString what = diagram_id.empty()
             ? QStringLiteral("el bloque")
-            : QStringLiteral("«%1»").arg(QString::fromStdString(joint.getIncorporatedName(diagram_id)));
+            : QStringLiteral("«%1»").arg(QString::fromStdString(joint_editor_->getGraph().getIncorporatedName(diagram_id)));
         emit interactionHintChanged(QStringLiteral("Llevas %1 colgando del ratón: haz clic donde quieras dejarlo "
                                                    "· Esc para cancelar").arg(what));
         updatePiecePreview();
@@ -1689,8 +1742,22 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             if (at_x == hi) ghost_x = hi + MIN_BLOCK_SEP + half;
             else if (at_x == lo) ghost_x = lo - MIN_BLOCK_SEP - half;
         }
+        // A new layer above or below everything is shown where it opens: a slim
+        // dashed band on the edge of the outermost layer, with the ghost's first
+        // row just past it (the real row ends up further out, often off screen).
+        const bool new_above = target < 0, new_below = target > last;
+        double top_row = rowSceneY(target);
+        if (new_above || new_below) {
+            const double edge = newLayerEdgeY(new_above);
+            const double half_top = move.top_row_y - move.bounds.top(); // half its first row
+            top_row = new_above ? edge - half_top - 20.0 : edge + half_top + 20.0;
+            placeBand(QRectF(bounds.left(), edge - 14.0, bounds.width(), 28.0), true);
+        }
+        else if (guides_->band->isVisible()) {
+            guides_->band->setVisible(false);
+        }
         const QRectF ghost = move.bounds
-            .translated(ghost_x - move.bounds.center().x(), rowSceneY(target) - move.top_row_y)
+            .translated(ghost_x - move.bounds.center().x(), top_row - move.top_row_y)
             .adjusted(-12.0, -12.0, 12.0, 12.0);
         QPainterPath ghost_path;
         ghost_path.addRoundedRect(ghost, 16.0, 16.0);
@@ -1703,8 +1770,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         guides_->ghost->setPen(ghost_pen);
         guides_->ghost->setVisible(true);
 
-        placeChip(target < 0 ? QStringLiteral("Nuevo nivel arriba")
-              : target > last ? QStringLiteral("Nuevo nivel abajo")
+        placeChip(new_above ? QStringLiteral("Nuevo nivel arriba")
+              : new_below ? QStringLiteral("Nuevo nivel abajo")
               : QStringLiteral("Desde el nivel %1").arg(target + 1),
             move.grab + shown - QPointF(0.0, 12.0)); // just above the grip, i.e. the cursor
     }
@@ -1722,10 +1789,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const int top_layer = currentGraph().layerForY(-(move.top_row_y + move.offset.y()));
         endPieceMove();
         try {
-            if (move.diagram_id.empty())
-                joint_editor_->moveComponent(move.anchor->shared_from_this(), click_x, top_layer);
-            else
-                joint_editor_->moveHypergraph(move.diagram_id, click_x, top_layer);
+            const NodePtr anchor = move.anchor ? move.anchor->shared_from_this() : nullptr;
+            if (!move.diagram_id.empty()) joint_editor_->moveHypergraph(move.diagram_id, click_x, top_layer);
+            else if (is_joint_)           joint_editor_->moveComponent(anchor, click_x, top_layer);
+            else                          regular_editor_->moveComponent(anchor, click_x, top_layer);
         }
         catch (const std::exception& e) {
             showError(e);

@@ -136,10 +136,8 @@ namespace hypergraph_logic {
 		// several once boxes of different diagrams are fused. Dummy boxes belong
 		// to no diagram.
 		//
-		// A connected component is a maximal set of boxes linked by connections
-		// (dummies included). Its span is [min(x - width/2), max(x + width/2)]
-		// over its boxes, and the occupied regions are the union of all spans,
-		// merged into disjoint closed intervals.
+		// Components are the graph's blocks (see GraphicalHypergraph's "Blocks"),
+		// each with the diagrams its boxes came from.
 		//
 		// A diagram is *mixed* when one of its components also holds boxes of
 		// another diagram: a connection was added between them, or boxes of both
@@ -159,15 +157,10 @@ namespace hypergraph_logic {
 			double right = 0.0;
 		};
 
-		// Placement of a whole diagram at a clicked x (see addHypergraph):
-		//   - x inside an occupied region: the diagram goes right before that
-		//     region if x is in its left half, right after it otherwise (the
-		//     exact middle goes after);
-		//   - x anywhere else: the diagram goes at x.
-		// In every layer its boxes are inserted, as one block, among the boxes
-		// whose centre lies left of that point and those right of it; only the
-		// coordinates are then recomputed (Brandes-Köpf and ports; no crossing
-		// minimization nor bar-ordering MIP).
+		// A whole diagram is placed at a clicked x like a block is (see
+		// GraphicalHypergraph's "Blocks"); only the coordinates are then
+		// recomputed (Brandes-Köpf and ports; no crossing minimization nor
+		// bar-ordering MIP).
 
 		// ── addHypergraph ─────────────────────────────────────────────────────────
 		//
@@ -194,66 +187,26 @@ namespace hypergraph_logic {
 		//
 		void removeHypergraph(const std::string& id);
 
-		// ── removeComponent ───────────────────────────────────────────────────────
+		// ── Moving diagrams ───────────────────────────────────────────────────────
 		//
-		// Takes the connected component that contains box out of the joint, mixed
-		// or not: all its boxes and connections go and layers left empty are closed
-		// up. A diagram left without any box in the joint stops counting as added,
-		// so it can be added again (unless boxes of unknown origin remain, which
-		// could be its). Throws std::invalid_argument if box is not in the joint.
-		//
-		void removeComponent(const Node* box);
-
-		// ── Moving diagrams and connected components ──────────────────────────────
-		//
-		// A diagram that is not mixed, or any connected component (mixed or not),
-		// has no connection to the rest of the joint, so it can be moved as a
-		// whole, sideways and up or down:
-		//
-		//   - click_x: placement among the other boxes' regions, as above (the
-		//     group's own region does not count);
-		//   - top_layer: the layer its shallowest box ends up in, keeping the
-		//     group's own shape. A negative value opens new layers above
-		//     everything (like relocateNodeToLayer(node, -1)); a value past the
-		//     deepest layer puts the group right below everything. Layers left
-		//     empty are closed up, so the group ends up level with the content
-		//     that was at top_layer.
-		//
-		// Only the vertical move takes top_layer; only the horizontal one, click_x
-		// (the group then keeps its current horizontal place, re-evaluated with
-		// the same rule in its new layers); the three-argument forms do both.
-		// Afterwards the joint is laid out again (no crossing minimization, no
-		// bar-ordering MIP), and every box's layer override is refreshed so the
-		// moved boxes keep their new layers under later operations.
-		//
-		// A diagram throws like removeHypergraph; a box that is not in the joint
-		// throws std::invalid_argument, and so does a vertical-only move that
-		// would leave the group where it is.
+		// A diagram that is not mixed has no connection to the rest of the joint,
+		// so it moves as a whole exactly like a block does (see
+		// GraphicalHypergraph's "Blocks"; the blocks themselves are moved and
+		// removed with moveComponent / removeComponent, mixed or not). Removing a
+		// block also stops counting as added every diagram left without any box
+		// in the joint, so it can be added again (unless boxes of unknown origin
+		// remain, which could be its). A diagram throws like removeHypergraph.
 		//
 		void moveHypergraph(const std::string& id, double click_x);
 		void moveHypergraphToLayer(const std::string& id, int top_layer);
 		void moveHypergraph(const std::string& id, double click_x, int top_layer);
 
-		// The connected component that contains box.
-		void moveComponent(const Node* box, double click_x);
-		void moveComponentToLayer(const Node* box, int top_layer);
-		void moveComponent(const Node* box, double click_x, int top_layer);
-
 		// ── Queries ───────────────────────────────────────────────────────────────
 
 		std::vector<Component> getComponents() const;
-		std::vector<std::pair<double, double>> getOccupiedRegions() const;
 
-		// The regions of every component but those of group (what a group being
-		// moved is placed among), and where placement puts a group dropped at
-		// click_x given such regions. For previews of a move.
-		std::vector<std::pair<double, double>> getOccupiedRegionsExcluding(const std::unordered_set<Node*>& group) const;
-		static double placementPoint(const std::vector<std::pair<double, double>>& regions, double click_x);
-
-		// Boxes (dummies included) that moveHypergraph / moveComponent would move.
-		// Throw as those do.
+		// Boxes (dummies included) that moveHypergraph would move. Throws as it does.
 		std::unordered_set<Node*> getHypergraphNodes(const std::string& id) const { return separableNodesOf(id); }
-		std::unordered_set<Node*> getComponentNodes(const Node* box) const { return componentNodesOf(box); }
 
 		// Diagram(s) a box came from (empty for a dummy box).
 		std::set<std::string> graphsOf(const Node* node) const;
@@ -350,33 +303,9 @@ namespace hypergraph_logic {
 		// alone. Throws as removeHypergraph / moveHypergraph document.
 		std::unordered_set<Node*> separableNodesOf(const std::string& id) const;
 
-		static std::vector<std::pair<double, double>> mergeSpans(std::vector<std::pair<double, double>> spans);
-
-		// Components of the current graph, optionally ignoring some boxes.
-		std::vector<Component> componentsExcluding(const std::unordered_set<Node*>& excluded) const;
-
-		// Boxes of the component that contains box (throws if it is not in the joint).
-		std::unordered_set<Node*> componentNodesOf(const Node* box) const;
-
-		// Moves a closed group of boxes (no connection to any box outside it):
-		// its shallowest box to top_layer, placed at click_x among the rest (see
-		// "Moving diagrams and connected components"). A missing click_x keeps
-		// the group's current horizontal place; a missing top_layer, its layers.
-		void moveGroup(const std::unordered_set<Node*>& group,
-			std::optional<double> click_x, std::optional<int> top_layer);
-
-		// Takes a closed group of boxes (no connection to any box outside it) out
-		// of the joint, with every hyperedge touching it, then closes up empty
-		// layers and lays the joint out again. Diagrams that had boxes in the
-		// group and have none left stop counting as added.
-		void removeGroup(const std::unordered_set<Node*>& doomed);
-
-		// Sets every real box's layer override from the depth rule: its own
-		// layer when it sits deeper than the rule would put it, -1 otherwise.
-		void refreshLayerOverrides();
-
-		// Makes sure every box has coordinates (needed to place by x).
-		void ensureLayout();
+		// Before a block (or diagram) goes: forgets its boxes' origins, and stops
+		// counting as added every diagram that had boxes in it and has none left.
+		void beforeRemovingBoxes(const std::unordered_set<Node*>& doomed) override;
 	};
 
 } // namespace hypergraph_logic
