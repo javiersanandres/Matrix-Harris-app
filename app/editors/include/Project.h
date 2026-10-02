@@ -190,6 +190,14 @@ namespace app_logic {
 		//
 		void save();
 
+		// ── detachFromFile ────────────────────────────────────────────────────────
+		//
+		// Forgets the file the project was loaded from, so the next save asks
+		// where to write (a project started from a copy, like the tour's
+		// example). Nothing else changes.
+		//
+		void detachFromFile();
+
 		// ── load ──────────────────────────────────────────────────────────────────
 		//
 		// Static factory that reconstructs a Project from a JSON file previously

@@ -673,25 +673,24 @@ namespace hypergraph_logic {
 		//
 		void resettleEdge(const HyperedgePtr& edge, LayerSpan* out_new_layers = nullptr, std::set<int>* out_altered_layers = nullptr);
 
-		// ── minimizeCrossingsAfterRelocation ──────────────────────────────────────────────────────────
+		// ── relocateAndMinimize ───────────────────────────────────────────────────────────────────────
 		//
-		// Called right after applyRelocationAndPropagate to run the disruptive, many-rounds sifting pass
-		// that such a relocation warrants, over the layers the operation placed nodes at (touched).
-		// The floor of the range is pulled up to no deeper than one layer below the shallowest of
-		// reference_nodes, so that any new dummy nodes introduced by the relocation are covered even
-		// if touched was already widened by an earlier, unrelated adjustment. The range stops at
-		// touched.max: below it, nothing was placed.
+		// Relocates `nodes` (see relocateNodes: each to the layer its depth rule, or its desired layer,
+		// now asks for, with everything hanging from it) and, if anything moved, runs global sifting
+		// over exactly the layers where something was placed: the relocated nodes, every descendant
+		// that moved and every dummy node the re-split edges brought. Layers that only lost nodes
+		// cannot gain crossings, so they are left alone. Returns whether anything moved.
 		//
-		void minimizeCrossingsAfterRelocation(const std::vector<NodePtr>& reference_nodes, const LayerSpan& touched, int sifting_rounds = 10);
-
-		// ── minimizeCrossingsForRelocatedTargets ──────────────────────────────────────────────────────
+		// `touched` may come with layers the caller has already changed (e.g. edges re-split while
+		// removing implied connections), to be sifted in the same pass.
 		//
-		// Called after relocating the targets of original_edge, when the caller has no more specific
-		// start_layer of its own to offer: recomputes the shallowest layer among the parents of
-		// original_edge's (now possibly relocated) targets, and runs global sifting from there down to
-		// the deepest layer the relocation placed nodes at (touched.max).
+		// The span is safe to use after the relocation's cleanUp(): a layer can only be dropped once
+		// a node has left it for a shallower one, which is itself in the span, so touched.min never
+		// goes stale; touched.max can end up one layer too deep, which only widens the pass (and
+		// minimizeCrossings clamps it to the last layer).
 		//
-		void minimizeCrossingsForRelocatedTargets(const HyperedgePtr& original_edge, const LayerSpan& touched);
+		bool relocateAndMinimize(const std::vector<NodePtr>& nodes, std::set<int>* out_altered_layers,
+			int sifting_rounds = 10, LayerSpan touched = {});
 
 		// ============================================================================
 		// Helper methods for connection management

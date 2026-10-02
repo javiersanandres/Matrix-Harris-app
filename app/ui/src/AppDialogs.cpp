@@ -316,6 +316,10 @@ QPushButton#secondary:hover { background: #F1F2F7; }
 
     namespace dialogs {
 
+        QString styleSheet() {
+            return dialogStyleSheet();
+        }
+
         namespace {
             void showSimple(QWidget* parent, StyledDialog::Badge badge, const QString& title, const QString& text) {
                 StyledDialog dlg(badge, title, parent);

@@ -5,6 +5,7 @@
 #include <QString>
 #include <QStringList>
 
+#include <functional>
 #include <optional>
 
 class QSettings;
@@ -66,11 +67,16 @@ namespace ui::gurobi {
     // it, e.g. a project to open, is left as it was.
     StartupOptions takeStartupOptions(QStringList& args);
 
+    // Called once the startup check is over (after its notice, if there was
+    // one, has been closed), with the notice the user asked not to see again
+    // (or None): what comes next at startup waits for it.
+    using AfterCheck = std::function<void(Notice silenced)>;
+
     // Starts the check; the notice, if any, appears over `window` when ready.
-    void checkAtStartup(QWidget* window, const StartupOptions& options);
+    void checkAtStartup(QWidget* window, const StartupOptions& options, AfterCheck then = {});
 
     // Shows `notice` (Install or License) over `parent`, recording a "No volver
-    // a recordármelo" in `group`.
-    void showNotice(Notice notice, QWidget* parent, const QString& group);
+    // a recordármelo" in `group`. Returns whether the user ticked it.
+    bool showNotice(Notice notice, QWidget* parent, const QString& group);
 
 } // namespace ui::gurobi

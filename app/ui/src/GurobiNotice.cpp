@@ -79,11 +79,16 @@ namespace ui::gurobi {
             bool hovered_ = false;
         };
 
-        // Shows the notice for `status` over `window`, if there is one to show.
-        void present(QWidget* window, GurobiStatus status, const QString& group) {
-            QSettings settings;
-            const Notice notice = pendingNotice(status, settings, group);
-            if (notice != Notice::None) showNotice(notice, window, group);
+        // Shows the notice for `status` over `window`, if there is one to show,
+        // then hands over to `then`.
+        void present(QWidget* window, GurobiStatus status, const QString& group, const AfterCheck& then) {
+            Notice notice;
+            {
+                QSettings settings;
+                notice = pendingNotice(status, settings, group);
+            }
+            const bool silenced = notice != Notice::None && showNotice(notice, window, group);
+            if (then) then(silenced ? notice : Notice::None);
         }
 
         // The window has had time to appear before a notice covers it.
@@ -141,7 +146,7 @@ namespace ui::gurobi {
         return options;
     }
 
-    void checkAtStartup(QWidget* window, const StartupOptions& options) {
+    void checkAtStartup(QWidget* window, const StartupOptions& options, AfterCheck then) {
         const QString group = options.simulated ? TEST_REMINDERS_GROUP : REMINDERS_GROUP;
         if (options.reset_reminders) {
             QSettings settings;
@@ -150,7 +155,9 @@ namespace ui::gurobi {
 
         if (options.simulated) {
             const GurobiStatus status = *options.simulated;
-            QTimer::singleShot(NOTICE_DELAY_MS, window, [window, status, group] { present(window, status, group); });
+            QTimer::singleShot(NOTICE_DELAY_MS, window, [window, status, group, then] {
+                present(window, status, group, then);
+            });
             return;
         }
 
@@ -158,16 +165,16 @@ namespace ui::gurobi {
         // so it runs off the UI thread; its answer is cached for the solvers.
         QThread* check = QThread::create([] { hypergraph_logic::gurobiStatus(); });
         QObject::connect(check, &QThread::finished, check, &QObject::deleteLater);
-        QObject::connect(check, &QThread::finished, window, [window, group] {
-            QTimer::singleShot(NOTICE_DELAY_MS, window, [window, group] {
-                present(window, hypergraph_logic::gurobiStatus(), group);
+        QObject::connect(check, &QThread::finished, window, [window, group, then] {
+            QTimer::singleShot(NOTICE_DELAY_MS, window, [window, group, then] {
+                present(window, hypergraph_logic::gurobiStatus(), group, then);
             });
         });
         check->start();
     }
 
-    void showNotice(Notice notice, QWidget* parent, const QString& group) {
-        if (notice == Notice::None) return;
+    bool showNotice(Notice notice, QWidget* parent, const QString& group) {
+        if (notice == Notice::None) return false;
         const bool install = notice == Notice::Install;
 
         StyledDialog dlg(install ? StyledDialog::Badge::Info : StyledDialog::Badge::Warning,
@@ -178,8 +185,9 @@ namespace ui::gurobi {
             ? QStringLiteral("Esta aplicación funciona mejor con Gurobi instalado. Si eres estudiante, profesor "
                              "o investigador universitario, te recomendamos instalar el programa para una mejor "
                              "experiencia.")
-            : QStringLiteral("No se ha encontrado una licencia de Gurobi válida. Si eres estudiante, profesor o "
-                             "investigador universitario puedes obtener una licencia válida de manera gratuita."));
+            : QStringLiteral("Esta aplicación funciona mejor con Gurobi. No se ha encontrado una licencia de Gurobi" 
+                             "válida. Si eres estudiante, profesor o investigador universitario puedes obtener una" 
+                             "licencia válida de manera gratuita. Te recomendamos hacerlo para una mejor experiencia."));
 
         auto* body = new QWidget;
         auto* col = new QVBoxLayout(body);
@@ -209,10 +217,10 @@ namespace ui::gurobi {
         dlg.addButton(QStringLiteral("Entendido"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();
 
-        if (tick->isChecked()) {
-            QSettings settings;
-            stopReminding(notice, settings, group);
-        }
+        if (!tick->isChecked()) return false;
+        QSettings settings;
+        stopReminding(notice, settings, group);
+        return true;
     }
 
 } // namespace ui::gurobi

@@ -56,6 +56,11 @@ namespace ui {
         // is replaced).
         void setScene(QGraphicsScene* scene);
 
+        // Parts of the card, for pointing at them (the introductory tour).
+        QWidget* miniature() const;
+        // The name, or its editor while it is being renamed.
+        QWidget* nameArea() const;
+
         static constexpr int TAB_WIDTH = 212;
         static constexpr int TAB_HEIGHT = 150;
 

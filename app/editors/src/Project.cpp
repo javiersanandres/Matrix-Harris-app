@@ -151,6 +151,10 @@ namespace app_logic {
 		return file_path_;
 	}
 
+	void Project::detachFromFile() {
+		file_path_.clear();
+	}
+
 	bool Project::hasUnsavedChanges() const {
 		if (unsaved_changes_) return true;
 		for (const auto& editor : editors_)

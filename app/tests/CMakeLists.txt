@@ -8,6 +8,8 @@ add_executable(app_logic_tests
     test_uncertain_connections.cpp
     test_history.cpp
     test_gurobi_notice.cpp
+    test_first_run.cpp
+    test_options_help.cpp
 )
 
 target_include_directories(app_logic_tests

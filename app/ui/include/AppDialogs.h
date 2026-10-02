@@ -89,6 +89,11 @@ namespace ui {
     // ============================================================================
     namespace dialogs {
 
+        // The stylesheet of StyledDialog (its card, title, message and the
+        // #primary / #secondary / #danger buttons), for other windows that
+        // should look the same.
+        QString styleSheet();
+
         // Something went wrong: a single "Entendido" button.
         void showError(QWidget* parent, const QString& title, const QString& text);
         void showWarning(QWidget* parent, const QString& title, const QString& text);

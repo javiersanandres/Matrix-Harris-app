@@ -1,4 +1,4 @@
-﻿# ============================================================================
+# ============================================================================
 # Unit Tests
 # ============================================================================
 
@@ -18,6 +18,7 @@ add_executable(hypergraph_logic_tests
     test_operation_feasibility.cpp
     test_highs_outcome.cpp
     test_gurobi_runtime.cpp
+    test_relocation_sifting.cpp
     test_line_style.cpp
     test_joint_diagrams.cpp
     test_graph_blocks.cpp

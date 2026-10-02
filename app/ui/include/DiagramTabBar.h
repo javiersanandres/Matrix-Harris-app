@@ -67,6 +67,14 @@ namespace ui {
 
         int tabCount() const { return static_cast<int>(tabs_.size()); }
 
+        // Parts of the bar, for pointing at them (the introductory tour).
+        QWidget* tabStrip() const { return scroll_area_; }
+        DiagramTabWidget* tabAt(int index) const {
+            return index >= 0 && index < tabCount() ? tabs_[index] : nullptr;
+        }
+        QWidget* addButton() const { return add_button_; }
+        DiagramTabWidget* jointTab() const { return joint_tab_; }
+
     signals:
         void tabClicked(int index);
         void jointTabClicked();

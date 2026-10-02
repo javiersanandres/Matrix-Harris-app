@@ -3,6 +3,7 @@
 #include "NodeEditorWidgets.h"
 #include "LayoutTypes.h"
 #include "UiStyle.h"
+#include "OptionsHelp.h"
 
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSceneContextMenuEvent>
@@ -498,10 +499,10 @@ namespace ui {
         }
 
         style::addMenuSection(menu, QStringLiteral("Conectar"));
-        addPick(style::Icon::CurrentBelow, QStringLiteral("Caja actual por debajo de"),
+        addPick(style::Icon::CurrentBelow, QStringLiteral("Caja «%1» por debajo de").arg(QString::fromStdString(node->getName())),
             InteractionState::WaitingForSecondNode_AddConnectionParent,
             QStringLiteral("Ninguna caja puede quedar por encima de esta"));
-        addPick(style::Icon::CurrentAbove, QStringLiteral("Caja actual por encima de"),
+        addPick(style::Icon::CurrentAbove, QStringLiteral("Caja «%1» por encima de").arg(QString::fromStdString(node->getName())),
             InteractionState::WaitingForSecondNode_AddConnectionChild,
             QStringLiteral("Ninguna caja puede quedar por debajo de esta"));
         addPick(style::Icon::Fuse, QStringLiteral("Fusionar"),
@@ -559,6 +560,7 @@ namespace ui {
             [this, node] { onRemoveNode(node); });
         addRemoveBlockEntry(menu, node);
 
+        help::addHelpButtons(menu, dialogParent());
         menu->popup(QCursor::pos());
     }
 
@@ -639,6 +641,7 @@ namespace ui {
             [this, edge] { onRemoveHyperedge(edge); });
         addRemoveBlockEntry(menu, reference);
 
+        help::addHelpButtons(menu, dialogParent());
         menu->popup(QCursor::pos());
     }
 
@@ -647,6 +650,7 @@ namespace ui {
         menu->setAttribute(Qt::WA_DeleteOnClose);
         menu->addAction(style::icon(style::Icon::NewBox), QStringLiteral("Nueva caja"),
             [this, scene_pos] { onCreateRootNode(scene_pos); });
+        help::addHelpButtons(menu, dialogParent());
         menu->popup(QCursor::pos());
     }
 

@@ -259,28 +259,10 @@ namespace hypergraph_logic {
 		}
 	}
 
-	void Hypergraph::minimizeCrossingsAfterRelocation(const std::vector<NodePtr>& reference_nodes, const LayerSpan& touched, int sifting_rounds) {
-		int start_layer = touched.min;
-		for (const auto& n : reference_nodes) {
-			if (n->getLayer() + 1 < start_layer) {
-				start_layer = n->getLayer() + 1;
-			}
-		}
-		minimizeCrossings(sifting_rounds, start_layer, touched.empty() ? -1 : touched.max);
-	}
-
-	void Hypergraph::minimizeCrossingsForRelocatedTargets(const HyperedgePtr& original_edge, const LayerSpan& touched) {
-		int start_layer = INT_MAX;
-		for (const auto& tgt : original_edge->getTargets()) {
-			for (const auto& p : tgt->getParents()) {
-				if (p->getLayer() + 1 < start_layer) {
-					start_layer = p->getLayer() + 1;
-				}
-			}
-		}
-		if (start_layer < INT_MAX) {
-			minimizeCrossings(10, start_layer, touched.empty() ? -1 : touched.max);
-		}
+	bool Hypergraph::relocateAndMinimize(const std::vector<NodePtr>& nodes, std::set<int>* out_altered_layers, int sifting_rounds, LayerSpan touched) {
+		if (!relocateNodes(nodes, &touched, out_altered_layers)) return false;
+		minimizeCrossings(sifting_rounds, touched.min, touched.max);
+		return true;
 	}
 
 	// ============================================================================
@@ -682,11 +664,9 @@ namespace hypergraph_logic {
 			// number is the parent_layer + 1 and this should propagate down to all the descendants of the child.
 			edge = createHyperedge({ parent }, { child }, parent_layer, out_altered_layers);
 
-			applyRelocationAndPropagate({ {child, resolveTargetLayer(child)} }, &touched, out_altered_layers);
-
-			// We run global sifting from the min_layer of all parents to the affected child. Since this operation is
-			// quite disruptive, we will allow more rounds of sifting to try to minimize crossings as much as possible.
-			minimizeCrossingsAfterRelocation(child->getParents(), touched);
+			// We run global sifting over everything the relocation placed (and the transitive removals before
+			// it). Since this operation is quite disruptive, we allow more rounds of sifting.
+			relocateAndMinimize({ child }, out_altered_layers, 10, touched);
 		}
 		return edge;
 	}
@@ -832,7 +812,8 @@ namespace hypergraph_logic {
 			if (out_altered_layers && edge_layer_before >= 0 && edge->getLayer() == edge_layer_before) {
 				out_altered_layers->insert(edge_layer_before);
 			}
-			minimizeCrossingsAfterRelocation(edge->getSources(), touched);
+			// The targets were relocated by the test above: sift what it placed.
+			minimizeCrossings(10, touched.min, touched.max);
 		}
 	}
 	
@@ -954,11 +935,12 @@ namespace hypergraph_logic {
 		}
 
 		if (parents_layer + 1 > target->getLayer()) {
-			applyRelocationAndPropagate({ {target, resolveTargetLayer(target)} }, &touched, out_altered_layers);
+			// The target is shallower than its new parents allow, so it (and what hangs from it) moves down.
+			relocateNodes({ target }, &touched, out_altered_layers);
 			if (out_altered_layers && !edge_was_dissolved && edge_layer_before >= 0 && edge->getLayer() == edge_layer_before) {
 				out_altered_layers->insert(edge_layer_before);
 			}
-			minimizeCrossingsAfterRelocation(sources, touched);
+			minimizeCrossings(10, touched.min, touched.max);
 		}
 		else {
 			bool outside_disruption = (!touched.empty());
@@ -1029,10 +1011,7 @@ namespace hypergraph_logic {
 					}
 				}
 
-				LayerSpan touched;
-				if (relocateNodes(relocations_vec, &touched, out_altered_layers)) {
-					minimizeCrossings(10, touched.min, touched.max);
-				}
+				relocateAndMinimize(relocations_vec, out_altered_layers);
 			}
 			else {
 				// If it has both parents and children, the parents need to assume the connections 
@@ -1052,11 +1031,7 @@ namespace hypergraph_logic {
 
 				HyperedgePtr edge = createHyperedge(parents, children, -1);
 
-				LayerSpan touched;
-				if (relocateNodes(edge->getTargets(), &touched, out_altered_layers)) {
-					minimizeCrossingsAfterRelocation(parents, touched);
-				}
-				else {
+				if (!relocateAndMinimize(edge->getTargets(), out_altered_layers)) {
 					settleAndMinimizeIfSplit(edge, nullptr, out_altered_layers);
 				}
 			}
@@ -1093,36 +1068,16 @@ namespace hypergraph_logic {
 				remaining_sources.erase(std::remove(remaining_sources.begin(), remaining_sources.end(), parent), remaining_sources.end());
 				removeTargetsFromHyperedge(edge, { child.get() }, false, out_altered_layers);
 				if (remaining_sources.empty()) {
-					LayerSpan touched;
-					if (relocateNodes({ child }, &touched, out_altered_layers)) {
-						if (child->getChildren().empty()) {
-							// The child has no children, so no new dummies could have been added
-							// and therefore there is nothing to minimize because the function
-							// choosePositionForRelocatedNode will handle everything for us.
-							return;
-						}
-						minimizeCrossingsAfterRelocation(child->getParents(), touched);
-					}
+					// The child may move up (a leaf too: its new layer is sifted, not just left
+					// where choosePositionForRelocatedNode guessed).
+					relocateAndMinimize({ child }, out_altered_layers);
 					return;
 				}
 
 				const auto& new_edge = createHyperedge(remaining_sources, { child }, -1);
 				inheritLineStyle(new_edge, edge);
-				LayerSpan touched;
-				if (relocateNodes({ child }, &touched, out_altered_layers)) {
-					if (child->getChildren().empty()) {
-						// The child has no children, so we just have to take care of the possibly
-						// created dummy nodes in the new edge (if relocating has caused splitting).
-						std::vector<Node*> nodes_to_minimize;
-						int min_layer = INT_MAX, max_layer = 0;
-						collectSegmentDummies(new_edge, nodes_to_minimize, min_layer, max_layer, /*include_real_sources=*/false);
-						minimizeCrossingsForNodes(nodes_to_minimize, min_layer, max_layer);
-					}
-					else {
-						minimizeCrossingsAfterRelocation(child->getParents(), touched);
-					}
-				}
-				else {
+				// The relocation re-settles new_edge (it reaches the child), so its dummies are sifted too.
+				if (!relocateAndMinimize({ child }, out_altered_layers)) {
 					std::vector<Node*> nodes_to_minimize;
 					int min_layer = INT_MAX, max_layer = 0;
 					int k = settleEdgePlacementAndCollectDummies(new_edge, nodes_to_minimize, min_layer, max_layer, /*include_real_sources=*/false, nullptr, out_altered_layers);
@@ -1176,12 +1131,7 @@ namespace hypergraph_logic {
 				removeHyperedgeFromLayer(original_edge->getLayer(), original_edge);
 			}
 
-			if (relocation) {
-				LayerSpan touched;
-				if (relocateNodes(original_edge->getTargets(), &touched, out_altered_layers)) {
-					minimizeCrossingsForRelocatedTargets(original_edge, touched);
-				}
-			}
+			if (relocation) relocateAndMinimize(original_edge->getTargets(), out_altered_layers);
 			cleanUp();
 			return;
 		}
@@ -1273,12 +1223,7 @@ namespace hypergraph_logic {
 		// targets, so those targets (and their descendants) may need
 		// to relocate upward.
 		// ----------------------------------------------------------------
-		if (relocation) {
-			LayerSpan touched;
-			if (relocateNodes(original_edge->getTargets(), &touched, out_altered_layers)) {
-				minimizeCrossingsForRelocatedTargets(original_edge, touched);
-			}
-		}
+		if (relocation) relocateAndMinimize(original_edge->getTargets(), out_altered_layers);
 		cleanUp();
 	}
 
@@ -1317,6 +1262,13 @@ namespace hypergraph_logic {
 			}
 		}
 
+		// Every way out: the removed targets lost these sources as parents, whatever shape the edge
+		// is left in, so they (and what hangs from them) may move up.
+		const auto relocate = [&] {
+			if (relocation) relocateAndMinimize(targets_to_relocate, out_altered_layers);
+			cleanUp();
+			};
+
 		if (original_edge->getTargets().empty()) {
 			// Edge has no targets left — dissolve everything. Whole-edge removal never counts
 			// as an altered layer.
@@ -1325,13 +1277,7 @@ namespace hypergraph_logic {
 			if (original_edge->getLayer() >= 0) {
 				removeHyperedgeFromLayer(original_edge->getLayer(), original_edge);
 			}
-			if (relocation) {
-				LayerSpan touched;
-				if (relocateNodes(targets_to_relocate, &touched, out_altered_layers)) {
-					minimizeCrossings(10, touched.min, touched.max);
-				}
-			}
-			cleanUp();
+			relocate();
 			return;
 		}
 
@@ -1341,13 +1287,14 @@ namespace hypergraph_logic {
 			if (out_altered_layers && original_edge->getLayer() >= 0) {
 				out_altered_layers->insert(original_edge->getLayer());
 			}
+			relocate();
 			return;
 		}
 		int k = edgeIsShort(original_edge);
 		if (k >= 0) {
 			// The edge is now short, so just collapse the segments and add it to the new layer.
 			collapseToShortLayer(original_edge, k, out_altered_layers);
-			cleanUp();
+			relocate();
 			return;
 		}
 
@@ -1426,13 +1373,7 @@ namespace hypergraph_logic {
 		// parent may have changed and they (and descendants) must relocate 
 		// upward. Collect all affected nodes and batch-relocate.
 		// ----------------------------------------------------------------
-		if (relocation) {
-			LayerSpan touched;
-			if (relocateNodes(targets_to_relocate, &touched, out_altered_layers)) {
-				minimizeCrossingsForRelocatedTargets(original_edge, touched);
-			}
-		}
-		cleanUp();
+		relocate();
 	}
 
 	// ============================================================================
@@ -1729,15 +1670,12 @@ namespace hypergraph_logic {
 		// span can only be one layer too deep because of it, so the node's layer is merged in.
 		touched.add(node->getLayer());
 
-		if (no_parents != no_children) {
-			// A root with its subtree, or a leaf with the dummies of its incoming edges: sift
+		if (!no_parents || !no_children) {
+			// A root with its subtree, a leaf with the dummies of its incoming edges, or both: sift
 			// the layers something was placed at, the node's own layer included, so it only
 			// moves away from where choosePositionForRelocatedNode put it if that removes
 			// crossings.
 			minimizeCrossings(3, touched.min, touched.max);
-		}
-		else if (!no_parents && !no_children) {
-			minimizeCrossingsAfterRelocation(parents, touched, 3);
 		}
 		// An isolated node just lands where choosePositionForRelocatedNode put it: nothing
 		// else was placed.

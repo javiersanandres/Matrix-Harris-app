@@ -8,6 +8,10 @@
 #include "ViewOverlays.h"
 #include "DiagramExport.h"
 #include "GurobiGuide.h"
+#include "DiagramTabWidget.h"
+#include "HelpNotifier.h"
+#include "OptionsHelp.h"
+#include "Tutorial.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -31,6 +35,7 @@
 #include <QPdfWriter>
 #include <QSettings>
 #include <QStatusBar>
+#include <QTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -186,14 +191,137 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
 
         // ── Ayuda ─────────────────────────────────────────────────────────────────
         QMenu* ayuda = addMenu(QStringLiteral("Ayuda"));
+        QAction* tutorial = add(ayuda, QStringLiteral("Tutorial de introducción"), QKeySequence(), this,
+            [this] { runTutorial(false); });
         add(ayuda, QStringLiteral("Atajos y controles"), QKeySequence(QStringLiteral("F1")), this, &MainWindow::onAtajos);
+        add(ayuda, QStringLiteral("Ayuda de las opciones"), QKeySequence(), this,
+            [this] { help::showOptionsHelp(this); });
         ayuda->addSeparator();
-        add(ayuda, QStringLiteral("Cómo instalar Gurobi"), QKeySequence(), this,
+        QAction* install = add(ayuda, QStringLiteral("Cómo instalar Gurobi"), QKeySequence(), this,
             [this] { gurobi::showGuide(gurobi::Guide::Install, this); });
-        add(ayuda, QStringLiteral("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
+        QAction* license = add(ayuda, QStringLiteral("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
             [this] { gurobi::showGuide(gurobi::Guide::License, this); });
         ayuda->addSeparator();
         add(ayuda, QStringLiteral("Acerca de Matrix-Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
+
+        help_notifier_ = new HelpNotifier(menuBar(), ayuda, this);
+        help_notifier_->addEntry(QStringLiteral("tutorial"), tutorial);
+        help_notifier_->addEntry(QStringLiteral("gurobiInstall"), install);
+        help_notifier_->addEntry(QStringLiteral("gurobiLicense"), license);
+    }
+
+    // ============================================================================
+    // Pointing to Help, introductory tour
+    // ============================================================================
+
+    void MainWindow::pointToHelpEntry(HelpEntry entry) {
+        switch (entry) {
+        case HelpEntry::Tutorial:      help_notifier_->flag(QStringLiteral("tutorial")); break;
+        case HelpEntry::GurobiInstall: help_notifier_->flag(QStringLiteral("gurobiInstall")); break;
+        case HelpEntry::GurobiLicense: help_notifier_->flag(QStringLiteral("gurobiLicense")); break;
+        }
+    }
+
+    void MainWindow::startTutorialIfFirstRun(bool force) {
+        QSettings settings;
+        if (!force && !tutorial::pendingAtStartup(settings)) return;
+        // A moment for the window to settle on screen first.
+        QTimer::singleShot(300, this, [this] { runTutorial(true); });
+    }
+
+    void MainWindow::runTutorial(bool first_run) {
+        if (tutorial_running_) return;
+
+        // The user practises on an example project, which takes the place of
+        // theirs (there is only one project at a time): unsaved changes are
+        // saved or dropped first, as when opening another project, and their
+        // project comes back from its file afterwards (a new one if it never
+        // had a file, as on the first run).
+        if (!mayContinue()) return;
+        const std::filesystem::path own_file = project_->getFilePath();
+        teardownProject();
+        project_.reset();
+        try {
+            adoptProject(tutorial::exampleProject());
+        }
+        catch (const std::exception&) {
+            // Without the example the tour still explains everything.
+            adoptProject(std::make_unique<Project>("Nuevo proyecto"));
+        }
+        tutorial_running_ = true;
+
+        auto* tour = new tutorial::TutorialOverlay(this, tutorial::introSteps(),
+            [this](tutorial::Target target) { return tutorialTarget(target); },
+            [this](tutorial::View view) {
+                if (view == tutorial::View::Joint) switchToTab(-1);
+                else if (view == tutorial::View::FirstDiagram && project_->getDiagramCount() > 0) switchToTab(0);
+            });
+        connect(tour, &tutorial::TutorialOverlay::finished, this, [this, first_run, own_file](bool completed) {
+            tutorial_running_ = false;
+            restoreAfterTutorial(own_file);
+            QSettings settings;
+            tutorial::markSeen(settings);
+            // Skipped on the first run: show where to find it again.
+            if (first_run && !completed) pointToHelpEntry(HelpEntry::Tutorial);
+            central_view_->setFocus();
+        });
+        tour->start();
+    }
+
+    void MainWindow::restoreAfterTutorial(const std::filesystem::path& own_file) {
+        teardownProject();
+        project_.reset(); // the example goes, whatever was done to it
+        if (!own_file.empty()) {
+            try {
+                adoptProject(Project::load(own_file));
+                return;
+            }
+            catch (const std::exception&) {
+                // Moved or broken meanwhile: a new project instead.
+            }
+        }
+        adoptProject(std::make_unique<Project>("Nuevo proyecto"));
+    }
+
+    bool MainWindow::refuseDuringTutorial() {
+        if (!tutorial_running_) return false;
+        statusBar()->showMessage(
+            QStringLiteral("Termina o salta el tutorial para cambiar de proyecto"), 4000);
+        return true;
+    }
+
+    QRect MainWindow::tutorialTarget(tutorial::Target target) const {
+        using T = tutorial::Target;
+        auto area = [this](const QWidget* w) {
+            if (!w || !w->isVisible()) return QRect();
+            return QRect(w->mapTo(this, QPoint(0, 0)), w->size());
+        };
+        auto menuTitle = [this](const QString& title) {
+            for (QAction* a : menuBar()->actions()) {
+                if (a->text() != title) continue;
+                const QRect r = menuBar()->actionGeometry(a);
+                return QRect(menuBar()->mapTo(this, r.topLeft()), r.size());
+            }
+            return QRect();
+        };
+        // The strip's visible part only (it scrolls).
+        auto inStrip = [&](const QWidget* w) { return area(w).intersected(area(tab_bar_->tabStrip())); };
+
+        DiagramTabWidget* first = tab_bar_->tabAt(0);
+        switch (target) {
+        case T::Canvas:            return area(central_view_);
+        case T::TabStrip:          return area(tab_bar_->tabStrip());
+        case T::FirstTabMiniature: return first ? inStrip(first->miniature()) : QRect();
+        case T::FirstTabName:      return first ? inStrip(first->nameArea()) : QRect();
+        case T::AddTab:            return inStrip(tab_bar_->addButton());
+        case T::JointTab:          return area(tab_bar_->jointTab());
+        case T::MinimizePanel:     return area(minimize_panel_);
+        case T::ZoomLabel:         return area(zoom_label_);
+        case T::FileMenu:          return menuTitle(QStringLiteral("Archivo"));
+        case T::EditMenu:          return menuTitle(QStringLiteral("Editar"));
+        case T::HelpMenu:          return menuTitle(QStringLiteral("Ayuda"));
+        }
+        return QRect();
     }
 
     void MainWindow::setupCentralArea() {
@@ -326,13 +454,19 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         minimize_help_btn_->setObjectName("helpButton");
         minimize_help_btn_->setText("?");
         minimize_help_btn_->setFixedSize(22, 22);
-        minimize_help_btn_->setToolTip(
-            "<b>⚡ Rápido:</b> Intenta encontrar el mejor dibujo con un límite "
-            "de tiempo de 5 segundos.<br><br>"
-            "<b>🐢 Lento:</b> Busca el mejor dibujo sin límite de tiempo. "
-            "Permite pausar la búsqueda y muestra el mejor dibujo encontrado hasta entonces.<br><br>"
-            "💡 Utiliza el modo <b>Lento</b> para mejores dibujos 💡"
-        );
+        minimize_help_btn_->setToolTip(QStringLiteral(
+            "<div style=\"color:#1F2330; font-size:10.5pt;\"><b>Minimizar cruces</b></div>"
+            "<div style=\"color:#4B5068; margin-top:4px;\">Reordena las cajas de cada nivel para que las "
+            "conexiones se crucen lo menos posible. Hay dos modos:</div>"
+            "<table cellspacing=\"0\" cellpadding=\"4\" style=\"margin-top:6px;\">"
+            "<tr><td style=\"color:#D97706;\"><b>Rápido</b></td>"
+            "<td style=\"color:#4B5068;\">Se queda con el mejor orden que encuentra en 5 segundos. "
+            "Ideal mientras editas.</td></tr>"
+            "<tr><td style=\"color:#2F9E6E;\"><b>Lento</b></td>"
+            "<td style=\"color:#4B5068;\">Busca el mejor orden posible, sin límite de tiempo. Puedes pausarlo "
+            "cuando quieras y quedarte con el mejor encontrado hasta entonces.</td></tr></table>"
+            "<div style=\"color:#8A90A2; margin-top:6px;\">Consejo: usa el modo lento para dejar listo un "
+            "esquema terminado.</div>"));
         minimize_panel_->contentLayout()->addWidget(minimize_help_btn_);
 
         mode_fast_btn_->setChecked(true);
@@ -616,6 +750,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     // ============================================================================
 
     void MainWindow::onNuevoProyecto() {
+        if (refuseDuringTutorial()) return;
         if (!mayContinue()) return;
         teardownProject();
         project_.reset(); // only one project (and joint graph) may exist at a time
@@ -638,6 +773,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     }
 
     void MainWindow::onAbrirProyecto() {
+        if (refuseDuringTutorial()) return;
         const QString start = project_->getFilePath().empty() ? QString()
             : QFileInfo(QString::fromStdString(project_->getFilePath().string())).absolutePath();
         const QString path = QFileDialog::getOpenFileName(
@@ -646,6 +782,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     }
 
     void MainWindow::openProject(const QString& path) {
+        if (refuseDuringTutorial()) return;
         if (!QFileInfo::exists(path)) {
             dialogs::showError(this, QStringLiteral("No se encuentra el proyecto"),
                 QStringLiteral("El archivo «%1» ya no existe o se ha movido.").arg(path));
@@ -1217,15 +1354,13 @@ QLabel#what { color: #3A4050; }
     }
 
     void MainWindow::onAcercaDe() {
-        StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Matrix-Harris"), this);
+        StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Matrix-Harris App"), this);
         dlg.setMessage(QStringLiteral(
             "Versión %1\n\n"
-            "Herramienta para crear, organizar y dibujar esquemas jMatrix Harris, "
+            "Herramienta para crear, organizar y dibujar esquemas Matrix Harris,"
+            "así como cualquier otro tipo de esquema jerárquico"
             "con un dibujo automático que minimiza los cruces.\n\n"
-            "Desarrollado por Javier San Andrés.\n"
-            "Construido con Qt %2.")
-            .arg(QApplication::applicationVersion().isEmpty() ? QStringLiteral("1.0") : QApplication::applicationVersion(),
-                 QString::fromLatin1(qVersion())));
+            "Desarrollado por Javier San Andrés.\n"));
         dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();
     }
@@ -1235,6 +1370,12 @@ QLabel#what { color: #3A4050; }
     // ============================================================================
 
     void MainWindow::closeEvent(QCloseEvent* event) {
+        // During the tour the open project is the example: nothing to keep
+        // (the user's own was saved or dropped when the tour began).
+        if (tutorial_running_) {
+            event->accept();
+            return;
+        }
         if (mayContinue()) event->accept();
         else event->ignore();
     }

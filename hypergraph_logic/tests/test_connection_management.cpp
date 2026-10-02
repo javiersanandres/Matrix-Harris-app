@@ -1686,7 +1686,7 @@ namespace hypergraph_logic::hypergraph_tests::connection_management {
 
     TEST_F(ConnectionManagementTest, RelocateNodeToLayer_BeyondLastLayer_IsolatedNode_NoCrash) {
         // Regression test: an isolated node (no parents, no children) sent past last_layer must
-        // not crash minimizeCrossingsAfterRelocation with an INT_MAX sentinel.
+        // not crash the sifting that follows the relocation.
         auto a = g.createNode("a", 0, 0, nullptr, nullptr);
         auto b = g.createNode("b", 0, 0, nullptr, nullptr);
         EXPECT_NO_THROW(g.relocateNodeToLayer(a, 5));

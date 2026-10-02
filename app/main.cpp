@@ -30,6 +30,8 @@ int main(int argc, char* argv[]) {
     // so they are never mistaken for a project to open.
     QStringList args = app.arguments();
     const ui::gurobi::StartupOptions gurobi_options = ui::gurobi::takeStartupOptions(args);
+    // --tutorial: show the introductory tour even if it was already seen.
+    const bool force_tutorial = args.removeAll(QStringLiteral("--tutorial")) > 0;
 
     ui::MainWindow window;
     window.showMaximized();
@@ -39,8 +41,15 @@ int main(int argc, char* argv[]) {
     if (args.size() > 1) window.openProject(args.at(1));
 
     // Whether Gurobi is installed and licensed; if not, a notice says how to
-    // get it once the window is up.
-    ui::gurobi::checkAtStartup(&window, gurobi_options);
+    // get it once the window is up. Then, on the first run, the introductory
+    // tour. A notice the user asked not to see again points to its guide in
+    // Ayuda.
+    ui::gurobi::checkAtStartup(&window, gurobi_options, [&window, force_tutorial](ui::gurobi::Notice silenced) {
+        using Entry = ui::MainWindow::HelpEntry;
+        if (silenced == ui::gurobi::Notice::Install) window.pointToHelpEntry(Entry::GurobiInstall);
+        if (silenced == ui::gurobi::Notice::License) window.pointToHelpEntry(Entry::GurobiLicense);
+        window.startTutorialIfFirstRun(force_tutorial);
+    });
 
     return app.exec();
 }

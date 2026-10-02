@@ -8,7 +8,8 @@ namespace ui {
     // HoverPopup
     //
     // A small frameless, always-on-top label used as a custom "hover card" for
-    // HelpButton. Unlike a native QToolTip -- which is not a real interactive
+    // HelpButton, drawn as the application's cards: a white rounded rectangle
+    // with a hairline border, a soft shadow and a thin accent line on top. Unlike a native QToolTip -- which is not a real interactive
     // widget and can't itself be hovered onto -- this is a genuine QWidget, so
     // entering/leaving IT (not just the button that spawned it) can factor into
     // "is the mouse still over something related to this popup".
@@ -30,6 +31,11 @@ namespace ui {
     protected:
         void enterEvent(QEnterEvent* event) override;
         void leaveEvent(QEvent* event) override;
+        void paintEvent(QPaintEvent* event) override;
+
+    private:
+        // Room around the card for its shadow.
+        static constexpr int SHADOW = 12;
     };
 
 } // namespace ui

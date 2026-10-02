@@ -34,6 +34,10 @@ target_sources(ui_lib
         AppDialogs.cpp
         GurobiGuide.cpp
         GurobiNotice.cpp
+        HelpNotifier.cpp
+        Tutorial.cpp
+        OptionsHelp.cpp
+        PictureViewer.cpp
         DiagramExport.cpp
         ViewOverlays.cpp
         MainWindow.cpp
@@ -60,6 +64,10 @@ target_sources(ui_lib
             ../include/AppDialogs.h
             ../include/GurobiGuide.h
             ../include/GurobiNotice.h
+            ../include/HelpNotifier.h
+            ../include/Tutorial.h
+            ../include/OptionsHelp.h
+            ../include/PictureViewer.h
             ../include/DiagramExport.h
             ../include/ViewOverlays.h
             ../include/MainWindow.h
@@ -80,14 +88,22 @@ target_link_libraries(ui_lib
 
 set_target_properties(ui_lib PROPERTIES AUTOMOC ON)
 
-# Screenshots of the Gurobi guides (GurobiGuide.cpp), embedded as
-# :/gurobi/<instalar|licencia>/NN.png. Whichever are present get embedded;
-# the guide shows a placeholder for any that are missing.
+# Pictures embedded in the executable:
+#   :/gurobi/<instalar|licencia>/NN.png  screenshots of the Gurobi guides
+#                                        (GurobiGuide.cpp; a missing one shows
+#                                        a placeholder);
+#   :/tutorial/<name>.png                pictures of the introductory tour
+#                                        (Tutorial.cpp; a missing one is left out);
+#   :/information/<topic>/NN.png         pictures of the options' help
+#                                        (OptionsHelp.cpp).
 set(UI_RESOURCES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../resources")
-file(GLOB GUROBI_GUIDE_IMAGES CONFIGURE_DEPENDS "${UI_RESOURCES_DIR}/gurobi/*/*.png")
-if(GUROBI_GUIDE_IMAGES)
-    qt_add_resources(ui_lib "gurobi_guides"
+file(GLOB UI_IMAGES CONFIGURE_DEPENDS
+    "${UI_RESOURCES_DIR}/gurobi/*/*.png"
+    "${UI_RESOURCES_DIR}/tutorial/*.png"
+    "${UI_RESOURCES_DIR}/information/*/*.png")
+if(UI_IMAGES)
+    qt_add_resources(ui_lib "ui_images"
         PREFIX "/"
         BASE "${UI_RESOURCES_DIR}"
-        FILES ${GUROBI_GUIDE_IMAGES})
+        FILES ${UI_IMAGES})
 endif()

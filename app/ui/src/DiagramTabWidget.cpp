@@ -106,6 +106,14 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         refreshName();
     }
 
+    QWidget* DiagramTabWidget::miniature() const {
+        return miniature_view_;
+    }
+
+    QWidget* DiagramTabWidget::nameArea() const {
+        return name_edit_->isVisible() ? static_cast<QWidget*>(name_edit_) : name_box_;
+    }
+
     void DiagramTabWidget::setScene(QGraphicsScene* scene) {
         if (QGraphicsScene* old = miniature_view_->scene())
             disconnect(old, nullptr, this, nullptr);

@@ -17,7 +17,13 @@
 
 class QLabel;
 
+namespace ui::tutorial {
+    enum class Target;
+}
+
 namespace ui {
+
+    class HelpNotifier;
 
     // ============================================================================
     // MainWindow
@@ -59,6 +65,19 @@ namespace ui {
 
         // Opens the project at path, asking first about unsaved changes.
         void openProject(const QString& path);
+
+        // ── Pointing the user to Help ─────────────────────────────────────────
+        // Entries of the Ayuda menu the user can be pointed to after dismissing
+        // something that also lives there: a dot on the menu, then on the entry
+        // (see HelpNotifier).
+        enum class HelpEntry { Tutorial, GurobiInstall, GurobiLicense };
+        void pointToHelpEntry(HelpEntry entry);
+
+        // ── Introductory tour ─────────────────────────────────────────────────
+        // Starts it on the first run, i.e. until it has been finished or
+        // skipped once (always, with force: the --tutorial option). Skipping it
+        // that first time points to its entry in Ayuda.
+        void startTutorialIfFirstRun(bool force = false);
 
     protected:
         void closeEvent(QCloseEvent* event) override;
@@ -171,6 +190,20 @@ namespace ui {
         // Returns true if it is safe to proceed (no unsaved changes, or user
         // chose to save or discard them).
         bool mayContinue();
+
+        // ── Introductory tour ─────────────────────────────────────────────────────
+        void runTutorial(bool first_run);
+        // Puts the user's project back once the tour is over: from its file,
+        // or a new one if it had none.
+        void restoreAfterTutorial(const std::filesystem::path& own_file);
+        // Project-replacing commands wait for the tour to end (it shows the
+        // example project); true when one was refused for that.
+        bool refuseDuringTutorial();
+        // Where a part the tour points at is, in this window's coordinates.
+        QRect tutorialTarget(tutorial::Target target) const;
+        bool tutorial_running_ = false;
+
+        HelpNotifier* help_notifier_ = nullptr;
 
         // ── Save helpers ──────────────────────────────────────────────────────────
         bool saveWithPath();   // prompts for a path
