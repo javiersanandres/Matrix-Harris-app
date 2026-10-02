@@ -43,6 +43,7 @@ set(HYPERGRAPH_SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../..")
 set(BENCHMARK_COMMON_SOURCES
     ${HYPERGRAPH_SRC_DIR}/minimizeCrossings.cpp
     ${HYPERGRAPH_SRC_DIR}/minimizeCrossingsILP.cpp
+    ${HYPERGRAPH_SRC_DIR}/GurobiRuntime.cpp
     ${HYPERGRAPH_SRC_DIR}/horizontalCoordinates.cpp
     ${HYPERGRAPH_SRC_DIR}/portAssignment.cpp
     ${HYPERGRAPH_SRC_DIR}/Node.cpp
@@ -54,7 +55,7 @@ set(BENCHMARK_COMMON_SOURCES
     ${HYPERGRAPH_SRC_DIR}/JointGraphicalHypergraph.cpp
     ${UI_DIR}/src/HypergraphRenderer.cpp
     ${UI_DIR}/src/NodeVisuals.cpp
-    $<IF:$<BOOL:${Gurobi_FOUND}>,${HYPERGRAPH_SRC_DIR}/horizontalOrder.cpp,>
+    ${HYPERGRAPH_SRC_DIR}/horizontalOrder.cpp
 )
 
 # ── add_benchmark_executable(<name> <main .cpp>) ─────────────────────────
@@ -75,7 +76,6 @@ function(add_benchmark_executable name main_source)
         PRIVATE
             ${CMAKE_SOURCE_DIR}/hypergraph_logic/include
             ${UI_INCLUDE_DIR}
-            $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_INCLUDE_DIRS},>
     )
 
     target_link_libraries(${name}
@@ -83,7 +83,7 @@ function(add_benchmark_executable name main_source)
             nlohmann_json::nlohmann_json
             ${BENCHMARK_QT_WIDGETS_TARGET}
             highs::highs
-            $<IF:$<BOOL:${Gurobi_FOUND}>,${Gurobi_LIBRARIES},>
+            ${CMAKE_DL_LIBS}
     )
 
     if(MSVC)
@@ -108,7 +108,6 @@ endif()
 
 target_compile_definitions(fullPipelineResults
     PRIVATE
-        GUROBI_AVAILABLE
         BENCHMARK_DIR="${BENCHMARK_DIR}"
 )
 
@@ -126,7 +125,6 @@ endif()
 
 target_compile_definitions(northDagsPipelineResults
     PRIVATE
-        GUROBI_AVAILABLE
         NORTH_BENCHMARK_DIR="${NORTH_BENCHMARK_DIR}"
 )
 

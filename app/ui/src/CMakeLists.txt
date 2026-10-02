@@ -32,6 +32,8 @@ target_sources(ui_lib
         HoverPopup.cpp
         UiStyle.cpp
         AppDialogs.cpp
+        GurobiGuide.cpp
+        GurobiNotice.cpp
         DiagramExport.cpp
         ViewOverlays.cpp
         MainWindow.cpp
@@ -56,6 +58,8 @@ target_sources(ui_lib
             ../include/HoverPopup.h
             ../include/UiStyle.h
             ../include/AppDialogs.h
+            ../include/GurobiGuide.h
+            ../include/GurobiNotice.h
             ../include/DiagramExport.h
             ../include/ViewOverlays.h
             ../include/MainWindow.h
@@ -75,3 +79,15 @@ target_link_libraries(ui_lib
 )
 
 set_target_properties(ui_lib PROPERTIES AUTOMOC ON)
+
+# Screenshots of the Gurobi guides (GurobiGuide.cpp), embedded as
+# :/gurobi/<instalar|licencia>/NN.png. Whichever are present get embedded;
+# the guide shows a placeholder for any that are missing.
+set(UI_RESOURCES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../resources")
+file(GLOB GUROBI_GUIDE_IMAGES CONFIGURE_DEPENDS "${UI_RESOURCES_DIR}/gurobi/*/*.png")
+if(GUROBI_GUIDE_IMAGES)
+    qt_add_resources(ui_lib "gurobi_guides"
+        PREFIX "/"
+        BASE "${UI_RESOURCES_DIR}"
+        FILES ${GUROBI_GUIDE_IMAGES})
+endif()

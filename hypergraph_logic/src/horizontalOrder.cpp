@@ -2,10 +2,7 @@
 #include "Highs.h"
 #include "HighsOutcome.h"
 #include "HorizontalOrderBackendTestHook.h"
-
-#ifdef GUROBI_AVAILABLE
-#include <gurobi_c++.h>
-#endif
+#include "GurobiRuntime.h"
 
 #include <algorithm>
 #include <map>
@@ -28,12 +25,11 @@
 // so that index 0 = topmost (highest y) bar on the canvas.
 //
 // Solver backend: the model itself (columns + sparse rows, below) is built
-// once, independent of which solver ends up running iT. HiGHS is
-// always available and is the default/fallback backend. When this
-// translation unit was compiled with Gurobi (GUROBI_AVAILABLE, set by CMake
-// when find_package(Gurobi) succeeds) AND a working Gurobi license is
-// actually present on the machine at runtime, Gurobi is used instead, since
-// it's substantially faster on this kind of MIP.
+// once, independent of which solver ends up running it. HiGHS is
+// always available and is the default/fallback backend. When Gurobi (any
+// version, found at run time, see GurobiRuntime.h) is installed and licensed
+// on the machine, Gurobi is used instead, since it's substantially faster on
+// this kind of MIP.
 // ==============================================================================================
 namespace horizontal_overlapping_internal {
 
@@ -128,75 +124,33 @@ namespace horizontal_overlapping_internal {
             return result;
         }
 
-#ifdef GUROBI_AVAILABLE
         // ── Gurobi backend ─────────────────────────────────────────────────────
 
+        // Installed and licensed here (checked once per process, see
+        // GurobiRuntime.h).
         bool gurobiUsable() {
-            static const bool usable = [] {
-                try {
-                    GRBEnv env(true); // empty/default env; construction is the license check
-                    env.set(GRB_IntParam_OutputFlag, 0);
-                    env.start();
-                    return true;
-                }
-                catch (GRBException&) {
-                    return false;
-                }
-                }();
-            return usable;
+            return gurobiStatus() == GurobiStatus::Ready;
         }
 
         MipSolveResult solveWithGurobi(const MipModel& m, int total_mip_layers) {
+            GurobiMip mip;
+            mip.lower = m.col_lower;
+            mip.upper = m.col_upper;
+            mip.cost = m.col_cost;
+            mip.start = m.col_guess; // warm start from the layer's existing hyperedge order
+            mip.binary.reserve(m.col_integrality.size());
+            for (HighsVarType t : m.col_integrality) mip.binary.push_back(t == HighsVarType::kInteger);
+            mip.rows.reserve(m.rows.size());
+            for (const auto& row : m.rows)
+                mip.rows.push_back({ row.idx.data(), row.val.data(), static_cast<int>(row.idx.size()), row.lo, row.hi });
+            mip.time_limit = std::min(kSolveTimeLimitSeconds, kSolveAllLayersTimeLimitSeconds / total_mip_layers);
+
+            GurobiSolution solution = solveMipWithGurobi(mip);
             MipSolveResult result;
-            try {
-                GRBEnv env(true);
-                env.set(GRB_IntParam_OutputFlag, 0);
-                env.start();
-                GRBModel model(env);
-                model.set(GRB_DoubleParam_TimeLimit, std::min(kSolveTimeLimitSeconds, kSolveAllLayersTimeLimitSeconds / total_mip_layers));
-
-                int n = static_cast<int>(m.col_lower.size());
-                std::vector<GRBVar> vars(n);
-                for (int i = 0; i < n; i++) {
-                    char type = (m.col_integrality[i] == HighsVarType::kInteger) ? GRB_BINARY : GRB_CONTINUOUS;
-                    double lb = (m.col_lower[i] <= -kInf) ? -GRB_INFINITY : m.col_lower[i];
-                    double ub = (m.col_upper[i] >= kInf) ? GRB_INFINITY : m.col_upper[i];
-                    vars[i] = model.addVar(lb, ub, m.col_cost[i], type);
-                }
-                model.update(); // vars must exist before addRange() can reference them below
-
-                for (const auto& row : m.rows) {
-                    GRBLinExpr expr = 0.0;
-                    for (size_t k = 0; k < row.idx.size(); k++)
-                        expr += row.val[k] * vars[row.idx[k]];
-                    double lo = (row.lo <= -kInf) ? -GRB_INFINITY : row.lo;
-                    double hi = (row.hi >= kInf) ? GRB_INFINITY : row.hi;
-                    model.addRange(expr, lo, hi);
-                }
-
-                model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
-
-                // Warm start from the layer's existing hyperedge order.
-                for (int i = 0; i < n; i++) vars[i].set(GRB_DoubleAttr_Start, m.col_guess[i]);
-
-                model.optimize();
-
-                int status = model.get(GRB_IntAttr_Status);
-                bool have_feasible_solution =
-                    (status == GRB_OPTIMAL) || (status == GRB_SUBOPTIMAL) ||
-                    (model.get(GRB_IntAttr_SolCount) > 0);
-                if (!have_feasible_solution) return result;
-
-                result.success = true;
-                result.col_value.resize(n);
-                for (int i = 0; i < n; i++) result.col_value[i] = vars[i].get(GRB_DoubleAttr_X);
-            }
-            catch (GRBException&) {
-                result = MipSolveResult(); // discard any partial state; report failure
-            }
+            result.success = solution.success;
+            result.col_value = std::move(solution.x);
             return result;
         }
-#endif
 
     } // namespace
 
@@ -208,11 +162,7 @@ namespace horizontal_overlapping_internal {
     }
 
     bool isGurobiUsableForHorizontalOrderTesting() {
-#ifdef GUROBI_AVAILABLE
         return gurobiUsable();
-#else
-        return false;
-#endif
     }
 
     HorizontalOrderSolver::HorizontalOrderSolver(
@@ -412,20 +362,16 @@ namespace horizontal_overlapping_internal {
             result = solveWithHighs(model, total_mip_layers_);
             break;
         case ILPBackendOverride::kForceGurobi:
-#ifdef GUROBI_AVAILABLE
             result = solveWithGurobi(model, total_mip_layers_);
-#endif
             // No fallback here on purpose: a caller that explicitly forced
             // Gurobi wants to know Gurobi failed, not get a HiGHS number back
             // mislabeled as Gurobi's.
             break;
         case ILPBackendOverride::kAuto:
         default:
-#ifdef GUROBI_AVAILABLE
             if (gurobiUsable()) {
                 result = solveWithGurobi(model, total_mip_layers_);
             }
-#endif
             if (!result.success) {
                 result = solveWithHighs(model, total_mip_layers_);
             }

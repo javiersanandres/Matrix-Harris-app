@@ -7,6 +7,7 @@ add_executable(app_logic_tests
     test_project.cpp
     test_uncertain_connections.cpp
     test_history.cpp
+    test_gurobi_notice.cpp
 )
 
 target_include_directories(app_logic_tests

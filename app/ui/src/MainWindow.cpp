@@ -7,6 +7,7 @@
 #include "UiStyle.h"
 #include "ViewOverlays.h"
 #include "DiagramExport.h"
+#include "GurobiGuide.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -186,6 +187,11 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         // ── Ayuda ─────────────────────────────────────────────────────────────────
         QMenu* ayuda = addMenu(QStringLiteral("Ayuda"));
         add(ayuda, QStringLiteral("Atajos y controles"), QKeySequence(QStringLiteral("F1")), this, &MainWindow::onAtajos);
+        ayuda->addSeparator();
+        add(ayuda, QStringLiteral("Cómo instalar Gurobi"), QKeySequence(), this,
+            [this] { gurobi::showGuide(gurobi::Guide::Install, this); });
+        add(ayuda, QStringLiteral("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
+            [this] { gurobi::showGuide(gurobi::Guide::License, this); });
         ayuda->addSeparator();
         add(ayuda, QStringLiteral("Acerca de Matrix-Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
     }
@@ -1214,11 +1220,11 @@ QLabel#what { color: #3A4050; }
         StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Matrix-Harris"), this);
         dlg.setMessage(QStringLiteral(
             "Versión %1\n\n"
-            "Herramienta para crear, organizar y dibujar esquemas jerárquicos de cajas y conexiones, "
+            "Herramienta para crear, organizar y dibujar esquemas jMatrix Harris, "
             "con un dibujo automático que minimiza los cruces.\n\n"
             "Desarrollado por Javier San Andrés.\n"
             "Construido con Qt %2.")
-            .arg(QApplication::applicationVersion().isEmpty() ? QStringLiteral("0.1.0") : QApplication::applicationVersion(),
+            .arg(QApplication::applicationVersion().isEmpty() ? QStringLiteral("1.0") : QApplication::applicationVersion(),
                  QString::fromLatin1(qVersion())));
         dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();

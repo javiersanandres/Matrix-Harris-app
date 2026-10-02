@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "GurobiNotice.h"
 #include <QApplication>
 #include <QLibraryInfo>
 #include <QLocale>
@@ -25,13 +26,21 @@ int main(int argc, char* argv[]) {
         }
     }
 
+    // The Gurobi developer options (see GurobiNotice.h) are taken out first,
+    // so they are never mistaken for a project to open.
+    QStringList args = app.arguments();
+    const ui::gurobi::StartupOptions gurobi_options = ui::gurobi::takeStartupOptions(args);
+
     ui::MainWindow window;
     window.showMaximized();
 
     // "MatrixHarrisApp proyecto.json" (e.g. opening a project from the file
     // explorer) starts with that project open.
-    const QStringList args = app.arguments();
     if (args.size() > 1) window.openProject(args.at(1));
+
+    // Whether Gurobi is installed and licensed; if not, a notice says how to
+    // get it once the window is up.
+    ui::gurobi::checkAtStartup(&window, gurobi_options);
 
     return app.exec();
 }

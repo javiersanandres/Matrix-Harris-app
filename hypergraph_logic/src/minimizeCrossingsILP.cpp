@@ -3,10 +3,8 @@
 #include "HighsOutcome.h"
 #include "ILPBackendTestHook.h"
 #include "ILPCancellationToken.h"
+#include "GurobiRuntime.h"
 
-#ifdef GUROBI_AVAILABLE
-#include "gurobi_c++.h"
-#endif
 
 #include <algorithm>
 #include <cmath>
@@ -42,11 +40,10 @@
 //
 // Solver backend: the model itself (columns + sparse rows, below) is built
 // once, independent of which solver ends up running it. HiGHS is always
-// available and is the default/fallback backend. When this translation unit
-// was compiled with Gurobi (GUROBI_AVAILABLE, set by CMake when
-// find_package(Gurobi) succeeds) *and* a working Gurobi license is actually
-// present on the machine at runtime, Gurobi is used instead, since it's
-// substantially faster on this kind of MIP.
+// available and is the default/fallback backend. When Gurobi (any version,
+// found at run time, see GurobiRuntime.h) is installed and licensed on the
+// machine, Gurobi is used instead, since it's substantially faster on this
+// kind of MIP.
 //
 // Two run modes (see ILPCancellationToken.h for the public API): by default
 // ("fast"), the exact-solve attempt is capped at kILPTimeBudgetSeconds and
@@ -190,114 +187,49 @@ namespace sifting_internal {
 			return result;
 		}
 
-#ifdef GUROBI_AVAILABLE
 		// ── Gurobi backend ─────────────────────────────────────────────────────
 		//
-		// Only ever compiled in when CMake's find_package(Gurobi) succeeded --
-		// but that only proves the SDK is installed, not that this machine has a
-		// currently-valid license (a floating/token license server can be
-		// unreachable, a named-user license can have expired, etc.), and there's
-		// no reliable way to check that ahead of time other than asking Gurobi.
-		// So both functions below are written to fail safely: constructing
-		// GRBEnv *is* the license check, everything is wrapped in
-		// try/catch(GRBException&), and any failure -- license or otherwise --
-		// comes back as an unsuccessful ILPSolveResult rather than propagating,
-		// so the caller (runCrossingILP) falls back to HiGHS transparently.
+		// Gurobi is found at run time (any version, see GurobiRuntime.h), and
+		// whether it has a currently-valid license (a license server can be
+		// unreachable, a named-user license can have expired, etc.) can only be
+		// known by asking it. So this backend fails safely: any problem, license
+		// or otherwise, comes back as an unsuccessful ILPSolveResult rather than
+		// propagating, so the caller (runCrossingILP) falls back to HiGHS
+		// transparently.
 
-		// Whether Gurobi is actually usable here, checked once and cached for the
-		// life of the process. Verifying a license can mean a round trip to a
-		// license server, and once we know the answer there's no reason to pay
-		// that cost again on every subsequent ILP solve.
+		// Whether Gurobi is installed and licensed here, checked once and cached
+		// for the life of the process: verifying a license can mean a round
+		// trip to a license server.
 		bool gurobiUsable() {
-			static const bool usable = [] {
-				try {
-					GRBEnv env(true); // empty/default env; construction is the license check
-					env.set(GRB_IntParam_OutputFlag, 0);
-					env.start();
-					return true;
-				}
-				catch (GRBException&) {
-					return false;
-				}
-				}();
-			return usable;
+			return gurobiStatus() == GurobiStatus::Ready;
 		}
-
-		// Small GRBCallback that cooperatively asks Gurobi to stop as soon as
-		// `token` is cancelled. Gurobi invokes callback() periodically during
-		// the MIP search on its own solving thread, so no separate watcher
-		// thread is needed -- the same pattern as the HiGHS interrupt callback
-		// above, just via Gurobi's own callback mechanism instead.
-		class CancelCallback : public GRBCallback {
-		public:
-			explicit CancelCallback(ILPCancellationToken* token) : token_(token) {}
-		protected:
-			void callback() override {
-				if (token_ != nullptr && token_->isCancelled()) {
-					abort();
-				}
-			}
-		private:
-			ILPCancellationToken* token_;
-		};
 
 		// token == nullptr: "fast" mode, capped at time_budget_seconds.
-		// token != nullptr: "slow" mode -- no TimeLimit is set at all, and a
-		// CancelCallback is registered instead (see above).
+		// token != nullptr: "slow" mode -- no time limit at all; Gurobi polls
+		// the token during the search instead and stops as soon as it is
+		// cancelled, keeping the best order found so far (the same pattern as
+		// the HiGHS interrupt callback above).
 		ILPSolveResult solveWithGurobi(const ILPModel& m, double time_budget_seconds, ILPCancellationToken* token) {
+			GurobiMip mip;
+			mip.lower = m.col_lower;
+			mip.upper = m.col_upper;
+			mip.cost = m.col_cost;
+			mip.binary.assign(m.col_lower.size(), true);
+			mip.start = m.col_guess; // warm start from the heuristic's already-computed block order
+			mip.rows.reserve(m.rows.size());
+			for (const auto& row : m.rows)
+				mip.rows.push_back({ row.idx.data(), row.val.data(), static_cast<int>(row.idx.size()), row.lo, row.hi });
+			if (token != nullptr) mip.should_stop = [token] { return token->isCancelled(); };
+			else                  mip.time_limit = time_budget_seconds;
+
+			GurobiSolution solution = solveMipWithGurobi(mip);
 			ILPSolveResult result;
-			try {
-				GRBEnv env(true);
-				env.set(GRB_IntParam_OutputFlag, 0);
-				env.start();
-				GRBModel model(env);
-				CancelCallback cancel_cb(token);
-				if (token != nullptr) {
-					model.setCallback(&cancel_cb);
-				}
-				else {
-					model.set(GRB_DoubleParam_TimeLimit, time_budget_seconds);
-				}
-
-				int n = static_cast<int>(m.col_lower.size());
-				std::vector<GRBVar> vars(n);
-				for (int i = 0; i < n; i++) {
-					vars[i] = model.addVar(m.col_lower[i], m.col_upper[i], m.col_cost[i], GRB_BINARY);
-				}
-				model.update(); // vars must exist before addRange() can reference them below
-
-				for (const auto& row : m.rows) {
-					GRBLinExpr expr = 0.0;
-					for (size_t k = 0; k < row.idx.size(); k++)
-						expr += row.val[k] * vars[row.idx[k]];
-					double lo = (row.lo <= -kInf) ? -GRB_INFINITY : row.lo;
-					double hi = (row.hi >= kInf) ? GRB_INFINITY : row.hi;
-					model.addRange(expr, lo, hi);
-				}
-
-				model.set(GRB_IntAttr_ModelSense, GRB_MINIMIZE);
-
-				// Warm start from the heuristic's already-computed block order.
-				for (int i = 0; i < n; i++) vars[i].set(GRB_DoubleAttr_Start, m.col_guess[i]);
-
-				model.optimize();
-
-				int status = model.get(GRB_IntAttr_Status);
-				bool have_feasible_solution =
-					(status == GRB_OPTIMAL) || (model.get(GRB_IntAttr_SolCount) > 0);
-				if (!have_feasible_solution) return result;
-
-				result.success = true;
-				result.col_value.resize(n);
-				for (int i = 0; i < n; i++) result.col_value[i] = vars[i].get(GRB_DoubleAttr_X);
-				result.objective = model.get(GRB_DoubleAttr_ObjVal);
-			}
-			catch (GRBException&) {
-				result = ILPSolveResult(); // discard any partial state; report failure
-			}
+			if (!solution.success) return result;
+			result.success = true;
+			result.col_value = std::move(solution.x);
+			result.objective = solution.objective;
 			return result;
 		}
-#endif
 
 	} // namespace
 
@@ -314,11 +246,7 @@ namespace sifting_internal {
 	}
 
 	bool isGurobiUsableForTesting() {
-#ifdef GUROBI_AVAILABLE
 		return gurobiUsable();
-#else
-		return false;
-#endif
 	}
 
 	// ── interruptible-solve hook (see ILPCancellationToken.h) ──────────────────
@@ -545,20 +473,16 @@ namespace sifting_internal {
 			result = solveWithHighs(ilp_model, time_budget_seconds, cancel_token);
 			break;
 		case ILPBackendOverride::kForceGurobi:
-#ifdef GUROBI_AVAILABLE
 			result = solveWithGurobi(ilp_model, time_budget_seconds, cancel_token);
-#endif
 			// No fallback here on purpose: a caller that explicitly forced
 			// Gurobi wants to know Gurobi failed, not get a HiGHS number back
 			// mislabeled as Gurobi's.
 			break;
 		case ILPBackendOverride::kAuto:
 		default:
-#ifdef GUROBI_AVAILABLE
 			if (gurobiUsable()) {
 				result = solveWithGurobi(ilp_model, time_budget_seconds, cancel_token);
 			}
-#endif
 			if (!result.success) {
 				result = solveWithHighs(ilp_model, time_budget_seconds, cancel_token);
 			}

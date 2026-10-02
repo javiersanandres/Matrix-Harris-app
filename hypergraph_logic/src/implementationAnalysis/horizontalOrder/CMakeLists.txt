@@ -1,34 +1,3 @@
-find_package(Gurobi QUIET)
-
-if(NOT Gurobi_FOUND)
-    set(GUROBI_HOME "C:/gurobi1301/win64" CACHE PATH "Gurobi installation directory")
-
-    if(EXISTS "${GUROBI_HOME}")
-        set(Gurobi_INCLUDE_DIRS "${GUROBI_HOME}/include")
-
-        set(Gurobi_CPP_LIB_DEBUG   "${GUROBI_HOME}/lib/gurobi_c++mdd2017.lib")
-        set(Gurobi_CPP_LIB_RELEASE "${GUROBI_HOME}/lib/gurobi_c++md2017.lib")
-        set(Gurobi_C_LIB           "${GUROBI_HOME}/lib/gurobi130.lib")
-
-        set(Gurobi_LIBRARIES
-            $<IF:$<CONFIG:Debug>,${Gurobi_CPP_LIB_DEBUG},${Gurobi_CPP_LIB_RELEASE}>
-            ${Gurobi_C_LIB}
-        )
-
-        set(Gurobi_FOUND TRUE)
-        message(STATUS "Gurobi found at: ${GUROBI_HOME}")
-    else()
-        # No longer fatal: horizontalOrder.cpp falls back to HiGHS when Gurobi
-        # isn't available, so this executable (and its ILP-Gurobi benchmark
-        # column) just skips Gurobi rather than failing to configure.
-        message(STATUS
-            "Gurobi not found at ${GUROBI_HOME} -- horizontalOrderResults will "
-            "use HiGHS only (set -DGUROBI_HOME=<path> to enable the Gurobi column).")
-    endif()
-else()
-    message(STATUS "Gurobi found via find_package")
-endif()
-
 # ============================================================================
 # JSON (nlohmann) - header-only, fetched from official release tarball
 # ============================================================================
@@ -43,6 +12,7 @@ FetchContent_MakeAvailable(json)
 add_executable(horizontalOrderResults
     horizontalOrderResults.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../horizontalOrder.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../GurobiRuntime.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../horizontalCoordinates.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../minimizeCrossings.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Node.cpp
@@ -72,15 +42,10 @@ target_link_libraries(horizontalOrderResults
         highs::highs
 )
 
-# Gurobi, so horizontalOrder.cpp's Gurobi backend (and this program's
-# ILP-Gurobi benchmark column, via HorizontalOrderBackendTestHook.h) can
-# actually be compiled and exercised here. Optional: if Gurobi isn't found,
-# horizontalOrderResults still builds and runs, just without that column.
-if(Gurobi_FOUND)
-    target_compile_definitions(horizontalOrderResults PRIVATE GUROBI_AVAILABLE)
-    target_include_directories(horizontalOrderResults PRIVATE ${Gurobi_INCLUDE_DIRS})
-    target_link_libraries(horizontalOrderResults PRIVATE ${Gurobi_LIBRARIES})
-endif()
+# Gurobi needs nothing here: GurobiRuntime.cpp loads whatever version is
+# installed at run time, so the ILP-Gurobi column works wherever Gurobi is
+# installed and licensed.
+target_link_libraries(horizontalOrderResults PRIVATE ${CMAKE_DL_LIBS})
 
 
 if(MSVC)
