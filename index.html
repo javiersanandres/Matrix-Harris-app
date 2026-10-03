@@ -239,7 +239,7 @@
         var version = (release.tag_name || "").replace(/^v/, "");
         var mb = Math.round(setup.size / (1024 * 1024));
         var meta = document.getElementById("meta");
-        meta.textContent = "Versión " + version + " · " + mb + " MB · Gratuito · Windows 10 y 11 (64 bits) · ";
+        meta.textContent = "Versión " + version + " · " + mb + " MB · Windows 10 y 11 (64 bits) · ";
         var notes = document.createElement("a");
         notes.href = release.html_url;
         notes.textContent = "Novedades";
