@@ -1,0 +1,252 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Taller Matrix Harris</title>
+  <meta name="description" content="Crea, organiza y une matrices Harris con un dibujo automático claro. Descarga gratuita para Windows.">
+  <link rel="icon" type="image/png" href="favicon.png">
+  <style>
+    :root {
+      --accent: #6366F1;
+      --violet: #8B5CF6;
+      --ink: #1F2330;
+      --ink-soft: #4B5068;
+      --muted: #8A90A2;
+      --bg: #F5F6FA;
+      --card: #FFFFFF;
+      --line: #E3E6EF;
+      --accent-soft: #EEF0FF;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --ink: #ECEDF3;
+        --ink-soft: #B9BDCC;
+        --muted: #8A90A2;
+        --bg: #14161D;
+        --card: #1D2029;
+        --line: #2C303C;
+        --accent-soft: #262A45;
+      }
+    }
+    * { box-sizing: border-box; }
+    html { scroll-behavior: smooth; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--ink);
+      font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+      line-height: 1.55;
+    }
+    a { color: var(--accent); }
+    .wrap { max-width: 1080px; margin: 0 auto; padding: 0 16px; }
+
+    /* ── Hero ─────────────────────────────────────────────────────── */
+    header.hero {
+      background: linear-gradient(135deg, var(--accent), var(--violet));
+      color: #fff;
+      padding: 56px 0 120px;
+      text-align: center;
+    }
+    .hero img.logo {
+      width: 112px; height: 112px;
+      filter: drop-shadow(0 10px 24px rgba(20, 16, 60, .35));
+    }
+    .hero h1 { font-size: clamp(2rem, 5vw, 3rem); margin: 18px 0 8px; letter-spacing: -.5px; }
+    .hero p.tagline { font-size: clamp(1.05rem, 2.4vw, 1.3rem); max-width: 640px; margin: 0 auto 30px; opacity: .95; }
+    .download {
+      display: inline-flex; align-items: center; gap: 12px;
+      background: #fff; color: var(--accent);
+      font-weight: 700; font-size: 1.15rem; text-decoration: none;
+      padding: 16px 30px; border-radius: 14px;
+      box-shadow: 0 12px 30px rgba(20, 16, 60, .3);
+      transition: transform .15s ease, box-shadow .15s ease;
+    }
+    .download:hover { transform: translateY(-2px); box-shadow: 0 16px 36px rgba(20, 16, 60, .38); }
+    .download svg { width: 22px; height: 22px; }
+    .meta { margin-top: 14px; font-size: .95rem; opacity: .9; }
+    .meta a { color: #fff; }
+
+    /* ── Screenshot, in a window frame ────────────────────────────── */
+    .shot {
+      margin: -84px auto 0;
+      max-width: 980px;
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 24px 60px rgba(20, 22, 40, .18);
+    }
+    .shot .bar {
+      display: flex; align-items: center; gap: 8px;
+      padding: 9px 14px; font-size: .85rem; color: var(--ink-soft);
+      border-bottom: 1px solid var(--line);
+      background: var(--card);
+    }
+    .shot .bar img { width: 16px; height: 16px; }
+    .shot > img { display: block; width: 100%; height: auto; background: #fff; }
+
+    /* ── Sections ─────────────────────────────────────────────────── */
+    section { padding: 64px 0 8px; }
+    h2 { font-size: 1.7rem; margin: 0 0 8px; letter-spacing: -.3px; }
+    .lead { color: var(--ink-soft); margin: 0 0 28px; max-width: 720px; }
+
+    .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+    .card {
+      background: var(--card);
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      padding: 20px;
+    }
+    .card .icon {
+      width: 40px; height: 40px; border-radius: 10px;
+      display: grid; place-items: center;
+      background: var(--accent-soft); color: var(--accent);
+      margin-bottom: 12px;
+    }
+    .card .icon svg { width: 22px; height: 22px; }
+    .card h3 { margin: 0 0 6px; font-size: 1.05rem; }
+    .card p { margin: 0; color: var(--ink-soft); font-size: .95rem; }
+
+    ol.steps { list-style: none; padding: 0; margin: 0; display: grid; gap: 12px; counter-reset: step; }
+    ol.steps li {
+      counter-increment: step;
+      background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+      padding: 16px 18px 16px 64px; position: relative;
+    }
+    ol.steps li::before {
+      content: counter(step);
+      position: absolute; left: 18px; top: 14px;
+      width: 30px; height: 30px; border-radius: 50%;
+      display: grid; place-items: center;
+      background: linear-gradient(135deg, var(--accent), var(--violet));
+      color: #fff; font-weight: 700;
+    }
+    ol.steps b { color: var(--ink); }
+    ol.steps span { color: var(--ink-soft); }
+
+    .note {
+      margin-top: 16px;
+      background: var(--accent-soft);
+      border-radius: 14px;
+      padding: 14px 18px;
+      color: var(--ink-soft);
+      font-size: .95rem;
+    }
+    .note b { color: var(--ink); }
+
+    footer {
+      margin-top: 72px; padding: 28px 0 40px;
+      border-top: 1px solid var(--line);
+      color: var(--muted); font-size: .9rem; text-align: center;
+    }
+    footer a { color: var(--muted); }
+  </style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <img class="logo" src="icon.png" alt="">
+    <h1>Taller Matrix Harris</h1>
+    <p class="tagline">Crea, organiza y une matrices Harris con un dibujo automático, claro y con los mínimos cruces.</p>
+    <a class="download" id="download" href="https://github.com/javiersanandres/Matrix-Harris-app/releases/latest">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 3v12"/><path d="m6 10 6 6 6-6"/><path d="M4 20h16"/></svg>
+      Descargar para Windows
+    </a>
+    <div class="meta" id="meta">Gratuito · Windows 10 y 11 (64 bits)</div>
+  </div>
+</header>
+
+<div class="wrap">
+  <div class="shot">
+    <div class="bar"><img src="favicon.png" alt="">Yacimiento — Taller Matrix Harris</div>
+    <img src="captura.png" alt="Ventana de Taller Matrix Harris con una matriz Harris de doce unidades estratigráficas" width="1600" height="1000">
+  </div>
+
+  <section>
+    <h2>Todo lo que necesitas para tus matrices</h2>
+    <p class="lead">Dibujar una matriz Harris a mano es lento y cada cambio obliga a rehacerla. Aquí solo dices qué unidad está sobre cuál: el dibujo se reorganiza solo.</p>
+    <div class="grid">
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="2" width="8" height="5" rx="1"/><rect x="2" y="17" width="8" height="5" rx="1"/><rect x="14" y="17" width="8" height="5" rx="1"/><path d="M12 7v5M6 12h12M6 12v5M18 12v5"/></svg></div>
+        <h3>Dibujo automático</h3>
+        <p>Tras cada cambio, las cajas y sus conexiones se recolocan solas. Un clic minimiza los cruces de líneas.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="9" height="9" rx="2"/><rect x="13" y="12" width="9" height="9" rx="2"/><path d="M11 7.5h4.5V12"/></svg></div>
+        <h3>Esquema conjunto</h3>
+        <p>Une en un solo esquema los de distintas zonas de la excavación y conecta las unidades que comparten.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/></svg></div>
+        <h3>Edición directa</h3>
+        <p>Crea, conecta y fusiona unidades desde menús en español; arrastra cajas o bloques enteros con el ratón.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16V5a1 1 0 0 1 1-1h11"/></svg></div>
+        <h3>Copiar y pegar</h3>
+        <p>Lleva bloques o esquemas completos a otro esquema, incluso entre dos ventanas abiertas.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 3H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V9z"/><path d="M14 3v6h6M12 18v-6M9 15l3 3 3-3"/></svg></div>
+        <h3>Exporta</h3>
+        <p>Guarda cada esquema como imagen, o el proyecto entero en PDF, listo para tu memoria o informe.</p>
+      </div>
+      <div class="card">
+        <div class="icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-3-6.7L21 8"/><path d="M21 3v5h-5"/></svg></div>
+        <h3>Siempre al día</h3>
+        <p>La aplicación avisa cuando hay una versión nueva y se actualiza sola, sin volver a esta página.</p>
+      </div>
+    </div>
+  </section>
+
+  <section>
+    <h2>Instalación</h2>
+    <p class="lead">Un instalador normal de Windows, en español. No hace falta ser administrador.</p>
+    <ol class="steps">
+      <li><b>Descarga el instalador</b> <span>con el botón de arriba.</span></li>
+      <li><b>Ábrelo.</b> <span>Si Windows muestra «Windows protegió su PC», pulsa <b>Más información</b> y después <b>Ejecutar de todas formas</b>. Aparece porque la aplicación es nueva y aún no la conoce.</span></li>
+      <li><b>Sigue el asistente</b> <span>y abre Taller Matrix Harris desde el menú Inicio. Un tutorial breve te enseña lo esencial.</span></li>
+    </ol>
+    <div class="note">
+      <b>Opcional: Gurobi.</b> La aplicación funciona sin instalar nada más. Con el optimizador Gurobi, gratuito para estudiantes y personal universitario, funciona de forma más rápida y certera. La propia aplicación explica cómo instalarlo en el menú Ayuda.
+    </div>
+  </section>
+</div>
+
+<footer>
+  <div class="wrap">
+    Taller Matrix Harris · Trabajo de Fin de Grado, Universidad Autónoma de Madrid · Javier San Andrés de Pedro<br>
+    <a href="https://github.com/javiersanandres/Matrix-Harris-app">Código fuente</a> ·
+    <a href="https://github.com/javiersanandres/Matrix-Harris-app/releases">Todas las versiones</a> ·
+    <a href="https://github.com/javiersanandres/Matrix-Harris-app/issues">Informar de un problema</a>
+  </div>
+</footer>
+
+<script>
+  // The button downloads the installer of the latest release directly. Without
+  // an answer from GitHub (no release yet, offline...), it keeps pointing to the
+  // releases page.
+  (function () {
+    var repo = "javiersanandres/Matrix-Harris-app";
+    fetch("https://api.github.com/repos/" + repo + "/releases/latest")
+      .then(function (r) { return r.ok ? r.json() : Promise.reject(r.status); })
+      .then(function (release) {
+        var setup = (release.assets || []).filter(function (a) { return /-setup\.exe$/i.test(a.name); })[0];
+        if (!setup) return;
+        document.getElementById("download").href = setup.browser_download_url;
+        var version = (release.tag_name || "").replace(/^v/, "");
+        var mb = Math.round(setup.size / (1024 * 1024));
+        var meta = document.getElementById("meta");
+        meta.textContent = "Versión " + version + " · " + mb + " MB · Gratuito · Windows 10 y 11 (64 bits) · ";
+        var notes = document.createElement("a");
+        notes.href = release.html_url;
+        notes.textContent = "Novedades";
+        meta.appendChild(notes);
+      })
+      .catch(function () {});
+  })();
+</script>
+</body>
+</html>
