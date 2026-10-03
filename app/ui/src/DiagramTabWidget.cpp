@@ -2,6 +2,7 @@
 #include "DiagramView.h"
 #include "UiStyle.h"
 
+#include <QContextMenuEvent>
 #include <QGraphicsScene>
 #include <QHBoxLayout>
 #include <QKeyEvent>
@@ -45,6 +46,9 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         miniature_view_ = new DiagramView(shared_scene, this);
         miniature_view_->setObjectName("miniature");
         miniature_view_->setThumbnailMode(true);
+        // A right click on the miniature is the card's (its menu), not the diagram's.
+        miniature_view_->setContextMenuPolicy(Qt::NoContextMenu);
+        miniature_view_->viewport()->setContextMenuPolicy(Qt::NoContextMenu);
         miniature_view_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         miniature_view_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
         outer->addWidget(miniature_view_, 1);
@@ -192,6 +196,12 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
 
     void DiagramTabWidget::mousePressEvent(QMouseEvent* event) {
         if (event->button() == Qt::LeftButton) emit clicked();
+    }
+
+    void DiagramTabWidget::contextMenuEvent(QContextMenuEvent* event) {
+        if (is_joint_) return;
+        emit menuRequested(event->globalPos());
+        event->accept();
     }
 
     void DiagramTabWidget::enterEvent(QEnterEvent* event) {

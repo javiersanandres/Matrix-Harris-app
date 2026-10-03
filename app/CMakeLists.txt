@@ -12,12 +12,17 @@ add_subdirectory(ui/src)
 
 
 # ── Main executable ───────────────────────────────────────────────────────────
-add_executable(MatrixHarrisApp main.cpp)
-target_link_libraries(MatrixHarrisApp PRIVATE ui_lib)
-set_target_properties(MatrixHarrisApp PROPERTIES
+add_executable(TallerMatrixHarris main.cpp)
+target_link_libraries(TallerMatrixHarris PRIVATE ui_lib)
+set_target_properties(TallerMatrixHarris PROPERTIES
     WIN32_EXECUTABLE TRUE
     AUTOMOC ON
 )
+# The executable's icon (Explorer, taskbar): ui/resources/app/app.ico, the
+# same file the windows take theirs from (":/app/app.ico").
+if(WIN32)
+    target_sources(TallerMatrixHarris PRIVATE app.rc)
+endif()
 
 if(BUILD_TESTING)
     add_subdirectory(tests)

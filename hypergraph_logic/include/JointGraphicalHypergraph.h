@@ -223,8 +223,14 @@ namespace hypergraph_logic {
 		//
 		const std::unordered_set<std::string>& getIncorporatedIds() const;
 
-		// Name the diagram had when it was added.
+		// Name the diagram is known by in the joint: the one it had when it was
+		// added, until renameIncorporated gives it the diagram's current one.
 		std::string getIncorporatedName(const std::string& id) const;
+
+		// Follows a rename of the diagram. Does nothing for a diagram that is not
+		// in the joint. Not an operation of its own: the name belongs to the
+		// diagram, and the joint only mirrors it (see Project::syncJointNames).
+		void renameIncorporated(const std::string& id, const std::string& name);
 
 		// ── Operations that change which diagram a box belongs to ────────────────
 		//

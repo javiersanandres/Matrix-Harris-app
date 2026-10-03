@@ -1007,15 +1007,17 @@ namespace hypergraph_logic {
 
 
             // ════════════════════════════════════════════════════════════════════════
-            // centerSingleHyperedgeRoots
+            // centerSingleHyperedgeTerminalNodes
             //
-            // A node with no parents and exactly one outgoing hyperedge is free to
-            // slide to the midpoint of that hyperedge's other endpoints, as long as
-            // it keeps 2*MIN_VERTICAL_SEP clearance from the nearest source port on
-            // either side within the layer.
+            // A root with exactly one outgoing hyperedge, or a leaf with exactly one
+            // incoming hyperedge, is free to slide to the midpoint of that
+            // hyperedge's other endpoints, as long as it keeps 2*MIN_VERTICAL_SEP
+            // clearance from the vertical lines its own would run into; failing
+            // that, it aligns with a port across, or settles in the middle of a
+            // roomy free piece near it.
             // ════════════════════════════════════════════════════════════════════════
 
-            TEST(CenterSingleHyperedgeRoots, SingleTargetEndsUpDirectlyAboveIt) {
+            TEST(CenterSingleHyperedgeTerminalNodes, SingleTargetEndsUpDirectlyAboveIt) {
                 // R's only hyperedge has one target C: the "span" collapses to a
                 // single point (C's port), so R must end up exactly above it.
                 TestGraph g("center_single_target");
@@ -1030,7 +1032,7 @@ namespace hypergraph_logic {
                 EXPECT_NEAR(g.nodeLayout().at(R.get()).source_ports[0].x, xC, 1e-9);
             }
 
-            TEST(CenterSingleHyperedgeRoots, NodeWithAParentIsNeverTouched) {
+            TEST(CenterSingleHyperedgeTerminalNodes, NodeWithAParentIsNeverTouched) {
                 // A node that has a parent is entirely out of scope for this pass,
                 // even if it otherwise looks like a candidate (a single source port).
                 // There's no independent "before" value to compare against without
@@ -1044,7 +1046,42 @@ namespace hypergraph_logic {
                 checkAllInvariants(g);
             }
 
-            TEST(CenterSingleHyperedgeRoots, AlreadyAlignedRootIsLeftUntouched) {
+            TEST(CenterSingleHyperedgeTerminalNodes, LeafUnderTwoSourcesIsCentredBetweenThem) {
+                // {A, B} -> C by one hyperedge: C is a leaf whose only connection
+                // comes from A and B, so it ends up under the middle of their ports.
+                TestGraph g("center_leaf");
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr C = g.createNode("C", A->getLayer() + 1, 0, A);
+                HyperedgePtr edge;
+                for (const auto& e : g.getAllHyperedges()) if (!e->isSegment()) edge = e;
+                NodePtr B = g.createSource(NodeAttributes("B"), -1, edge);
+                runPipeline(g);
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+
+                const double xa = g.nodeLayout().at(A.get()).source_ports[0].x;
+                const double xb = g.nodeLayout().at(B.get()).source_ports[0].x;
+                const double xc = g.nodeLayout().at(C.get()).target_ports[0].x;
+                EXPECT_NEAR(xc, (xa + xb) * 0.5, 1e-9);
+                EXPECT_NEAR(g.nodeLayout().at(C.get()).x, xc, 1e-9) << "the box moves with its port";
+            }
+
+            TEST(CenterSingleHyperedgeTerminalNodes, CrowdedLeavesKeepEveryInvariant) {
+                // Several leaves under one wide parent, each by its own hyperedge:
+                // most cannot reach their midpoint without running into a neighbour's
+                // line, so they fall back to an alignment or to a free piece. Wherever
+                // they settle, nothing may overlap.
+                TestGraph g("center_crowded_leaves");
+                NodePtr P = g.createNode("P", 0, 0, nullptr);
+                for (int i = 0; i < 5; ++i)
+                    g.createNode("L" + std::to_string(i), P->getLayer() + 1, i, P);
+                g.createNode("Q", 0, 1, nullptr);
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+            }
+
+            TEST(CenterSingleHyperedgeTerminalNodes, AlreadyAlignedRootIsLeftUntouched) {
                 // Once R is exactly above its single target (as in the single-target
                 // test above), running the pipeline again must be a no-op on R's
                 // position: it's already aligned, so nothing should move it.
@@ -1059,7 +1096,7 @@ namespace hypergraph_logic {
                 EXPECT_NEAR(before, after, 1e-9);
             }
 
-            TEST(CenterSingleHyperedgeRoots, RootWithTwoHyperedgesIsNeverTouched) {
+            TEST(CenterSingleHyperedgeTerminalNodes, RootWithTwoHyperedgesIsNeverTouched) {
                 // R has two separate outgoing edges (two source ports), so it has
                 // more than one hyperedge and must be skipped entirely regardless
                 // of having no parents.

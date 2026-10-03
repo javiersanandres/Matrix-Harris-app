@@ -64,6 +64,16 @@ namespace app_logic {
 		//
 		int addDiagram();
 
+		// ── duplicateDiagram ──────────────────────────────────────────────────────
+		//
+		// Appends an exact copy of the diagram at the given index (boxes,
+		// connections, layout), as a new diagram the joint does not take for the
+		// original, named "<name> (copia)" ("(copia 2)", ... when taken), and sets
+		// it as the active diagram. Its history starts empty. Returns its index.
+		// Throws std::out_of_range if index is out of bounds.
+		//
+		int duplicateDiagram(int index);
+
 		// ── removeDiagram ─────────────────────────────────────────────────────────
 		//
 		// Removes the diagram at the given index. If the removed diagram was active,
@@ -73,6 +83,16 @@ namespace app_logic {
 		// Throws std::out_of_range if index is out of bounds.
 		//
 		void removeDiagram(int index);
+
+		// ── syncJointNames ────────────────────────────────────────────────────────
+		//
+		// Gives every diagram that is in the joint its current name there, so a
+		// rename (or undoing one) shows in the joint too. The joint's history
+		// holds the names it had at each step, so this is also needed after an
+		// undo or redo in the joint. Called by load(); the UI calls it after
+		// every rename, undo and redo.
+		//
+		void syncJointNames();
 
 		// ── getDiagramCount ───────────────────────────────────────────────────────
 		//

@@ -52,6 +52,15 @@ namespace app_logic {
 		// it as a whole to where the user clicked. Undoable; the joint's
 		// getGraph().isSeparable(id) says whether they are possible.
 		void removeHypergraph(const std::string& id);
+
+		// ── renameIncorporated ────────────────────────────────────────────────────
+		//
+		// The joint's name for a diagram follows the diagram's (see
+		// JointGraphicalHypergraph::renameIncorporated). Not recorded in the
+		// history: undoing a joint operation must not bring back an old name.
+		void renameIncorporated(const std::string& id, const std::string& name) {
+			joint_->renameIncorporated(id, name);
+		}
 		void moveHypergraph(const std::string& id, double click_x);
 
 		// ── Moving up/down ────────────────────────────────────────────────────────

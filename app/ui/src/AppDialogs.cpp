@@ -3,6 +3,7 @@
 
 #include <QGraphicsDropShadowEffect>
 #include <QHBoxLayout>
+#include <QIcon>
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMouseEvent>
@@ -40,23 +41,9 @@ namespace ui {
                 }
 
                 if (badge_ == Badge::App) {
-                    // The application's emblem: a tiny diagram on the brand gradient.
-                    QLinearGradient g(0, 0, 48, 48);
-                    g.setColorAt(0, style::palette::accent);
-                    g.setColorAt(1, style::palette::violet);
-                    p.setPen(Qt::NoPen);
-                    p.setBrush(g);
-                    p.drawRoundedRect(QRectF(2, 2, 44, 44), 12, 12);
-                    p.setPen(QPen(Qt::white, 2.0, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-                    p.drawLine(QPointF(17, 18), QPointF(17, 24));
-                    p.drawLine(QPointF(31, 18), QPointF(31, 24));
-                    p.drawLine(QPointF(17, 24), QPointF(31, 24));
-                    p.drawLine(QPointF(24, 24), QPointF(24, 30));
-                    p.setBrush(Qt::white);
-                    p.setPen(Qt::NoPen);
-                    p.drawRoundedRect(QRectF(11, 11, 12, 7), 2, 2);
-                    p.drawRoundedRect(QRectF(25, 11, 12, 7), 2, 2);
-                    p.drawRoundedRect(QRectF(18, 30, 12, 7), 2, 2);
+                    // The application's icon, at the size closest to the screen's scale.
+                    static const QIcon app_icon(QStringLiteral(":/app/app.ico"));
+                    p.drawPixmap(QRect(0, 0, 48, 48), app_icon.pixmap(QSize(48, 48), devicePixelRatioF()));
                     return;
                 }
 

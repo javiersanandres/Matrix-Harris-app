@@ -12,9 +12,13 @@
 #include "HelpNotifier.h"
 #include "OptionsHelp.h"
 #include "Tutorial.h"
+#include "PieceClipboard.h"
 
 #include <QApplication>
 #include <QButtonGroup>
+#include <QClipboard>
+#include <QCursor>
+#include <QGuiApplication>
 #include <QDesktopServices>
 #include <QStandardPaths>
 #include <QUrl>
@@ -47,7 +51,7 @@ namespace ui {
     namespace {
         constexpr int MAX_RECENT_PROJECTS = 8;
         const char* const RECENT_KEY = "recentProjects";
-        const char* const PROJECT_FILTER = "Proyectos de Matrix-Harris (*.json)";
+        const char* const PROJECT_FILTER = "Proyectos de Taller Matrix Harris (*.json)";
 
         // "1 caja" / "3 cajas".
         QString count(qsizetype n, const QString& one, const QString& many) {
@@ -131,6 +135,16 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
             this, &MainWindow::onRehacer);
         action_rehacer_->setShortcuts({ QKeySequence(QStringLiteral("Ctrl+Y")), QKeySequence(QStringLiteral("Ctrl+Shift+Z")) });
         action_rehacer_->setEnabled(false);
+        editar->addSeparator();
+        QAction* copiar = add(editar, QStringLiteral("Copiar"), QKeySequence::Copy, this, &MainWindow::onCopiar);
+        copiar->setIcon(style::icon(style::Icon::Copy));
+        copiar->setToolTip(QStringLiteral("Copia el bloque que está bajo el ratón, o el esquema entero"));
+        action_pegar_ = add(editar, QStringLiteral("Pegar"), QKeySequence::Paste, this, &MainWindow::onPegar);
+        action_pegar_->setIcon(style::icon(style::Icon::Paste));
+        action_pegar_->setToolTip(QStringLiteral("Pega lo copiado donde está el ratón"));
+        action_pegar_->setEnabled(false);
+        // Also when something is copied in another window or program.
+        connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, &MainWindow::updatePasteAction);
 
         // ── Ver ───────────────────────────────────────────────────────────────────
         QMenu* ver = addMenu(QStringLiteral("Ver"));
@@ -166,6 +180,9 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         action_eliminar_esquema_ = add(esquema, QStringLiteral("Eliminar esquema…"), QKeySequence(),
             this, &MainWindow::onEliminarEsquemaActivo);
         action_eliminar_esquema_->setIcon(style::icon(style::Icon::RemoveBox));
+        action_duplicar_esquema_ = add(esquema, QStringLiteral("Duplicar esquema"), QKeySequence(QStringLiteral("Ctrl+D")),
+            this, [this] { duplicateDiagram(project_->getActiveIndex()); });
+        action_duplicar_esquema_->setIcon(style::icon(style::Icon::Duplicate));
         esquema->addSeparator();
         add(esquema, QStringLiteral("Esquema siguiente"), QKeySequence(QStringLiteral("Ctrl+Tab")),
             this, &MainWindow::onEsquemaSiguiente);
@@ -202,7 +219,7 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         QAction* license = add(ayuda, QStringLiteral("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
             [this] { gurobi::showGuide(gurobi::Guide::License, this); });
         ayuda->addSeparator();
-        add(ayuda, QStringLiteral("Acerca de Matrix-Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
+        add(ayuda, QStringLiteral("Acerca de Taller Matrix Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
 
         help_notifier_ = new HelpNotifier(menuBar(), ayuda, this);
         help_notifier_->addEntry(QStringLiteral("tutorial"), tutorial);
@@ -367,6 +384,8 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
             this, &MainWindow::onTabRenamed);
         connect(tab_bar_, &DiagramTabBar::removeTabRequested,
             this, &MainWindow::onRemoveDiagram);
+        connect(tab_bar_, &DiagramTabBar::tabMenuRequested,
+            this, &MainWindow::showTabMenu);
     }
 
     void MainWindow::setupStatusBar() {
@@ -490,6 +509,9 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         // Only the scene on screen gets to talk to the banner.
         connect(scene, &DiagramScene::interactionHintChanged, this, [this, scene](const QString& hint) {
             if (central_view_->scene() == scene) hint_banner_->setHint(hint);
+        });
+        connect(scene, &DiagramScene::notice, this, [this](const QString& message) {
+            statusBar()->showMessage(message, 5000);
         });
     }
 
@@ -639,9 +661,11 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             central_view_->fitWithMargin(scene_to_show->sceneRect());
         }
 
-        // The joint diagram cannot be renamed or deleted.
+        // The joint diagram cannot be renamed, duplicated, deleted nor pasted into.
         action_renombrar_->setEnabled(index >= 0);
         action_eliminar_esquema_->setEnabled(index >= 0);
+        action_duplicar_esquema_->setEnabled(index >= 0);
+        updatePasteAction();
 
         updateUndoRedoActions();
         updateStatusBar();
@@ -663,6 +687,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     void MainWindow::onTabRenamed(int index, const QString& new_name) {
         // Undoable like any change in the diagram (and the title follows).
         project_->getEditor(index).setName(new_name.toStdString());
+        project_->syncJointNames(); // the joint shows the new name too
         updateUndoRedoActions();
         updateWindowTitle();
     }
@@ -710,7 +735,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     void MainWindow::updateWindowTitle() {
         QString title = QString::fromStdString(project_->getName());
         if (project_->hasUnsavedChanges()) title += QStringLiteral(" *");
-        setWindowTitle(title + QStringLiteral(" — Matrix-Harris"));
+        setWindowTitle(title + QStringLiteral(" — Taller Matrix Harris"));
     }
 
     void MainWindow::updateStatusBar() {
@@ -801,7 +826,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         catch (const std::exception& e) {
             adoptProject(std::make_unique<Project>("Nuevo proyecto"));
             dialogs::showError(this, QStringLiteral("No se ha podido abrir el proyecto"),
-                QStringLiteral("«%1» no es un proyecto válido de Matrix-Harris.\n\n%2")
+                QStringLiteral("«%1» no es un proyecto válido del Taller Matrix Harris.\n\n%2")
                     .arg(QFileInfo(path).fileName(), QString::fromStdString(e.what())));
         }
     }
@@ -1083,6 +1108,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             int idx = project_->getActiveIndex();
             if (idx == -1) project_->getJointEditor().undo();
             else           project_->getEditor(idx).undo();
+            project_->syncJointNames(); // undoing a rename, or a joint step with old names
 
             if (idx == -1) joint_scene_->rebuild();
             else           scenes_[idx]->rebuild();
@@ -1094,11 +1120,42 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         }
     }
 
+    void MainWindow::onCopiar() {
+        DiagramScene* scene = activeScene();
+        if (!scene) return;
+        // The block under the mouse; with the mouse elsewhere, the whole diagram.
+        QWidget* viewport = central_view_->viewport();
+        const QPoint local = viewport->mapFromGlobal(QCursor::pos());
+        const QString copied = viewport->rect().contains(local)
+            ? scene->copyAt(central_view_->mapToScene(local))
+            : scene->copyAt(scene->sceneRect().topLeft() - QPointF(1e6, 1e6));
+        if (copied.isEmpty())
+            statusBar()->showMessage(QStringLiteral("No hay nada que copiar"), 3000);
+    }
+
+    void MainWindow::onPegar() {
+        DiagramScene* scene = activeScene();
+        if (!scene || !scene->canPaste()) return;
+        // Where the mouse is, or in the middle of what is on screen.
+        QWidget* viewport = central_view_->viewport();
+        const QPoint local = viewport->mapFromGlobal(QCursor::pos());
+        scene->pasteAt(central_view_->mapToScene(viewport->rect().contains(local) ? local : viewport->rect().center()));
+    }
+
+    void MainWindow::updatePasteAction() {
+        if (!action_pegar_ || !project_) return;
+        const bool regular = project_->getActiveIndex() >= 0;
+        action_pegar_->setEnabled(regular && clipboard::hasPiece());
+        action_pegar_->setToolTip(regular ? QStringLiteral("Pega lo copiado donde está el ratón")
+                                          : QStringLiteral("No se puede pegar en el esquema conjunto"));
+    }
+
     void MainWindow::onRehacer() {
         try {
             int idx = project_->getActiveIndex();
             if (idx == -1) project_->getJointEditor().redo();
             else           project_->getEditor(idx).redo();
+            project_->syncJointNames();
 
             if (idx == -1) joint_scene_->rebuild();
             else           scenes_[idx]->rebuild();
@@ -1148,6 +1205,37 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
     void MainWindow::onEliminarEsquemaActivo() {
         const int idx = project_->getActiveIndex();
         if (idx >= 0) onRemoveDiagram(idx);
+    }
+
+    void MainWindow::duplicateDiagram(int index) {
+        if (index < 0 || index >= project_->getDiagramCount()) return;
+        if (auto* scene = activeScene()) scene->cancelInteraction();
+
+        const QString original = QString::fromStdString(project_->getDiagramName(index));
+        const int new_index = project_->duplicateDiagram(index);
+        project_->getEditor(new_index).setOnMutated([this] { onEditorMutated(); });
+        DiagramScene* scene = createSceneForEditor(new_index);
+        scenes_.push_back(scene);
+        zoom_levels_.push_back(0.0);
+        const QString name = QString::fromStdString(project_->getDiagramName(new_index));
+        tab_bar_->addTab(scene, name);
+        switchToTab(new_index);
+        updateWindowTitle();
+        statusBar()->showMessage(QStringLiteral("«%1» duplicado como «%2»").arg(original, name), 4000);
+    }
+
+    void MainWindow::showTabMenu(int index, const QPoint& global_pos) {
+        if (index < 0 || index >= project_->getDiagramCount()) return;
+        QMenu* menu = style::createMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->addAction(QStringLiteral("Renombrar"), this, [this, index] { tab_bar_->startRename(index); });
+        menu->addAction(style::icon(style::Icon::Duplicate), QStringLiteral("Duplicar esquema"),
+            this, [this, index] { duplicateDiagram(index); });
+        menu->addSeparator();
+        menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar esquema…"),
+            this, [this, index] { onRemoveDiagram(index); });
+        help::addHelpButtons(menu, this);
+        menu->popup(global_pos);
     }
 
     void MainWindow::onMinimizeCrossings() {
@@ -1322,10 +1410,13 @@ QLabel#what { color: #3A4050; }
             { QStringLiteral("Edición"), {
                 { QStringLiteral("Ctrl+Z"), QStringLiteral("Deshacer") },
                 { QStringLiteral("Ctrl+Y"), QStringLiteral("Rehacer") },
+                { QStringLiteral("Ctrl+C"), QStringLiteral("Copiar el bloque bajo el ratón (o el esquema)") },
+                { QStringLiteral("Ctrl+V"), QStringLiteral("Pegar donde está el ratón") },
                 { QStringLiteral("Esc"), QStringLiteral("Cancelar la selección en curso") } } },
             { QStringLiteral("Esquemas"), {
                 { QStringLiteral("Ctrl+T"), QStringLiteral("Nuevo esquema") },
                 { QStringLiteral("F2"), QStringLiteral("Renombrar esquema") },
+                { QStringLiteral("Ctrl+D"), QStringLiteral("Duplicar esquema") },
                 { QStringLiteral("Ctrl+Tab"), QStringLiteral("Esquema siguiente") },
                 { QStringLiteral("Ctrl+J"), QStringLiteral("Esquema conjunto") },
                 { QStringLiteral("Ctrl+M"), QStringLiteral("Minimizar cruces") } } },
@@ -1345,6 +1436,7 @@ QLabel#what { color: #3A4050; }
                 { QStringLiteral("Rueda sobre caja"), QStringLiteral("Desplazar un texto largo") } } },
             { QStringLiteral("Pestañas"), {
                 { QStringLiteral("Doble clic"), QStringLiteral("Renombrar (sobre el nombre)") },
+                { QStringLiteral("Clic derecho"), QStringLiteral("Renombrar, duplicar o eliminar") },
                 { QStringLiteral("Ctrl+rueda"), QStringLiteral("Zoom en la miniatura") } } },
         });
 
@@ -1354,11 +1446,11 @@ QLabel#what { color: #3A4050; }
     }
 
     void MainWindow::onAcercaDe() {
-        StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Matrix-Harris App"), this);
+        StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Taller Matrix Harris"), this);
         dlg.setMessage(QStringLiteral(
-            "Versión %1\n\n"
-            "Herramienta para crear, organizar y dibujar esquemas Matrix Harris,"
-            "así como cualquier otro tipo de esquema jerárquico"
+            "Versión 1.0\n\n"
+            "Herramienta para crear, organizar y dibujar esquemas Matrix Harris, "
+            "así como cualquier otro tipo de esquema jerárquico, "
             "con un dibujo automático que minimiza los cruces.\n\n"
             "Desarrollado por Javier San Andrés.\n"));
         dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);

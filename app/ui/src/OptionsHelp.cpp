@@ -40,10 +40,11 @@ namespace ui::help {
         // ============================================================================
 
         struct Block {
-            enum class Kind { Heading, Text, Picture, Pair, Note } kind;
+            enum class Kind { Heading, Text, Picture, Pair, Triple, Note } kind;
             QString text;               // heading, text or note (rich text)
             QString first, first_caption;
             QString second, second_caption;
+            QString third, third_caption; // Triple only
         };
 
         struct Topic {
@@ -56,12 +57,17 @@ namespace ui::help {
             QString keywords; // extra words the search finds it by
         };
 
-        Block heading(const QString& t) { return { Block::Kind::Heading, t, {}, {}, {}, {} }; }
-        Block text(const QString& t) { return { Block::Kind::Text, t, {}, {}, {}, {} }; }
-        Block note(const QString& t) { return { Block::Kind::Note, t, {}, {}, {}, {} }; }
-        Block picture(const QString& p, const QString& caption) { return { Block::Kind::Picture, {}, p, caption, {}, {} }; }
+        Block heading(const QString& t) { return { Block::Kind::Heading, t, {}, {}, {}, {}, {}, {} }; }
+        Block text(const QString& t) { return { Block::Kind::Text, t, {}, {}, {}, {}, {}, {} }; }
+        Block note(const QString& t) { return { Block::Kind::Note, t, {}, {}, {}, {}, {}, {} }; }
+        Block picture(const QString& p, const QString& caption) { return { Block::Kind::Picture, {}, p, caption, {}, {}, {}, {} }; }
         Block pair(const QString& a, const QString& ca, const QString& b, const QString& cb) {
-            return { Block::Kind::Pair, {}, a, ca, b, cb };
+            return { Block::Kind::Pair, {}, a, ca, b, cb, {}, {} };
+        }
+        // Three steps in one row: typically the menu, the selection and the result.
+        Block triple(const QString& a, const QString& ca, const QString& b, const QString& cb,
+                     const QString& c, const QString& cc) {
+            return { Block::Kind::Triple, {}, a, ca, b, cb, c, cc };
         }
         QString pic(const char* topic, int n) {
             return QStringLiteral(":/information/%1/%2.png").arg(QLatin1String(topic)).arg(n, 2, 10, QLatin1Char('0'));
@@ -71,6 +77,7 @@ namespace ui::help {
         const QString BOX_MENU = QStringLiteral("Menú de la caja");
         const QString CONNECTION_MENU = QStringLiteral("Menú de la conexión");
         const QString JOINT = QStringLiteral("Esquema conjunto");
+        const QString TABS = QStringLiteral("Pestañas");
 
         const QString HOW = QStringLiteral("Cómo se usa");
         const QString EXAMPLE = QStringLiteral("Ejemplo");
@@ -102,6 +109,35 @@ namespace ui::help {
                                         "reúnen las de los demás esquemas.")),
                 },
                 QStringLiteral("crear añadir fondo clic posición nivel suelta") });
+
+            t.push_back({ "paste", BACKGROUND, QStringLiteral("Pegar"), I::Paste,
+                QStringLiteral("Pega como un bloque nuevo lo que copiaste, justo donde haces clic derecho."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Primero copia un bloque o un esquema (ver <b>Copiar bloque o esquema</b>). "
+                                        "Después haz clic derecho en una zona vacía del esquema donde lo quieras: "
+                                        "<b>Pegar</b> aparece justo debajo de <b>Nueva caja</b>. Lo pegado es una copia "
+                                        "independiente, con las mismas cajas, nombres, colores y conexiones.")),
+                    pair(pic("paste", 1), QStringLiteral("Clic derecho en el fondo, a la derecha › Pegar."),
+                         pic("paste", 2), QStringLiteral("La copia del bloque 1–2 aparece en ese sitio.")),
+                    heading(QStringLiteral("Importa dónde haces clic")),
+                    text(QStringLiteral("Lo pegado se coloca como si soltaras un bloque que estás moviendo:"
+                                        "<ul style=\"margin-left:-18px\">"
+                                        "<li>Su primera fila de cajas entra en el <b>nivel del clic</b>; por encima del "
+                                        "primer nivel o por debajo del último, se abren niveles nuevos.</li>"
+                                        "<li>Queda <b>entre los bloques</b> que hay a izquierda y derecha del clic. Si "
+                                        "haces clic encima de un bloque, va a su izquierda o a su derecha, según la "
+                                        "mitad en la que caiga el clic.</li></ul>")),
+                    heading(QStringLiteral("Atajo y otras ventanas")),
+                    text(QStringLiteral("<b>Ctrl+V</b> pega donde está el ratón (o en el centro de la vista). Lo copiado "
+                                        "se guarda en el portapapeles del sistema, así que también se puede pegar en "
+                                        "otra ventana abierta de la aplicación, aunque se haya cerrado la ventana de "
+                                        "la que salió. Se puede pegar tantas veces como quieras.")),
+                    note(QStringLiteral("<b>Pegar</b> solo aparece cuando hay algo que pegar: si después copias otra cosa "
+                                        "(por ejemplo, un texto), desaparece. En el esquema conjunto no se puede pegar. "
+                                        "Con <b>Ctrl+Z</b> se deshace.")),
+                },
+                QStringLiteral("pegar portapapeles ctrl+v copia duplicar ventana") });
 
             // ── Box menu ────────────────────────────────────────────────────
             t.push_back({ "createAbove", BOX_MENU, QStringLiteral("Crear caja arriba"), I::BoxAbove,
@@ -211,8 +247,9 @@ namespace ui::help {
                                         "tomar cada dato de una u otra, o escribirlo.")),
                     text(QStringLiteral("Útil cuando descubres que dos cajas representan lo mismo: todo lo que estaba por "
                                         "encima o por debajo de cualquiera de ellas queda unido a la caja fusionada.")),
-                    pair(pic("fuse", 2), QStringLiteral("Fusionar la 2: se elige la 3."),
-                         pic("fuse", 3), QStringLiteral("Una sola caja, 2, une ahora la 1 con la 4.")),
+                    triple(pic("fuse", 1), QStringLiteral("Clic derecho en la caja 2 › Fusionar."),
+                           pic("fuse", 2), QStringLiteral("Se elige la 3."),
+                           pic("fuse", 3), QStringLiteral("Una sola caja, 2, une ahora la 1 con la 4.")),
                     note(QStringLiteral("No se pueden fusionar dos cajas que ya están una por encima de la otra, aunque "
                                         "sea indirectamente: se crearía un ciclo.")),
                 },
@@ -232,6 +269,33 @@ namespace ui::help {
                                         "o del último nivel, se abren niveles nuevos.")),
                 },
                 QStringLiteral("mover desplazar grupo esquema") });
+
+            t.push_back({ "copyPiece", BOX_MENU, QStringLiteral("Copiar bloque o esquema"), I::Copy,
+                QStringLiteral("Copia el bloque de esta caja, o el esquema entero, para pegarlo en cualquier esquema."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Haz clic derecho sobre una caja (o una conexión) y elige en la sección "
+                                        "<b>Copiar</b>:"
+                                        "<ul style=\"margin-left:-18px\">"
+                                        "<li><b>Copiar bloque</b>: la caja y todas las que están unidas a ella, con sus "
+                                        "conexiones. Solo aparece cuando el esquema tiene más de un bloque.</li>"
+                                        "<li><b>Copiar esquema</b>: todos los bloques del esquema, colocados como "
+                                        "están.</li></ul>")),
+                    picture(pic("copyPiece", 1),
+                            QStringLiteral("Clic derecho en la caja 3 › Copiar bloque (solo el 3–4) o Copiar esquema "
+                                           "(también el 1–2).")),
+                    text(QStringLiteral("Luego pégalo con <b>Pegar</b>, en el menú del fondo de cualquier esquema, o con "
+                                        "<b>Ctrl+V</b>. Se copian los nombres, el aspecto de las cajas y el estilo de "
+                                        "las líneas, también las conexiones hipotéticas.")),
+                    heading(QStringLiteral("Atajo")),
+                    text(QStringLiteral("<b>Ctrl+C</b> copia el bloque de la caja o conexión que está bajo el ratón; "
+                                        "con el ratón sobre el fondo, copia el esquema entero.")),
+                    note(QStringLiteral("En el esquema conjunto también se puede copiar: <b>Copiar esquema «…»</b> copia "
+                                        "el esquema de la caja tal como está en el conjunto, mientras no esté mezclado con "
+                                        "otros. Lo copiado se puede pegar en cualquier esquema, pero no en el "
+                                        "conjunto.")),
+                },
+                QStringLiteral("copiar portapapeles ctrl+c bloque esquema duplicar") });
             t.push_back({ "uncertain", BOX_MENU, QStringLiteral("Conexiones hipotéticas"), I::LineDashed,
                 QStringLiteral("Marca como dudosa una conexión de esta caja: se dibuja discontinua desde ella."),
                 {
@@ -252,8 +316,10 @@ namespace ui::help {
                     heading(HOW),
                     text(QStringLiteral("Elige la opción y haz clic en la otra caja: solo se ofrecen las unidas "
                                         "directamente. Si la conexión unía más cajas, las demás siguen unidas.")),
-                    pair(pic("removePartial", 2), QStringLiteral("La 1 y la 2 llegan a la 3: desde la 2 se elige la 3."),
-                         pic("removePartial", 3), QStringLiteral("La 2 ya no está unida a la 3; la 1 sí.")),
+                    triple(pic("removePartial", 1), QStringLiteral("La 1 y la 2 llegan a la 3. Clic derecho en la 2 › "
+                                                                   "Eliminar conexión parcial."),
+                           pic("removePartial", 2), QStringLiteral("Se elige la 3."),
+                           pic("removePartial", 3), QStringLiteral("La 2 ya no está unida a la 3; la 1 sí.")),
                     note(QStringLiteral("Una caja que pierde lo que tenía encima puede subir de nivel.")),
                 },
                 QStringLiteral("quitar borrar romper relación") });
@@ -292,7 +358,7 @@ namespace ui::help {
                     text(QStringLiteral("Haz clic sobre la línea (se resalta la conexión entera) y elige <b>Crear caja "
                                         "entre</b>. Las cajas de arriba quedan unidas a la nueva, y la nueva a las de "
                                         "abajo, que bajan un nivel para hacerle sitio.")),
-                    pair(pic("createBetween", 1), QStringLiteral("Clic en la conexión de la 1 › Crear caja entre."),
+                    pair(pic("createBetween", 1), QStringLiteral("Clic en la conexión que une 1, 2 y 3 › Crear caja entre."),
                          pic("createBetween", 2), QStringLiteral("La 4 queda entre la 1 y las cajas 2 y 3.")),
                 },
                 QStringLiteral("intermedia insertar medio") });
@@ -395,8 +461,9 @@ namespace ui::help {
                     heading(HOW),
                     text(QStringLiteral("Haz clic sobre la línea, elige <b>Simplificar conexión</b> y haz clic en una de "
                                         "sus cajas: deja de formar parte de la conexión. Las demás siguen unidas.")),
-                    pair(pic("simplify", 2), QStringLiteral("Simplificar la conexión de la 1: se elige la 3."),
-                         pic("simplify", 3), QStringLiteral("La conexión une solo la 1 y la 2.")),
+                    triple(pic("simplify", 1), QStringLiteral("Clic en la conexión › Simplificar conexión."),
+                           pic("simplify", 2), QStringLiteral("Se elige la 3."),
+                           pic("simplify", 3), QStringLiteral("La conexión une solo la 1 y la 2.")),
                     note(QStringLiteral("Una caja que pierde lo que tenía encima puede subir de nivel.")),
                 },
                 QStringLiteral("quitar caja conexión reducir") });
@@ -457,6 +524,23 @@ namespace ui::help {
                                         "bloque, solo aparece Mover esquema, porque los dos harían lo mismo.")),
                 },
                 QStringLiteral("mover esquema entero conjunto bloques todos") });
+
+            // ── Tabs ────────────────────────────────────────────────────────
+            t.push_back({ "duplicateDiagram", TABS, QStringLiteral("Duplicar esquema"), I::Duplicate,
+                QStringLiteral("Crea un esquema nuevo que es una copia exacta de otro."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Haz clic derecho sobre la pestaña del esquema y elige <b>Duplicar esquema</b> "
+                                        "(o usa <b>Esquema › Duplicar esquema</b>, <b>Ctrl+D</b>, para el esquema "
+                                        "abierto). La copia aparece en una pestaña nueva al final, con el nombre "
+                                        "«<i>nombre</i> (copia)», y se abre.")),
+                    pair(pic("duplicateDiagram", 1), QStringLiteral("Clic derecho en la pestaña › Duplicar esquema."),
+                         pic("duplicateDiagram", 2), QStringLiteral("La copia, «Esquema (copia)», se abre en una pestaña nueva.")),
+                    note(QStringLiteral("La copia es un esquema independiente: cambiar uno no afecta al otro, y se puede "
+                                        "añadir al esquema conjunto por separado. Para llevar solo una parte a otro "
+                                        "esquema, usa <b>Copiar bloque o esquema</b> y <b>Pegar</b>.")),
+                },
+                QStringLiteral("duplicar copiar clonar pestaña ctrl+d") });
 
             return t;
         }
@@ -970,17 +1054,28 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
                     case Block::Kind::Picture:
                         col->addWidget(captioned(b.first, b.first_caption, std::min(content_width_, 560), page), 0, Qt::AlignHCenter);
                         break;
-                    case Block::Kind::Pair: {
-                        // Before and after, side by side with an arrow between.
+                    case Block::Kind::Pair:
+                    case Block::Kind::Triple: {
+                        // The steps side by side, an arrow between each two.
+                        std::vector<std::pair<QString, QString>> steps = {
+                            { b.first, b.first_caption }, { b.second, b.second_caption } };
+                        if (b.kind == Block::Kind::Triple) steps.emplace_back(b.third, b.third_caption);
+                        const int n = static_cast<int>(steps.size());
+                        const int spacing = n == 2 ? 14 : 8;
+                        const int arrow_width = n == 2 ? 26 : 20;
+                        const int each = (content_width_ - spacing * 2 * (n - 1) - arrow_width * (n - 1)) / n;
                         auto* row = new QHBoxLayout;
-                        row->setSpacing(14);
-                        const int each = (content_width_ - 14 * 2 - 26) / 2;
+                        row->setSpacing(spacing);
                         row->addStretch();
-                        row->addWidget(captioned(b.first, b.first_caption, each, page), 0, Qt::AlignVCenter);
-                        auto* arrow = new QLabel(QStringLiteral("→"), page);
-                        arrow->setStyleSheet(QStringLiteral("color: #A0A5B5; font-size: 18pt;"));
-                        row->addWidget(arrow, 0, Qt::AlignVCenter);
-                        row->addWidget(captioned(b.second, b.second_caption, each, page), 0, Qt::AlignVCenter);
+                        for (int i = 0; i < n; ++i) {
+                            if (i > 0) {
+                                auto* arrow = new QLabel(QStringLiteral("→"), page);
+                                arrow->setStyleSheet(n == 2 ? QStringLiteral("color: #A0A5B5; font-size: 18pt;")
+                                                            : QStringLiteral("color: #A0A5B5; font-size: 15pt;"));
+                                row->addWidget(arrow, 0, Qt::AlignVCenter);
+                            }
+                            row->addWidget(captioned(steps[i].first, steps[i].second, each, page), 0, Qt::AlignVCenter);
+                        }
                         row->addStretch();
                         col->addLayout(row);
                         break;
@@ -1047,6 +1142,11 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
             { QStringLiteral("Simplificar conexión"), QStringLiteral("simplify") },
             { QStringLiteral("Eliminar conexión"), QStringLiteral("removeConnection") },
             { QStringLiteral("Administrar esquemas"), QStringLiteral("jointManage") },
+            { QStringLiteral("Pegar"), QStringLiteral("paste") },
+            { QStringLiteral("Copiar bloque"), QStringLiteral("copyPiece") },
+            { QStringLiteral("Copiar esquema"), QStringLiteral("copyPiece") },
+            { QStringLiteral("Copiar este esquema"), QStringLiteral("copyPiece") },
+            { QStringLiteral("Duplicar esquema"), QStringLiteral("duplicateDiagram") },
         };
         const QString text = QString(entry).remove(QLatin1Char('&'));
         if (auto it = exact.find(text); it != exact.end()) return it->second;
@@ -1055,6 +1155,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
         if (below.match(text).hasMatch()) return QStringLiteral("addChildConnection");
         if (above.match(text).hasMatch()) return QStringLiteral("addParentConnection");
         if (text.startsWith(QStringLiteral("Mover esquema «"))) return QStringLiteral("moveDiagram");
+        if (text.startsWith(QStringLiteral("Copiar esquema «"))) return QStringLiteral("copyPiece");
         return {};
     }
 
@@ -1084,6 +1185,7 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
             for (const Block& b : t.blocks) {
                 if (!b.first.isEmpty()) info.pictures << b.first;
                 if (!b.second.isEmpty()) info.pictures << b.second;
+                if (!b.third.isEmpty()) info.pictures << b.third;
             }
             out.push_back(info);
         }

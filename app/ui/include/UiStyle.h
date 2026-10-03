@@ -62,6 +62,9 @@ namespace ui::style {
         Move,              // a piece of diagram with a four-way arrow
         TakeOut,           // a piece of diagram leaving through a dashed frame
         Add,               // a plus in a soft circle (filled when hovered)
+        Copy,              // two sheets, the front one holding a piece of diagram
+        Paste,             // a clipboard with a new box on it
+        Duplicate,         // a diagram and its copy, one behind the other
     };
 
     QIcon icon(Icon which);

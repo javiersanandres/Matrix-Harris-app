@@ -252,6 +252,54 @@ namespace hypergraph_logic {
 		computeLayout({});
 	}
 
+	// ============================================================================
+	// Copying and pasting
+	// ============================================================================
+
+	GraphicalHypergraph GraphicalHypergraph::copyOf(const std::unordered_set<Node*>& group) const {
+		for (const auto& [orig, segs] : all_hyperedges_) {
+			bool inside = false, outside = false;
+			for (const auto& s : orig->getSources()) (group.count(s.get()) ? inside : outside) = true;
+			for (const auto& t : orig->getTargets()) (group.count(t.get()) ? inside : outside) = true;
+			if (inside && outside)
+				throw std::invalid_argument("Las cajas que se copian están conectadas con otras.");
+		}
+
+		// clone() keeps all_nodes_ in order: the copy's i-th box is this graph's i-th.
+		GraphicalHypergraph copy = clone();
+		copy.id_ = generateId();
+		std::unordered_set<Node*> others;
+		for (size_t i = 0; i < all_nodes_.size(); ++i)
+			if (!group.count(all_nodes_[i].get())) others.insert(copy.all_nodes_[i].get());
+		if (!others.empty()) {
+			copy.removeGroup(others); // closes up the layers left empty, lays it out again
+			copy.refreshLayerOverrides();
+		}
+		return copy;
+	}
+
+	GraphicalHypergraph GraphicalHypergraph::duplicate() const {
+		GraphicalHypergraph copy = clone();
+		copy.id_ = generateId();
+		return copy;
+	}
+
+	std::vector<NodePtr> GraphicalHypergraph::paste(GraphicalHypergraph&& piece, double click_x, int top_layer) {
+		std::unordered_set<Node*> group;
+		std::vector<NodePtr> boxes;
+		for (const auto& n : piece.all_nodes_) {
+			group.insert(n.get());
+			if (!n->isDummy()) boxes.push_back(n);
+		}
+		if (group.empty()) return boxes;
+
+		ensureLayout();
+		piece.ensureLayout();
+		mergeFrom(std::move(piece), false); // after everything: moveGroup places it
+		moveGroup(group, click_x, top_layer); // places it, closes up layers, lays everything out
+		return boxes;
+	}
+
 	void GraphicalHypergraph::refreshLayerOverrides() {
 		for (const auto& n : all_nodes_) {
 			if (n->isDummy()) continue;

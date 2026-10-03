@@ -173,6 +173,12 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             }
             });
 
+        connect(tab, &DiagramTabWidget::menuRequested, this, [this, tab](const QPoint& global_pos) {
+            auto it = std::find(tabs_.begin(), tabs_.end(), tab);
+            if (it != tabs_.end())
+                emit tabMenuRequested(static_cast<int>(std::distance(tabs_.begin(), it)), global_pos);
+            });
+
         connect(tab, &DiagramTabWidget::removeRequested, this, [this, tab] {
             auto it = std::find(tabs_.begin(), tabs_.end(), tab);
             if (it != tabs_.end()) {

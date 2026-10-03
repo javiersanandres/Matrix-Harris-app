@@ -126,4 +126,11 @@ namespace app_logic {
 		}
 	}
 
+	std::vector<NodePtr> HypergraphEditor::paste(GraphicalHypergraph&& piece, double click_x, int top_layer) {
+		auto saved = takeSnapshot();
+		std::vector<NodePtr> result = graph_.paste(std::move(piece), click_x, top_layer);
+		commitSnapshot(std::move(saved));
+		return result;
+	}
+
 } // namespace app_logic

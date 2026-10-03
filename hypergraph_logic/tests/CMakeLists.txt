@@ -22,6 +22,7 @@ add_executable(hypergraph_logic_tests
     test_line_style.cpp
     test_joint_diagrams.cpp
     test_graph_blocks.cpp
+    test_copy_paste.cpp
 )
 
 target_include_directories(hypergraph_logic_tests

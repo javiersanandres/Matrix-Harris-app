@@ -5,6 +5,7 @@
 #include <cmath>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <unordered_set>
 
 // ====================================================================================
@@ -2019,7 +2020,7 @@ namespace hypergraph_logic {
             assigners[layer]->solveVerticalOverlaps(min_spacing[layer]);
         }
         recentreNodesUnderPorts();
-        centerSingleHyperedgeRoots(assigner_ptrs);
+        centerSingleHyperedgeTerminalNodes(assigner_ptrs);
     }
 
     // ── placeDummyChains ─────────────────────────────────────────────────
@@ -2143,8 +2144,36 @@ namespace hypergraph_logic {
         }
     }
 
-    void GraphicalHypergraph::centerSingleHyperedgeRoots(std::vector<port_assignment_internal::PortAssigner*>& assigners) {
+    // Where to settle a box's single port in allowed when neither the middle of
+    // its connection nor an alignment is possible. The pieces are sorted by
+    // length, longest first; among those at least 4*MIN_VERTICAL_SEP long, the
+    // one nearest to x wins (the longer one on a tie), otherwise the longest.
+    // The result is its middle point. A piece unbounded on one side has no
+    // middle: x is kept, but at least 2*MIN_VERTICAL_SEP inside its bounded
+    // end (and x itself if it is unbounded on both).
+    static double middleOfRoomiestNearby(std::vector<Interval> allowed, double x) {
+        std::stable_sort(allowed.begin(), allowed.end(), [](const Interval& a, const Interval& b) {
+            return a.second - a.first > b.second - b.first;
+        });
+        const Interval* chosen = nullptr;
+        double best_d = std::numeric_limits<double>::infinity();
+        for (const Interval& I : allowed) {
+            if (I.second - I.first < 4 * MIN_VERTICAL_SEP) continue;
+            const double d = std::abs(std::clamp(x, I.first, I.second) - x);
+            if (d < best_d) { best_d = d; chosen = &I; }
+        }
+        if (!chosen) chosen = &allowed.front(); // every piece is narrow: the widest
+
+        const bool open_left = std::isinf(chosen->first), open_right = std::isinf(chosen->second);
+        if (open_left && open_right) return x;
+        if (open_left) return std::min(x, chosen->second - 2 * MIN_VERTICAL_SEP);
+        if (open_right) return std::max(x, chosen->first + 2 * MIN_VERTICAL_SEP);
+        return (chosen->first + chosen->second) * 0.5;
+    }
+
+    void GraphicalHypergraph::centerSingleHyperedgeTerminalNodes(std::vector<port_assignment_internal::PortAssigner*>& assigners) {
         using namespace port_assignment_internal;
+        constexpr double INF = std::numeric_limits<double>::infinity();
 
         for (const auto& [layer, data] : layers_) {
             const auto& nodes = data.nodes;
@@ -2153,82 +2182,91 @@ namespace hypergraph_logic {
             auto pass = [&](int start, int end, int step) {
                 for (int i = start; i != end; i += step) {
                     Node* node = nodes[i].get();
-                    if (!node->getParents().empty()) continue;
+                    if (node->isDummy()) continue;
 
+                    // A root hangs its single connection below it; a leaf hangs from its
+                    // single connection above it.
                     NodeLayout& nl = node_layout_.at(node);
-                    if (nl.source_ports.size() != 1) continue;
+                    const bool root = node->getParents().empty() && nl.source_ports.size() == 1 && nl.target_ports.empty();
+                    const bool leaf = node->getChildren().empty() && nl.target_ports.size() == 1 && nl.source_ports.empty();
+                    if (!root && !leaf) continue;
 
-                    Hyperedge* edge = nl.source_ports[0].edge;
-                    double min_x = std::numeric_limits<double>::max();
-                    double max_x = std::numeric_limits<double>::lowest();
-                    for (const auto& src : edge->getSources()) {
-                        if (src.get() == node) continue;
-                        for (const Port& p : node_layout_.at(src.get()).source_ports)
+                    Port& own = root ? nl.source_ports[0] : nl.target_ports[0];
+                    Hyperedge* edge = own.edge;
+                    const int gap = root ? layer : layer - 1; // the layer the connection leaves from
+                    if (gap < 0 || gap >= static_cast<int>(assigners.size()) || !assigners[gap]) continue;
+                    PortAssigner* assigner = assigners[gap];
+
+                    // The connection's other ends: those on this box's side, and those
+                    // across, which an aligned port would join with a straight line.
+                    double min_x = INF, max_x = -INF;
+                    const auto& same_side = root ? edge->getSources() : edge->getTargets();
+                    for (const auto& other : same_side) {
+                        if (other.get() == node) continue;
+                        const NodeLayout& ol = node_layout_.at(other.get());
+                        for (const Port& p : root ? ol.source_ports : ol.target_ports)
                             if (p.edge == edge) { min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x); }
                     }
                     bool aligned = false;
-                    std::vector<double> tgt_ports; // Store the target ports for later steps
-                    for (const auto& tgt : edge->getTargets()) {
-                        for (const Port& p : node_layout_.at(tgt.get()).target_ports) {
-                            if (p.edge == edge) {
-                                if (p.x == nl.source_ports[0].x) aligned = true;
-                                min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
-                                tgt_ports.push_back(p.x);
-                            }
-                            if (aligned) break;
+                    std::vector<double> across; // ports this one could align with
+                    for (const auto& other : root ? edge->getTargets() : edge->getSources()) {
+                        const NodeLayout& ol = node_layout_.at(other.get());
+                        for (const Port& p : root ? ol.target_ports : ol.source_ports) {
+                            if (p.edge != edge) continue;
+                            if (p.x == own.x) aligned = true;
+                            min_x = std::min(min_x, p.x); max_x = std::max(max_x, p.x);
+                            across.push_back(p.x);
                         }
-                        if (aligned) break;
                     }
                     if (aligned || min_x > max_x) continue; // Do nothing when two ports are already aligned.
                     double candidate = (min_x + max_x) * 0.5;
 
-                    double low = (i == 0) ? std::numeric_limits<double>::lowest() :
+                    double low = (i == 0) ? -INF :
                         node_layout_.at(nodes[i - 1].get()).x + (nodes[i - 1]->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
 
-                    double high = (i == k - 1) ? std::numeric_limits<double>::max() :
+                    double high = (i == k - 1) ? INF :
                         node_layout_.at(nodes[i + 1].get()).x - (nodes[i + 1]->getWidth() + node->getWidth()) * 0.5 - MIN_BLOCK_SEP;
 
+                    // The vertical lines this one would run into: a root's line goes down
+                    // to its bar, past the lines that come down from the bars above it to
+                    // the next layer; a leaf's comes down from its bar, past the lines that
+                    // go from the previous layer down to the bars below it.
                     std::vector<Interval> forbidden_regions;
-                    for (const auto& e : data.outgoing_edges) {
-                        if (assigners[layer]->edgeOrderedBefore(e.get(), edge)) {
-                            for (const auto& tgt : e->getTargets()) {
-                                for (const Port& p : node_layout_.at(tgt.get()).target_ports) {
-                                    if (low < p.x + 3 * MIN_VERTICAL_SEP && p.x - 3 * MIN_VERTICAL_SEP < high) {
-                                        forbidden_regions.push_back({ p.x - 2 * MIN_VERTICAL_SEP, p.x + 2 * MIN_VERTICAL_SEP });
-                                    }
-                                }
+                    for (const auto& e : layers_.at(gap).outgoing_edges) {
+                        if (root ? !assigner->edgeOrderedBefore(e.get(), edge) : !assigner->edgeOrderedBefore(edge, e.get()))
+                            continue;
+                        for (const auto& other : root ? e->getTargets() : e->getSources()) {
+                            const NodeLayout& ol = node_layout_.at(other.get());
+                            for (const Port& p : root ? ol.target_ports : ol.source_ports) {
+                                if (low < p.x + 2 * MIN_VERTICAL_SEP && p.x - 2 * MIN_VERTICAL_SEP < high)
+                                    forbidden_regions.push_back({ p.x - 2 * MIN_VERTICAL_SEP, p.x + 2 * MIN_VERTICAL_SEP });
                             }
                         }
                     }
                     auto allowed_space = subtractRegions({ low, high }, forbidden_regions);
+                    if (allowed_space.empty()) continue; // no room to move at all
+
+                    double new_x;
                     if (insideAny(allowed_space, candidate)) {
-                        nl.x = candidate;
-                        nl.source_ports[0].x = candidate;
+                        new_x = candidate;
                     }
                     else {
-                        // Try to align it to the target port which is closest to
-                        // the middle point and also lives inside allowed_space.
-                        double alignment_port = nl.x;
-                        double best_d = std::abs(nl.x - candidate);
-                        for (auto port : tgt_ports) {
-                            if (insideAny(allowed_space, port)) {
-                                double diff = std::abs(port - candidate);
-                                if (diff < best_d) {
-                                    alignment_port = port;
-                                    best_d = diff;
-                                }
-                                else if (diff == best_d) {
-                                    if (std::abs(alignment_port - nl.x) < std::abs(port - nl.x)) {
-                                        alignment_port = port;
-                                    }
-                                }
-                            }
+                        // Align it to the port across which is closest to the middle point
+                        // and lives inside allowed_space (on a tie, the one closer to where
+                        // it is now).
+                        std::optional<double> alignment;
+                        for (double port : across) {
+                            if (!insideAny(allowed_space, port)) continue;
+                            if (!alignment) { alignment = port; continue; }
+                            const double d_new = std::abs(port - candidate), d_best = std::abs(*alignment - candidate);
+                            if (d_new < d_best || (d_new == d_best && std::abs(port - nl.x) < std::abs(*alignment - nl.x)))
+                                alignment = port;
                         }
-                        if (alignment_port != nl.x) {
-                            nl.x = alignment_port;
-                            nl.source_ports[0].x = alignment_port;
-                        }
+                        // Otherwise, the middle of a roomy piece of allowed_space near it.
+                        new_x = alignment ? *alignment : middleOfRoomiestNearby(allowed_space, nl.x);
                     }
+                    nl.x = new_x;
+                    own.x = new_x;
                 }
                 };
 

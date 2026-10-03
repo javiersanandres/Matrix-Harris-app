@@ -70,12 +70,12 @@ TEST_F(GurobiNoticeTest, TestGroupIsKeptApartFromTheRealOne) {
 }
 
 TEST(GurobiStartupOptions, TakesTheTestOptionsAndLeavesTheRest) {
-    QStringList args{ "MatrixHarrisApp.exe", "--gurobi-test=no-license", "proyecto.json", "--gurobi-test-reset" };
+    QStringList args{ "TallerMatrixHarris.exe", "--gurobi-test=no-license", "proyecto.json", "--gurobi-test-reset" };
     const StartupOptions options = takeStartupOptions(args);
     ASSERT_TRUE(options.simulated.has_value());
     EXPECT_EQ(*options.simulated, GurobiStatus::NoLicense);
     EXPECT_TRUE(options.reset_reminders);
-    EXPECT_EQ(args, (QStringList{ "MatrixHarrisApp.exe", "proyecto.json" }));
+    EXPECT_EQ(args, (QStringList{ "TallerMatrixHarris.exe", "proyecto.json" }));
 }
 
 TEST(GurobiStartupOptions, EveryStateAndUnknownOnes) {

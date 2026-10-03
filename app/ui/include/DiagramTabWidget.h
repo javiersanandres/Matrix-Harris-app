@@ -23,6 +23,7 @@ namespace ui {
     //   - Double-clicking the name edits it in place: Enter or leaving the field
     //     commits (renamed()), Esc restores the previous name.
     //   - The name is centred under the miniature.
+    //   - Right-clicking a regular tab asks for its menu (menuRequested()).
     //   - Hovering a regular tab reveals a bin button (removeRequested()). The
     //     joint tab has no bin, cannot be renamed and carries a "joint" glyph.
     //   - The active tab is outlined and tinted in the accent colour.
@@ -68,10 +69,12 @@ namespace ui {
         void renamed(const QString& new_name);   // user committed a rename
         void clicked();                          // tab selected
         void removeRequested();                  // bin button pressed
+        void menuRequested(const QPoint& global_pos); // right click (regular tabs)
 
     protected:
         void paintEvent(QPaintEvent* event) override;
         void mousePressEvent(QMouseEvent* event) override;
+        void contextMenuEvent(QContextMenuEvent* event) override;
         void enterEvent(QEnterEvent* event) override;
         void leaveEvent(QEvent* event) override;
         bool eventFilter(QObject* watched, QEvent* event) override;

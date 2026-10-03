@@ -128,7 +128,7 @@ namespace ui::gurobi {
                                  "<b>Enter</b> para dejarla en la carpeta propuesta."),
                   { { 12, {} } } },
                 { QStringLiteral("Verás dónde se ha guardado la licencia. Cierra la terminal y… ¡enhorabuena! "
-                                 "Vuelve a abrir Matrix-Harris para disfrutar de su mejor versión."),
+                                 "Vuelve a abrir el Taller Matrix Harris para disfrutar de su mejor versión."),
                   { { 13, {} } } },
             } };
         }

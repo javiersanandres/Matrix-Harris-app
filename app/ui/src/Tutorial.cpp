@@ -48,8 +48,8 @@ namespace ui::tutorial {
     std::vector<Step> introSteps() {
         using T = Target;
         return {
-            { QStringLiteral("¡Te damos la bienvenida a Matrix-Harris!"),
-              QStringLiteral("Aquí dibujas esquemas Matrix-Harris y cualquier tipo de esquema jerárquico: <b>cajas</b> " 
+            { QStringLiteral("¡Te damos la bienvenida al Taller Matrix Harris!"),
+              QStringLiteral("Aquí dibujas esquemas Matrix Harris y cualquier tipo de esquema jerárquico: <b>cajas</b> " 
                              "colocadas en <b>niveles</b> y unidas "
                              "por <b>conexiones</b>. En un par de minutos verás lo esencial.<br><br>"
                              "Para que pruebes cada paso, hemos abierto un <b>proyecto de ejemplo</b>: la parte "
@@ -118,10 +118,11 @@ namespace ui::tutorial {
                   .arg(key(QStringLiteral("Ctrl + rueda")), key(QStringLiteral("arrastrar"))),
               {}, { T::FirstTabMiniature } },
 
-            { QStringLiteral("Renombra o elimina un esquema"),
+            { QStringLiteral("Renombra, duplica o elimina un esquema"),
               QStringLiteral("Haz %1 sobre el nombre para cambiarlo (o pulsa %2). Al pasar el ratón por la pestaña "
-                             "aparece una papelera para eliminar el esquema.")
-                  .arg(key(QStringLiteral("doble clic")), key(QStringLiteral("F2"))),
+                             "aparece una papelera para eliminar el esquema. Haciendo %3 se accede a las dos opciones"
+                             "anteriores y a la de duplicar.")
+                  .arg(key(QStringLiteral("doble clic")), key(QStringLiteral("F2")), key(QStringLiteral("clic derecho"))),
               {}, { T::FirstTabName } },
 
             { QStringLiteral("Nuevo esquema"),

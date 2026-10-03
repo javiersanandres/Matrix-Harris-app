@@ -302,6 +302,29 @@ namespace hypergraph_logic {
 		void moveComponent(const Node* box, double click_x, int top_layer);
 		void removeComponent(const Node* box);
 
+		// ── Copying and pasting a closed group of boxes ───────────────────────────
+		//
+		// copyOf: a new graph (with an ID of its own) holding only the given
+		// boxes, which must be a closed group (whole blocks: getComponentNodes,
+		// a joint's getHypergraphNodes, or every box), with their connections,
+		// line styles, uncertain marks and layout. The layers left empty above
+		// them are closed up, so the copy starts at layer 0. A group linked to a
+		// box outside it throws std::invalid_argument, and an empty one gives an
+		// empty graph.
+		//
+		// duplicate: an exact copy of the whole graph with an ID of its own, so
+		// a joint does not take it for the original.
+		//
+		// paste: moves the boxes of piece (typically a copyOf, possibly read
+		// back with fromJSON) into this graph as one more block, placed like a
+		// moved block (see "Blocks"): its shallowest box in top_layer, at
+		// click_x among the other blocks. piece shares its boxes with this
+		// graph afterwards and must not be used again. Returns the pasted real
+		// boxes.
+		GraphicalHypergraph copyOf(const std::unordered_set<Node*>& group) const;
+		GraphicalHypergraph duplicate() const;
+		std::vector<NodePtr> paste(GraphicalHypergraph&& piece, double click_x, int top_layer);
+
 		// ── clone ─────────────────────────────────────────────────────────────────
 		//
 		// Produces a fully independent deep copy of this graph, including all
@@ -370,14 +393,19 @@ namespace hypergraph_logic {
 		// margin to its own leftmost/rightmost port is equal.
 		void recentreNodesUnderPorts();
 
-		// ── Stage 4.6: centre lone root sources under their single hyperedge ──────
+		// ── Stage 4.6: centre lone roots and leaves on their single hyperedge ─────
 		//
-		// For every node with no parents and exactly one outgoing hyperedge (a
-		// single source port), tries to move both the node and its port to the
-		// midpoint of that hyperedge's other endpoints, as long as doing so
-		// keeps at least 2*MIN_VERTICAL_SEP away from the nearest source port
-		// on each side within the same layer.
-		void centerSingleHyperedgeRoots(std::vector<port_assignment_internal::PortAssigner*>& assigners);
+		// For every root with exactly one outgoing hyperedge (a single source
+		// port) and every leaf with exactly one incoming hyperedge (a single
+		// target port), unless that port is already aligned with one across the
+		// hyperedge, moves both the node and its port, within the room its
+		// neighbours leave and at least 2*MIN_VERTICAL_SEP away from the vertical
+		// lines its own would run into, to the first of:
+		//   1. the midpoint of that hyperedge's other endpoints;
+		//   2. the port across the hyperedge closest to that midpoint (aligned);
+		//   3. the middle of the free piece at least 4*MIN_VERTICAL_SEP long
+		//      nearest to where the node is, or of the widest one if none is.
+		void centerSingleHyperedgeTerminalNodes(std::vector<port_assignment_internal::PortAssigner*>& assigners);
 
 		// ── Stage 5: edge y-coordinates ───────────────────────────────────────────
 		//

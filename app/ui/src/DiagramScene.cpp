@@ -4,6 +4,7 @@
 #include "LayoutTypes.h"
 #include "UiStyle.h"
 #include "OptionsHelp.h"
+#include "PieceClipboard.h"
 
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsSceneContextMenuEvent>
@@ -511,6 +512,7 @@ namespace ui {
 
         const PieceChoice piece = pieceChoiceFor(node);
         addMoveEntries(menu, piece, node);
+        addCopyEntries(menu, node);
 
         // "Conexiones hipotéticas": one checkable entry per connection of this box,
         // named after the boxes at its other end. A doubtful connection is drawn
@@ -619,6 +621,7 @@ namespace ui {
         Node* reference = edge->getSources().empty() ? nullptr : edge->getSources().front().get();
         const PieceChoice piece = pieceChoiceFor(reference);
         addMoveEntries(menu, piece, reference);
+        addCopyEntries(menu, reference);
 
         // Each entry names what it will do, with an icon of the result. A
         // connection that is partly dashed (doubtful at some boxes) offers both.
@@ -650,6 +653,13 @@ namespace ui {
         menu->setAttribute(Qt::WA_DeleteOnClose);
         menu->addAction(style::icon(style::Icon::NewBox), QStringLiteral("Nueva caja"),
             [this, scene_pos] { onCreateRootNode(scene_pos); });
+        // Only when there is something to paste (possibly copied in another window).
+        if (canPaste()) {
+            menu->setToolTipsVisible(true);
+            QAction* paste = menu->addAction(style::icon(style::Icon::Paste), QStringLiteral("Pegar"),
+                [this, scene_pos] { pasteAt(scene_pos); });
+            paste->setToolTip(QStringLiteral("Pega aquí %1").arg(clipboard::description()));
+        }
         help::addHelpButtons(menu, dialogParent());
         menu->popup(QCursor::pos());
     }
@@ -1536,6 +1546,136 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             return;
 
         takeOut(doomed, [this, ptr = box->shared_from_this()] { joint_editor_->removeComponent(ptr); });
+    }
+
+    // ============================================================================
+    // Copying and pasting
+    // ============================================================================
+
+    void DiagramScene::addCopyEntries(QMenu* menu, Node* box) {
+        if (!box) return;
+        const GraphicalHypergraph& graph = currentGraph();
+        std::unordered_set<Node*> block;
+        try { block = graph.getComponentNodes(box); }
+        catch (const std::exception&) { return; }
+
+        // The whole diagram: in the joint, the box's own while it is not mixed.
+        std::string diagram_id;
+        QString diagram_name;
+        std::unordered_set<Node*> diagram;
+        bool copy_diagram = !is_joint_;
+        if (is_joint_) {
+            const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+            const auto ids = joint.graphsOf(box);
+            if (ids.size() == 1 && !ids.begin()->empty() && joint.isSeparable(*ids.begin())) {
+                diagram_id = *ids.begin();
+                diagram_name = QString::fromStdString(joint.getIncorporatedName(diagram_id));
+                diagram = joint.getHypergraphNodes(diagram_id);
+                copy_diagram = true;
+            }
+        }
+        // The block is offered when it is something else than that diagram.
+        const bool copy_block = is_joint_ ? block != diagram : block.size() < graph.getAllNodes().size();
+        if (!copy_diagram && !copy_block) return;
+
+        style::addMenuSection(menu, QStringLiteral("Copiar"));
+        if (copy_block) {
+            QAction* a = menu->addAction(style::icon(style::Icon::Copy), QStringLiteral("Copiar bloque"),
+                [this, box] { copyBlock(box); });
+            a->setToolTip(QStringLiteral("Copia esta caja y todas las que están unidas a ella, "
+                                         "para pegarlas en cualquier esquema"));
+        }
+        if (copy_diagram) {
+            QString text = QStringLiteral("Copiar esquema");
+            if (is_joint_) {
+                const QString name = QFontMetrics(menu->font()).elidedText(diagram_name, Qt::ElideRight, 200);
+                text = name.isEmpty() ? QStringLiteral("Copiar este esquema") : QStringLiteral("Copiar esquema «%1»").arg(name);
+            }
+            QAction* a = menu->addAction(style::icon(style::Icon::Copy), text,
+                [this, diagram_id] { copyDiagram(diagram_id); });
+            a->setToolTip(QStringLiteral("Copia el esquema entero, con todos sus bloques, "
+                                         "para pegarlo en cualquier esquema"));
+        }
+    }
+
+    void DiagramScene::copyBlock(Node* box) {
+        std::unordered_set<Node*> nodes;
+        try { nodes = currentGraph().getComponentNodes(box); }
+        catch (const std::exception& e) { showError(e); return; }
+        copyNodes(nodes, QStringLiteral("el bloque de «%1»").arg(QString::fromStdString(box->getName())));
+    }
+
+    void DiagramScene::copyDiagram(const std::string& diagram_id) {
+        std::unordered_set<Node*> nodes;
+        QString description;
+        if (is_joint_ && !diagram_id.empty()) {
+            const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+            try { nodes = joint.getHypergraphNodes(diagram_id); }
+            catch (const std::exception& e) { showError(e); return; }
+            description = QStringLiteral("el esquema «%1»").arg(QString::fromStdString(joint.getIncorporatedName(diagram_id)));
+        }
+        else {
+            for (const auto& n : currentGraph().getAllNodes()) nodes.insert(n.get());
+            description = is_joint_ ? QStringLiteral("el esquema conjunto")
+                : QStringLiteral("el esquema «%1»").arg(QString::fromStdString(currentGraph().getName()));
+        }
+        copyNodes(nodes, description);
+    }
+
+    void DiagramScene::copyNodes(const std::unordered_set<Node*>& nodes, const QString& description) {
+        if (nodes.empty()) return;
+        try { clipboard::copy(currentGraph().copyOf(nodes), description); }
+        catch (const std::exception& e) { showError(e); return; }
+        emit notice(QStringLiteral("Copiado %1. Pégalo con clic derecho › Pegar o con Ctrl+V, "
+                                   "también en otra ventana.").arg(description));
+    }
+
+    QString DiagramScene::copyAt(const QPointF& scene_pos) {
+        if (piece_move_ || state_ != InteractionState::Idle) return QString();
+
+        // The box or connection under the point (or under one of its parts).
+        Node* box = nullptr;
+        for (QGraphicsItem* it : items(scene_pos)) {
+            for (QGraphicsItem* p = it; p && !box; p = p->parentItem()) {
+                if (auto* n = qgraphicsitem_cast<NodeItem*>(p)) box = n->node();
+                else if (auto* e = dynamic_cast<HyperedgeItem*>(p); e && !e->edge()->getSources().empty())
+                    box = e->edge()->getSources().front().get();
+            }
+            if (box) break;
+        }
+        if (box) copyBlock(box);
+        else if (!currentGraph().getAllNodes().empty()) copyDiagram(std::string());
+        else return QString();
+        return clipboard::description();
+    }
+
+    bool DiagramScene::canPaste() const {
+        return !is_joint_ && clipboard::hasPiece();
+    }
+
+    bool DiagramScene::pasteAt(const QPointF& scene_pos) {
+        if (is_joint_ || piece_move_) return false;
+        cancelInteraction();
+        auto piece = clipboard::piece();
+        if (!piece) return false;
+
+        const auto from = nodeCenters();
+        std::vector<NodePtr> boxes;
+        try {
+            // Its first row in the layer at the point (-1 or past the deepest one
+            // opens a new layer), at its x among the blocks.
+            boxes = regular_editor_->paste(std::move(*piece), scene_pos.x(),
+                currentGraph().layerForY(-scene_pos.y()));
+        }
+        catch (const std::exception& e) {
+            showError(e);
+            return false;
+        }
+        rebuildAnimated(from); // the new boxes fade in
+        emit graphChanged();
+        emit notice(boxes.size() == 1 ? QStringLiteral("Se ha pegado 1 caja")
+                                      : QStringLiteral("Se han pegado %1 cajas").arg(boxes.size()));
+        return true;
     }
 
     void DiagramScene::takeOut(const std::unordered_set<Node*>& doomed, std::function<void()> apply) {

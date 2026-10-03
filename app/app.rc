@@ -1,0 +1,3 @@
+// The executable's icon, shown by Windows Explorer, the taskbar and the
+// installer. The windows use the same file through Qt's resources.
+IDI_ICON1 ICON "ui/resources/app/app.ico"

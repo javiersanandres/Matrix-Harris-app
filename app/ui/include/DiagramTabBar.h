@@ -82,6 +82,7 @@ namespace ui {
         void tabRenamed(int index, const QString& new_name);
         void jointTabRenamed(const QString& new_name);
         void removeTabRequested(int index);
+        void tabMenuRequested(int index, const QPoint& global_pos); // right click on a tab
 
     protected:
         void paintEvent(QPaintEvent* event) override;

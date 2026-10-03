@@ -98,6 +98,12 @@ namespace ui {
         // ── Editar ────────────────────────────────────────────────────────────────
         void onDeshacer();
         void onRehacer();
+        // Ctrl+C: the block under the mouse, or the whole diagram when the mouse
+        // is over no box or connection (or not over the diagram). Ctrl+V: pastes
+        // where the mouse is, or in the middle of the view (see DiagramScene).
+        void onCopiar();
+        void onPegar();
+        void updatePasteAction();
 
         // ── Ver ───────────────────────────────────────────────────────────────────
         void onAcercar();
@@ -109,6 +115,11 @@ namespace ui {
         // ── Esquema ───────────────────────────────────────────────────────────────
         void onRenombrarEsquema();
         void onEliminarEsquemaActivo();
+        // A copy of the diagram as a new one at the end of the tabs, shown
+        // straight away (see Project::duplicateDiagram).
+        void duplicateDiagram(int index);
+        // Right click on a tab: rename, duplicate, delete.
+        void showTabMenu(int index, const QPoint& global_pos);
         void onEsquemaSiguiente();
         void onEsquemaAnterior();
 
@@ -258,6 +269,8 @@ namespace ui {
         QAction* action_rehacer_;
         QAction* action_renombrar_;
         QAction* action_eliminar_esquema_;
+        QAction* action_duplicar_esquema_ = nullptr;
+        QAction* action_pegar_ = nullptr;
         QAction* action_menu_fast_ = nullptr;
         QAction* action_menu_slow_ = nullptr;
         QAction* action_panel_;

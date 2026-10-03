@@ -1,15 +1,20 @@
 #include "MainWindow.h"
 #include "GurobiNotice.h"
 #include <QApplication>
+#include <QIcon>
 #include <QLibraryInfo>
 #include <QLocale>
+#include <QSettings>
 #include <QTranslator>
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
-    app.setApplicationName("Matrix-Harris");
-    app.setOrganizationName("Javier San Andrés");
+    app.setApplicationName(QStringLiteral("Taller Matrix Harris"));
+    app.setOrganizationName(QStringLiteral("Javier San Andrés"));
     app.setApplicationVersion("0.1.0");
+    // Title bar and taskbar of every window: the executable's own icon, with
+    // all its sizes (read by Qt's ico plugin).
+    app.setWindowIcon(QIcon(QStringLiteral(":/app/app.ico")));
 
     // The app is in Spanish, so Qt's own dialogs (colour picker, file dialogs,
     // message box buttons, ...) must be too. Look for Qt's Spanish translations
@@ -36,7 +41,7 @@ int main(int argc, char* argv[]) {
     ui::MainWindow window;
     window.showMaximized();
 
-    // "MatrixHarrisApp proyecto.json" (e.g. opening a project from the file
+    // "TallerMatrixHarris proyecto.json" (e.g. opening a project from the file
     // explorer) starts with that project open.
     if (args.size() > 1) window.openProject(args.at(1));
 

@@ -38,6 +38,7 @@ target_sources(ui_lib
         Tutorial.cpp
         OptionsHelp.cpp
         PictureViewer.cpp
+        PieceClipboard.cpp
         DiagramExport.cpp
         ViewOverlays.cpp
         MainWindow.cpp
@@ -68,6 +69,7 @@ target_sources(ui_lib
             ../include/Tutorial.h
             ../include/OptionsHelp.h
             ../include/PictureViewer.h
+            ../include/PieceClipboard.h
             ../include/DiagramExport.h
             ../include/ViewOverlays.h
             ../include/MainWindow.h
@@ -100,7 +102,8 @@ set(UI_RESOURCES_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../resources")
 file(GLOB UI_IMAGES CONFIGURE_DEPENDS
     "${UI_RESOURCES_DIR}/gurobi/*/*.png"
     "${UI_RESOURCES_DIR}/tutorial/*.png"
-    "${UI_RESOURCES_DIR}/information/*/*.png")
+    "${UI_RESOURCES_DIR}/information/*/*.png"
+    "${UI_RESOURCES_DIR}/app/*.ico")
 if(UI_IMAGES)
     qt_add_resources(ui_lib "ui_images"
         PREFIX "/"

@@ -67,6 +67,13 @@ namespace app_logic {
 		NodePtr createTarget(const NodeAttributes& attributes, int layer_position,
 			const HyperedgePtr& edge);
 
+		// ── paste ─────────────────────────────────────────────────────────────────
+		//
+		// Pastes a copied piece (see GraphicalHypergraph::copyOf / paste) as a new
+		// block: its shallowest box in top_layer, at click_x. Undoable. Returns
+		// the pasted real boxes.
+		std::vector<NodePtr> paste(GraphicalHypergraph&& piece, double click_x, int top_layer);
+
 		// ── canUndo / canRedo predicates ──────────────────────────────────────────
 		bool canUndo() const { return !past_.empty(); }
 		bool canRedo() const { return !future_.empty(); }

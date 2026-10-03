@@ -386,6 +386,33 @@ namespace ui::style {
                 p.drawLine(QPointF(10.0, 9.0), QPointF(10.0, 12.0));
                 break;
             }
+            case Icon::Copy:
+            case Icon::Duplicate: {
+                // A sheet behind, and the front one with two joined boxes.
+                const bool duplicate = which == Icon::Duplicate;
+                p.setPen(c.pen(duplicate ? palette::accent : palette::faint, 1.2,
+                               duplicate ? Qt::SolidLine : Qt::DashLine));
+                p.setBrush(duplicate ? palette::accent_soft : QColor(Qt::white));
+                p.drawRoundedRect(QRectF(6.5, 1.5, 12.0, 12.5), 2.0, 2.0);
+                p.setPen(c.pen(palette::ink_soft, 1.2));
+                p.setBrush(Qt::white);
+                p.drawRoundedRect(QRectF(1.5, 5.5, 12.0, 13.0), 2.0, 2.0);
+                c.link({ 7.5, 10.5 }, { 7.5, 13.0 });
+                c.existing({ 4.5, 8.0, 6.0, 2.8 });
+                c.existing({ 4.5, 13.0, 6.0, 2.8 });
+                break;
+            }
+            case Icon::Paste: {
+                // A clipboard, its clip in the accent colour, and a new box on it.
+                p.setPen(c.pen(palette::ink_soft, 1.2));
+                p.setBrush(Qt::white);
+                p.drawRoundedRect(QRectF(3.0, 3.5, 14.0, 15.0), 2.0, 2.0);
+                p.setPen(c.pen(palette::accent, 1.2));
+                p.setBrush(palette::accent_soft);
+                p.drawRoundedRect(QRectF(6.5, 1.5, 7.0, 4.0), 1.5, 1.5);
+                c.fresh({ 6.0, 9.0, 8.0, 6.0 });
+                break;
+            }
             case Icon::Add: {
                 const bool hot = c.mode == QIcon::Active || c.mode == QIcon::Selected;
                 p.setPen(Qt::NoPen);

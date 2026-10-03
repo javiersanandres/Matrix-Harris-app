@@ -149,6 +149,10 @@ namespace hypergraph_logic {
 		return it == incorporated_names_.end() ? std::string() : it->second;
 	}
 
+	void JointGraphicalHypergraph::renameIncorporated(const std::string& id, const std::string& name) {
+		if (incorporated_ids_.count(id)) incorporated_names_[id] = name;
+	}
+
 	void JointGraphicalHypergraph::pruneOrigins() {
 		std::unordered_set<const Node*> alive;
 		for (const auto& n : all_nodes_) alive.insert(n.get());

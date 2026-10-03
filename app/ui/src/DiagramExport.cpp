@@ -69,7 +69,7 @@ namespace ui::exporting {
             p.setPen(style::palette::muted);
             p.setFont(font(8));
             const QRectF footer(MARGIN, footer_top + 4, width, 14);
-            p.drawText(footer, Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Matrix-Harris"));
+            p.drawText(footer, Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Taller Matrix Harris"));
             p.drawText(footer, Qt::AlignRight | Qt::AlignVCenter,
                 QStringLiteral("Página %1 de %2").arg(number).arg(total));
 
@@ -97,7 +97,7 @@ namespace ui::exporting {
         QPdfWriter pdf(path);
         pdf.setResolution(72); // painter units are points
         pdf.setTitle(project_name);
-        pdf.setCreator(QStringLiteral("Matrix-Harris"));
+        pdf.setCreator(QStringLiteral("Taller Matrix Harris"));
         pdf.setPageLayout(layoutFor(pages.front().scene));
 
         QPainter p;

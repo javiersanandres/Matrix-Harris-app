@@ -428,6 +428,66 @@ namespace app_logic {
                 fs::remove(tmp);
             }
 
+            // ── The joint's names follow the diagrams' ───────────────────────
+
+            // Diagram 0 ("A", in the joint) and diagram 1 ("B", not in it).
+            static void twoDiagramsOneInTheJoint(Project& p) {
+                p.getEditor(0).setName("A");
+                p.getEditor(0).createNode(NodeAttributes("1"), 0, -1, nullptr);
+                p.addDiagram();
+                p.getEditor(1).setName("B");
+                p.getJointEditor().addHypergraph(const_cast<GraphicalHypergraph&>(p.getEditor(0).getGraph()), false);
+            }
+
+            TEST(Project, RenamingADiagramRenamesItInTheJoint) {
+                Project p("P");
+                twoDiagramsOneInTheJoint(p);
+                const std::string a = p.getEditor(0).getId();
+
+                p.getEditor(0).setName("A2");
+                p.syncJointNames();
+                EXPECT_EQ(p.getJointEditor().getGraph().getIncorporatedName(a), "A2");
+
+                p.getEditor(0).undo(); // the rename
+                p.syncJointNames();
+                EXPECT_EQ(p.getJointEditor().getGraph().getIncorporatedName(a), "A");
+
+                // A diagram that is not in the joint stays out of it.
+                p.getEditor(1).setName("B2");
+                p.syncJointNames();
+                EXPECT_FALSE(p.getJointEditor().getGraph().getIncorporatedIds().count(p.getEditor(1).getId()));
+                EXPECT_TRUE(p.getJointEditor().getGraph().getIncorporatedName(p.getEditor(1).getId()).empty());
+            }
+
+            TEST(Project, UndoingInTheJointDoesNotBringBackAnOldName) {
+                Project p("P");
+                twoDiagramsOneInTheJoint(p);
+                const std::string a = p.getEditor(0).getId();
+
+                p.getJointEditor().moveHypergraphToLayer(a, 1); // its snapshot knows it as "A"
+                p.getEditor(0).setName("A2");
+                p.syncJointNames();
+                p.getJointEditor().undo();
+                p.syncJointNames();
+                EXPECT_EQ(p.getJointEditor().getGraph().getIncorporatedName(a), "A2");
+            }
+
+            TEST(Project, LoadingGivesTheJointTheDiagramsNames) {
+                namespace fs = std::filesystem;
+                fs::path tmp = fs::temp_directory_path() / "test_project_joint_names.json";
+                std::string a;
+                {
+                    Project p("P");
+                    twoDiagramsOneInTheJoint(p);
+                    a = p.getEditor(0).getId();
+                    p.getEditor(0).setName("A2"); // not synced: as files saved before it was
+                    p.save(tmp);
+                }
+                auto loaded = Project::load(tmp);
+                EXPECT_EQ(loaded->getJointEditor().getGraph().getIncorporatedName(a), "A2");
+                fs::remove(tmp);
+            }
+
         } // namespace project_tests
     } // namespace editors
 } // namespace app_logic

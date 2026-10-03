@@ -48,6 +48,26 @@ namespace app_logic {
 		return active_index_;
 	}
 
+	int Project::duplicateDiagram(int index) {
+		if (index < 0 || index >= static_cast<int>(editors_.size()))
+			throw std::out_of_range("Project::duplicateDiagram: index out of bounds.");
+
+		const std::string base = editors_[index]->getName() + " (copia";
+		auto taken = [this](const std::string& name) {
+			return std::any_of(editors_.begin(), editors_.end(),
+				[&](const auto& e) { return e->getName() == name; });
+		};
+		std::string name = base + ")";
+		for (int n = 2; taken(name); ++n) name = base + " " + std::to_string(n) + ")";
+
+		GraphicalHypergraph copy = editors_[index]->getGraph().duplicate();
+		copy.setName(name);
+		editors_.push_back(std::make_unique<HypergraphEditor>(std::move(copy), InitialLayout::Keep));
+		active_index_ = static_cast<int>(editors_.size()) - 1;
+		markUnsaved();
+		return active_index_;
+	}
+
 	void Project::removeDiagram(int index) {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::removeDiagram: index out of bounds.");
@@ -66,6 +86,11 @@ namespace app_logic {
 		}
 
 		markUnsaved();
+	}
+
+	void Project::syncJointNames() {
+		for (const auto& editor : editors_)
+			joint_editor_->renameIncorporated(editor->getId(), editor->getName());
 	}
 
 	int Project::getDiagramCount() const {
@@ -249,6 +274,7 @@ namespace app_logic {
 		p->joint_editor_.reset();
 		p->joint_editor_ = std::make_unique<JointHypergraphEditor>(
 			JointGraphicalHypergraph::fromJSON(j.at("joint")), InitialLayout::Keep);
+		p->syncJointNames(); // files saved before the joint followed renames
 
 		// Projects saved before recent colours existed simply start with none.
 		if (j.contains("recent_colours")) {

@@ -133,6 +133,25 @@ namespace ui {
         // drops it there, Esc or a right click puts it back.
         bool isMovingPiece() const { return piece_move_.has_value(); }
 
+        // ── Copying and pasting (see PieceClipboard) ──────────────────────────────
+        //
+        // Box and connection menus copy the block, or the whole diagram (in the
+        // joint, the box's diagram while it is not mixed); the background menu
+        // of a regular diagram pastes, right below "Nueva caja", when there is
+        // something to paste. The copy goes on the system clipboard, so another
+        // running instance can paste it too. The joint diagram cannot paste.
+        //
+        // copyAt (Ctrl+C): the block of the box or connection at scene_pos, or
+        // the whole diagram over the background. Returns what was copied, or an
+        // empty string when there was nothing to copy.
+        QString copyAt(const QPointF& scene_pos);
+
+        // pasteAt (Ctrl+V): the copy becomes a new block whose first row is the
+        // layer at scene_pos, placed among the other blocks at its x, like a
+        // moved block. Undoable. False when nothing was pasted.
+        bool pasteAt(const QPointF& scene_pos);
+        bool canPaste() const;
+
         // ── Signals emitted to MainWindow ────────────────────────────────────────
     signals:
         // Emitted after any mutation so MainWindow can update undo/redo actions
@@ -151,6 +170,9 @@ namespace ui {
         // Tells the user what the pending operation expects next; an empty hint
         // means no operation is pending any more.
         void interactionHintChanged(const QString& hint);
+
+        // A short message for the status bar (e.g. what was copied).
+        void notice(const QString& message);
 
     protected:
         void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
@@ -241,6 +263,12 @@ namespace ui {
         void addRemoveBlockEntry(QMenu* menu, hypergraph_logic::Node* box);
         void onRemoveDiagram(const std::string& diagram_id);
         void onRemoveBlock(hypergraph_logic::Node* box);
+
+        // "Copiar bloque" / "Copiar esquema" for the piece around box.
+        void addCopyEntries(QMenu* menu, hypergraph_logic::Node* box);
+        void copyBlock(hypergraph_logic::Node* box);
+        void copyDiagram(const std::string& diagram_id); // joint: that diagram; else the whole one
+        void copyNodes(const std::unordered_set<hypergraph_logic::Node*>& nodes, const QString& description);
         // The doomed boxes and their connections shrink away, then apply()
         // changes the graph and the rest glides together (or back, if it throws).
         void takeOut(const std::unordered_set<hypergraph_logic::Node*>& doomed, std::function<void()> apply);

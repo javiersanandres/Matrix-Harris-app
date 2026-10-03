@@ -32,6 +32,9 @@ TEST(OptionsHelp, EveryMenuOptionHasAnEntry) {
         "Crear caja entre", "Bifurcar arriba con caja nueva", "Bifurcar abajo con caja nueva",
         "Bifurcar arriba con caja existente", "Bifurcar abajo con caja existente",
         "Usar línea continua", "Usar línea discontinua", "Simplificar conexión", "Eliminar conexión",
+        // copying and pasting, tabs
+        "Copiar bloque", "Copiar esquema", "Copiar esquema «Esquema 1»", "Copiar este esquema", "Pegar",
+        "Duplicar esquema",
     };
     const auto ids = topicIds();
     for (const QString& option : options) {
@@ -42,6 +45,10 @@ TEST(OptionsHelp, EveryMenuOptionHasAnEntry) {
     EXPECT_EQ(topicForMenuEntry("Mover esquema «Esquema 1»"), "moveDiagram");
     EXPECT_EQ(topicForMenuEntry("Mover este esquema"), "moveDiagram");
     EXPECT_EQ(topicForMenuEntry("Mover bloque"), "moveBlock");
+    EXPECT_EQ(topicForMenuEntry("Copiar esquema «Esquema 1»"), "copyPiece");
+    EXPECT_EQ(topicForMenuEntry("Pegar"), "paste");
+    EXPECT_EQ(topicForMenuEntry("Duplicar esquema"), "duplicateDiagram");
+    EXPECT_TRUE(topicForMenuEntry("Renombrar").isEmpty());
     EXPECT_TRUE(topicForMenuEntry("Propiedades…").isEmpty());
     EXPECT_TRUE(topicForMenuEntry("Crear").isEmpty()) << "section titles have no entry";
 }

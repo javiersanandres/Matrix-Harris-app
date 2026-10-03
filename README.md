@@ -1,4 +1,4 @@
-# Matrix-Harris App
+# Taller Matrix Harris
 
 A desktop application for creating, editing and automatically laying out **Harris Matrix diagrams**, developed as a Computer Science Engineering thesis (TFG) at Universidad Autónoma de Madrid.
 
@@ -12,7 +12,7 @@ Drawing Harris Matrix diagrams by hand is slow and error-prone, especially for l
 
 ## What this application does
 
-Matrix-Harris App lets users interactively build, edit and merge Harris Matrix diagrams while the layout is recalculated automatically after every change, keeping the drawing clear, readable and visually consistent. Concretely, it supports:
+Taller Matrix Harris ("Matrix Harris Workshop") lets users interactively build, edit and merge Harris Matrix diagrams while the layout is recalculated automatically after every change, keeping the drawing clear, readable and visually consistent. Concretely, it supports:
 
 - Creating and managing multiple diagrams within a project, plus a special **joint diagram** where individual diagrams can be combined side by side and connected to one another.
 - Creating, renaming, deleting and merging stratigraphic units (nodes), as well as creating and editing the relationships between them (hyperedges), including operations such as adding a new parent/child, inserting a node inside an existing connection, or adding extra origins/destinations to a connection.
