@@ -176,6 +176,7 @@ namespace ui {
             this);
 
         form_ = new NodeAttributesForm(initial, recent_colours, this);
+        form_->setFontSizeForAllAvailable(!create);
         preview_ = new NodePreview(this);
         preview_->setFixedWidth(340);
 
@@ -187,6 +188,7 @@ namespace ui {
 
     NodeAttributes NodeDialog::attributes() const { return form_->attributes(); }
     QList<QColor> NodeDialog::pickedColours() const { return form_->pickedColours(); }
+    bool NodeDialog::fontSizeForAll() const { return form_->fontSizeForAll(); }
 
     // ============================================================================
     // FuseNodesDialog

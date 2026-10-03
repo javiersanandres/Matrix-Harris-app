@@ -826,6 +826,15 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         name_->selectAll();
     }
 
+    void NodeAttributesForm::setFontSizeForAllAvailable(bool available) {
+        font_size_all_->setVisible(available);
+        if (!available) font_size_all_->setChecked(false);
+    }
+
+    bool NodeAttributesForm::fontSizeForAll() const {
+        return !font_size_all_->isHidden() && font_size_all_->isChecked();
+    }
+
     // ── Building ──────────────────────────────────────────────────────────────────
 
     void NodeAttributesForm::build(const QList<QColor>& recent_colours) {
@@ -1003,7 +1012,17 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 sync();
                 emit attributesChanged();
             });
-            return font_size_;
+            font_size_all_ = new TickBox(QStringLiteral("Aplicar a todas las cajas del esquema"));
+            font_size_all_->setToolTip(QStringLiteral(
+                "Las demás cajas del esquema tomarán también este tamaño de fuente"));
+            font_size_all_->setVisible(false);
+            auto* wrap = new QWidget;
+            auto* v = new QVBoxLayout(wrap);
+            v->setContentsMargins(0, 0, 0, 0);
+            v->setSpacing(6);
+            v->addWidget(font_size_);
+            v->addWidget(font_size_all_, 0, Qt::AlignLeft);
+            return wrap;
         }
         case Fire: {
             auto* wrap = new QWidget;

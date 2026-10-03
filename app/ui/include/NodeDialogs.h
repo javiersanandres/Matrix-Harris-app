@@ -39,6 +39,10 @@ public:
     // Colours the user explicitly picked while the dialog was open.
     QList<QColor> pickedColours() const;
 
+    // Edit mode only: whether every box of the diagram should take the font size
+    // too ("Aplicar a todas las cajas del esquema").
+    bool fontSizeForAll() const;
+
 private:
     NodeAttributesForm* form_ = nullptr;
     NodePreview*        preview_ = nullptr;

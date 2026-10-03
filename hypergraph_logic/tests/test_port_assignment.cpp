@@ -1110,6 +1110,160 @@ namespace hypergraph_logic {
             }
 
 
+            // ════════════════════════════════════════════════════════════════════════
+            // reduceHorizontalJogs — roots and leaves take their box along
+            //
+            // A root whose only connection is the port being aligned, or a leaf whose
+            // only connection is it, moves its whole box under or over the other port
+            // instead of meeting it half way.
+            // ════════════════════════════════════════════════════════════════════════
+
+            TEST(ReduceJogsMovableBox, LoneRootMovesOverAFixedPort) {
+                // R -> T, and W -> T from the right: T's port for R's edge sits left
+                // of T's centre. T has two target ports, so only R may move.
+                TestGraph g("jogs_movable_root");
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                NodePtr T = g.createNode("T", 1, 0, R);
+                NodePtr W = g.createNode("W", 0, 1, nullptr);
+                g.addConnection(W, T);
+                HyperedgePtr e = findEdge(g, R, T);
+                ASSERT_NE(e, nullptr);
+
+                auto assigner = portsAt(g, { {R, 10}, {W, 300}, {T, 0} });
+                const double t_before = portX(g, T, e, false);
+                ASSERT_LT(std::abs(portX(g, R, e, true) - t_before), MIN_BLOCK_SEP * 0.5);
+                assigner->reduceHorizontalJogs();
+
+                EXPECT_NEAR(portX(g, T, e, false), t_before, 1e-9) << "T's port stays where it was";
+                EXPECT_NEAR(portX(g, R, e, true), t_before, 1e-9);
+                EXPECT_NEAR(g.nodeLayout().at(R.get()).x, t_before, 1e-9) << "the box moves with its port";
+            }
+
+            TEST(ReduceJogsMovableBox, RootAndLeafMeetAtTheClosestPointToTheirMiddle) {
+                // R -> L, both free to move; Q on R's right leaves R room only up to 10,
+                // so they meet at 10 rather than at the middle of their ports (12.5).
+                TestGraph g("jogs_movable_both");
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                NodePtr L = g.createNode("L", 1, 0, R);
+                NodePtr Q = g.createNode("Q", 0, 1, nullptr);
+                HyperedgePtr e = findEdge(g, R, L);
+                ASSERT_NE(e, nullptr);
+
+                const double q_x = 10 + NODE_WIDTH + MIN_BLOCK_SEP;
+                auto assigner = portsAt(g, { {R, 0}, {Q, q_x}, {L, 25} });
+                assigner->reduceHorizontalJogs();
+
+                EXPECT_NEAR(portX(g, R, e, true), 10.0, 1e-9);
+                EXPECT_NEAR(portX(g, L, e, false), 10.0, 1e-9);
+                EXPECT_NEAR(g.nodeLayout().at(R.get()).x, 10.0, 1e-9);
+                EXPECT_NEAR(g.nodeLayout().at(L.get()).x, 10.0, 1e-9);
+            }
+
+
+            // ════════════════════════════════════════════════════════════════════════
+            // straightenSingleLinkChains
+            //
+            // A chain of nodes linked one to one down to a leaf (or up to a root) ends
+            // up on one vertical line together with the node it hangs from (or the one
+            // it comes down to), whenever the room around it allows.
+            // ════════════════════════════════════════════════════════════════════════
+
+            // Every box of 'chain' and every port of the links between them share one x.
+            static void checkChainIsStraight(TestGraph& g, const std::vector<NodePtr>& chain) {
+                ASSERT_GE(chain.size(), 2u);
+                const double x0 = g.nodeLayout().at(chain.front().get()).x;
+                for (size_t i = 0; i < chain.size(); ++i) {
+                    const NodeLayout& nl = g.nodeLayout().at(chain[i].get());
+                    EXPECT_NEAR(nl.x, x0, 1e-9) << chain[i]->getName();
+                    if (i + 1 < chain.size()) {
+                        ASSERT_EQ(nl.source_ports.size(), 1u) << chain[i]->getName();
+                        EXPECT_NEAR(nl.source_ports[0].x, x0, 1e-9) << chain[i]->getName();
+                    }
+                    if (i > 0) {
+                        ASSERT_EQ(nl.target_ports.size(), 1u) << chain[i]->getName();
+                        EXPECT_NEAR(nl.target_ports[0].x, x0, 1e-9) << chain[i]->getName();
+                    }
+                }
+            }
+
+            TEST(StraightenSingleLinkChains, ChainUnderAnOffCentrePortIsOneLine) {
+                // P hangs a leaf A and a chain C1 -> C2 -> C3: P's port for C1 is off
+                // its centre, so recentring alone would leave C1 and C2 half way.
+                TestGraph g("straighten_down");
+                NodePtr P = g.createNode("P", 0, 0, nullptr);
+                g.createNode("A", 1, 0, P);
+                NodePtr C1 = g.createNode("C1", 1, 1, P);
+                NodePtr C2 = g.createNode("C2", 2, 0, C1);
+                NodePtr C3 = g.createNode("C3", 3, 0, C2);
+                runPipeline(g);
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+                checkChainIsStraight(g, { C1, C2, C3 });
+            }
+
+            TEST(StraightenSingleLinkChains, ChainFromARootDownToANodeWithTwoChildren) {
+                // The upward case: R -> S -> T, where T hangs two leaves. T keeps its
+                // two source ports symmetric, so the chain comes down to T's centre.
+                TestGraph g("straighten_up");
+                NodePtr R = g.createNode("R", 0, 0, nullptr);
+                NodePtr S = g.createNode("S", 1, 0, R);
+                NodePtr T = g.createNode("T", 2, 0, S);
+                g.createNode("U", 3, 0, T);
+                g.createNode("V", 3, 1, T);
+                NodePtr Other = g.createNode("Other", 0, 1, nullptr);
+                g.createNode("OtherChild", 1, 1, Other);
+                runPipeline(g);
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+                checkChainIsStraight(g, { R, S, T });
+
+                const NodeLayout& t = g.nodeLayout().at(T.get());
+                ASSERT_EQ(t.source_ports.size(), 2u);
+                EXPECT_NEAR((t.source_ports[0].x + t.source_ports[1].x) * 0.5, t.x, 1e-9);
+            }
+
+            TEST(StraightenSingleLinkChains, DummiesCanBePartOfTheChain) {
+                // H's only connection skips a layer to the leaf Z: H -> dummy -> Z.
+                // A's own lineage, on the left, is what makes layers 2 and 3 exist.
+                TestGraph g("straighten_dummy");
+                NodePtr P = g.createNode("P", 0, 0, nullptr);
+                NodePtr A = g.createNode("A", 1, 0, P);
+                NodePtr A2 = g.createNode("A2", 2, 0, A);
+                g.createNode("A3", 3, 0, A2);
+                NodePtr H = g.createNode("H", 1, 1, P);
+                NodePtr Z = g.createNode("Z", 3, 1, H);
+                runPipeline(g);
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+
+                auto dummies = collectDummiesBetweenLayers(g, 1, 3);
+                std::vector<NodePtr> chain = { H };
+                for (const auto& d : dummies)
+                    if (g.nodeLayout().at(d.get()).target_ports.size() == 1 &&
+                        g.nodeLayout().at(d.get()).target_ports[0].edge->getSources().front() == H)
+                        chain.push_back(d);
+                ASSERT_EQ(chain.size(), 2u) << "H -> Z must go through one dummy";
+                chain.push_back(Z);
+                checkChainIsStraight(g, chain);
+            }
+
+            TEST(StraightenSingleLinkChains, CrowdedChainsKeepEveryInvariant) {
+                // Several chains hanging side by side from one parent, with little
+                // room between them: whichever can be straightened is, the rest stay.
+                TestGraph g("straighten_crowded");
+                NodePtr P = g.createNode("P", 0, 0, nullptr);
+                NodePtr Q = g.createNode("Q", 0, 1, nullptr);
+                for (int i = 0; i < 4; ++i) {
+                    NodePtr a = g.createNode("A" + std::to_string(i), 1, i, i % 2 ? Q : P);
+                    NodePtr b = g.createNode("B" + std::to_string(i), 2, i, a);
+                    g.createNode("C" + std::to_string(i), 3, i, b);
+                }
+                EXPECT_NO_THROW(runPipeline(g));
+                checkAllInvariants(g);
+                checkNodeBoxSeparation(g);
+            }
+
+
         } // namespace port_assignment
     } // namespace graphicalhypergraph_tests
 } // namespace hypergraph_logic

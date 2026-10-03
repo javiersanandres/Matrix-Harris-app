@@ -1070,10 +1070,17 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         if (dlg.exec() != QDialog::Accepted) return;
 
         const NodeAttributes updated = dlg.attributes();
-        if (updated == node_ptr->getAttributes()) return;
+        const bool font_size_for_all = dlg.fontSizeForAll();
+        if (updated == node_ptr->getAttributes() && !font_size_for_all) return;
         try {
-            if (is_joint_) joint_editor_->setNodeAttributes(node_ptr, updated);
-            else           regular_editor_->setNodeAttributes(node_ptr, updated);
+            if (font_size_for_all) {
+                if (is_joint_) joint_editor_->setNodeAttributesWithFontSizeForAll(node_ptr, updated);
+                else           regular_editor_->setNodeAttributesWithFontSizeForAll(node_ptr, updated);
+            }
+            else {
+                if (is_joint_) joint_editor_->setNodeAttributes(node_ptr, updated);
+                else           regular_editor_->setNodeAttributes(node_ptr, updated);
+            }
         }
         catch (const std::exception& e) { showError(e); return; }
 

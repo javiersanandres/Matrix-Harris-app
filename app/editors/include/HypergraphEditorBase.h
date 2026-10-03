@@ -7,6 +7,7 @@
 #include <deque>
 #include <functional>
 #include <map>
+#include <optional>
 #include <stdexcept>
 #include <string>
 #include <variant>
@@ -237,18 +238,68 @@ namespace app_logic {
 		// layer. The entry remembers that re-ordering, so undo and redo bring back
 		// exactly the drawing there was, not just an equivalent one.
 		void setNodeAttributes(const NodePtr& node, const NodeAttributes& attributes) {
+			if (std::optional<LocalChange> change = applyNodeAttributes(node, attributes))
+				commitLocal(std::move(*change));
+		}
+
+		// ── setNodeAttributesWithFontSizeForAll ───────────────────────────────────
+		//
+		// setNodeAttributes, and every other box of the diagram takes the same font
+		// size, so all the labels can be adjusted at once. Font sizes do not change
+		// the layout. One step of the history: undone without copying the graph.
+		void setNodeAttributesWithFontSizeForAll(const NodePtr& node, const NodeAttributes& attributes) {
+			if (!node) throw std::invalid_argument("La caja no puede ser nula.");
+			auto& graph = derived().graph();
+
+			// The other boxes whose font size changes, and the size each one had.
+			std::vector<std::pair<NodeLocator, int>> resized;
+			for (const auto& other : graph.getAllNodes()) {
+				if (other == node || other->isDummy() || other->getFontSize() == attributes.font_size) continue;
+				resized.push_back({ locate(graph, other), other->getFontSize() });
+			}
+			auto setFontSizes = [](GraphicalHypergraph& g, const std::vector<std::pair<NodeLocator, int>>& boxes,
+				std::optional<int> size) {
+				for (const auto& [at, old_size] : boxes) {
+					const NodePtr box = resolve(g, at);
+					NodeAttributes a = box->getAttributes();
+					a.font_size = size.value_or(old_size);
+					box->setAttributes(a);
+				}
+			};
+
+			// The box itself first: if its new shape cannot be laid out, it throws
+			// with the graph as it was, before any other box is touched.
+			std::optional<LocalChange> own = applyNodeAttributes(node, attributes);
+			if (!own && resized.empty()) return;
+			const int size = attributes.font_size;
+			setFontSizes(graph, resized, size);
+
+			commitLocal({
+				[own, resized, setFontSizes](GraphicalHypergraph& g) {
+					setFontSizes(g, resized, std::nullopt);
+					if (own) own->undo(g);
+				},
+				[own, resized, setFontSizes, size](GraphicalHypergraph& g) {
+					if (own) own->redo(g);
+					setFontSizes(g, resized, size);
+				} });
+		}
+
+	private:
+		// Applies the attributes to the node and returns how to undo and redo it,
+		// or nothing if they were already the node's (see setNodeAttributes).
+		std::optional<LocalChange> applyNodeAttributes(const NodePtr& node, const NodeAttributes& attributes) {
 			if (!node) throw std::invalid_argument("La caja no puede ser nula.");
 			auto& graph = derived().graph();
 			const NodeAttributes old_attributes = node->getAttributes();
-			if (old_attributes == attributes) return;
+			if (old_attributes == attributes) return std::nullopt;
 			const NodeLocator at = locate(graph, node);
 
 			if (node->getShape() == attributes.shape) {
 				node->setAttributes(attributes);
-				commitLocal({
+				return LocalChange{
 					[at, old_attributes](GraphicalHypergraph& g) { resolve(g, at)->setAttributes(old_attributes); },
-					[at, attributes](GraphicalHypergraph& g) { resolve(g, at)->setAttributes(attributes); } });
-				return;
+					[at, attributes](GraphicalHypergraph& g) { resolve(g, at)->setAttributes(attributes); } };
 			}
 
 			const int layer = node->getLayer();
@@ -278,7 +329,7 @@ namespace app_logic {
 						std::find(old_order.begin(), old_order.end(), e) - old_order.begin()));
 			}
 
-			commitLocal({
+			return LocalChange{
 				[at, old_attributes, moved_from](GraphicalHypergraph& g) {
 					resolve(g, at)->setAttributes(old_attributes);
 					for (const auto& [l, from] : moved_from) {
@@ -298,9 +349,10 @@ namespace app_logic {
 						g.setHyperedgeOrder(l, after);
 					}
 					g.computeLayout({});
-				} });
+				} };
 		}
 
+	public:
 		// ── setHyperedgeContinuous ────────────────────────────────────────────────
 		//
 		// Draws the whole connection with a continuous (true) or discontinuous

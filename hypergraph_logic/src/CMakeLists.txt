@@ -60,6 +60,11 @@ FetchContent_Declare(
 # picking up this project's BUILD_TESTING=ON (used below for
 # graphical_hypergraph) so it doesn't try to build its own test suite too.
 set(FAST_BUILD ON CACHE BOOL "" FORCE)
+# No zlib: HiGHS only uses it to read compressed (.gz) model files, which this
+# project never does, and any zlib it found on the build machine (e.g.
+# Strawberry Perl's, whose libz.a is the import library of zlib1__.dll) would
+# make the app need that DLL on every user's computer.
+set(ZLIB OFF CACHE BOOL "" FORCE)
 set(_saved_build_testing ${BUILD_TESTING})
 set(BUILD_TESTING OFF)
 FetchContent_MakeAvailable(highs)

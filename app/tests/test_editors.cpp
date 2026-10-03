@@ -569,6 +569,83 @@ namespace app_logic {
                 EXPECT_NEAR(ed.getGraph().getLayerLayout().at(1), layer1_before, 1e-9);
             }
 
+            // ── font size for every box ───────────────────────────────────────
+
+            static int fontSizeOf(const HypergraphEditor& ed, const std::string& name) {
+                for (const auto& n : ed.getAllNodes())
+                    if (n->getName() == name) return n->getFontSize();
+                ADD_FAILURE() << "no box named " << name;
+                return -1;
+            }
+
+            TEST(HypergraphEditor, FontSizeForAllReachesEveryBoxInOneStep) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodeAttributes c("C");
+                c.font_size = 20;
+                ed.createNode(c, 0, 1, nullptr);
+                // A long connection, so there are dummies, which have no font.
+                ed.createNode("D", A->getLayer() + 3, 0, A);
+
+                NodeAttributes a = A->getAttributes();
+                a.name = "A2";
+                a.font_size = 14;
+                ed.setNodeAttributesWithFontSizeForAll(A, a);
+                for (const char* name : { "A2", "B", "C", "D" }) EXPECT_EQ(fontSizeOf(ed, name), 14) << name;
+
+                ed.undo();
+                EXPECT_EQ(fontSizeOf(ed, "A"), NodeAttributes::DEFAULT_FONT_SIZE);
+                EXPECT_EQ(fontSizeOf(ed, "B"), NodeAttributes::DEFAULT_FONT_SIZE);
+                EXPECT_EQ(fontSizeOf(ed, "C"), 20);
+                EXPECT_EQ(fontSizeOf(ed, "D"), NodeAttributes::DEFAULT_FONT_SIZE);
+                ed.redo();
+                for (const char* name : { "A2", "B", "C", "D" }) EXPECT_EQ(fontSizeOf(ed, name), 14) << name;
+            }
+
+            TEST(HypergraphEditor, FontSizeForAllWorksWhenOnlyTheOthersChange) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                ed.createNode("B", 0, 1, nullptr);
+                NodeAttributes a = A->getAttributes();
+                a.font_size = 11;
+                ed.setNodeAttributes(A, a);
+
+                // A already has the size: only B changes, still one undoable step.
+                ed.setNodeAttributesWithFontSizeForAll(A, a);
+                EXPECT_EQ(fontSizeOf(ed, "B"), 11);
+                ed.undo();
+                EXPECT_EQ(fontSizeOf(ed, "B"), NodeAttributes::DEFAULT_FONT_SIZE);
+                EXPECT_EQ(fontSizeOf(ed, "A"), 11);
+            }
+
+            TEST(HypergraphEditor, FontSizeForAllWithNothingToChangeRecordsNothing) {
+                HypergraphEditor ed = editorWithOneBox();
+                NodePtr A = ed.getAllNodes()[0];
+                ASSERT_FALSE(ed.canUndo());
+                ed.setNodeAttributesWithFontSizeForAll(A, A->getAttributes());
+                EXPECT_FALSE(ed.canUndo());
+            }
+
+            TEST(HypergraphEditor, FontSizeForAllWithANewShapeUndoesBoth) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                ed.createNode("B", A->getLayer() + 1, 0, A);
+                NodeAttributes circle = A->getAttributes();
+                circle.shape = NodeShape::Circle;
+                circle.font_size = 16;
+                ed.setNodeAttributesWithFontSizeForAll(A, circle);
+                EXPECT_EQ(fontSizeOf(ed, "B"), 16);
+
+                ed.undo();
+                for (const auto& n : ed.getAllNodes())
+                    if (n->getName() == "A") EXPECT_EQ(n->getAttributes(), NodeAttributes("A"));
+                EXPECT_EQ(fontSizeOf(ed, "B"), NodeAttributes::DEFAULT_FONT_SIZE);
+                ed.redo();
+                EXPECT_EQ(fontSizeOf(ed, "A"), 16);
+                EXPECT_EQ(fontSizeOf(ed, "B"), 16);
+            }
+
             // ── setName ───────────────────────────────────────────────────────
 
             TEST(HypergraphEditor, SetNameUpdatesGetName) {

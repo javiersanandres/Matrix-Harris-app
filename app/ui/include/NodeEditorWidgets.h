@@ -205,7 +205,8 @@ namespace ui {
     //   - Color del texto    : ColorPickerButton with "Automático", which follows
     //                          the background (black or white, whichever reads
     //                          better) until the user picks a colour explicitly.
-    //   - Tamaño de fuente   : FontSizeSelector.
+    //   - Tamaño de fuente   : FontSizeSelector, optionally with a tick box to
+    //                          give that size to every box of the diagram.
     //   - Fuego / Fuego con cenizas : two mutually exclusive tick boxes. Either
     //                          one forces a white background and black text (and
     //                          locks both pickers); unticking restores the colours
@@ -238,6 +239,11 @@ namespace ui {
         const QList<QColor>& pickedColours() const { return picked_colours_; }
 
         void focusName();
+
+        // Shows, under the font size, a tick box to give that size to every box of
+        // the diagram (hidden by default), and whether it is ticked.
+        void setFontSizeForAllAvailable(bool available);
+        bool fontSizeForAll() const;
 
     signals:
         void attributesChanged();
@@ -289,6 +295,7 @@ namespace ui {
         ColorPickerButton* colour_ = nullptr;
         ColorPickerButton* font_colour_ = nullptr;
         FontSizeSelector* font_size_ = nullptr;
+        TickBox* font_size_all_ = nullptr;
         TickBox* fire_ = nullptr;
         TickBox* ashes_ = nullptr;
 

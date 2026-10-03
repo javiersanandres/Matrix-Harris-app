@@ -267,10 +267,46 @@ namespace port_assignment_internal {
     double PortAssigner::reduceHorizontalJogs() const {
         double min_spacing = MIN_VERTICAL_SEP;
 
+        // A root whose only connection is this one port (as source), or a leaf whose
+        // only connection is this one port (as target), can take its whole box along
+        // to align it: the range returned is where its centre, and so its port, may
+        // go without coming closer than MIN_BLOCK_SEP to its neighbours.
+        auto movableBox = [&](Node* node, bool as_source) -> std::optional<std::pair<double, double>> {
+            if (node->isDummy()) return std::nullopt;
+            const NodeLayout& nl = node_layout_.at(node);
+            const auto& own = as_source ? nl.source_ports : nl.target_ports;
+            const auto& other = as_source ? nl.target_ports : nl.source_ports;
+            if (own.size() != 1 || !other.empty()) return std::nullopt;
+
+            const auto& nodes = as_source ? upper_.nodes : lower_.nodes;
+            const int i = positionInLayer(node, as_source);
+            const int k = static_cast<int>(nodes.size());
+            double low = -std::numeric_limits<double>::infinity();
+            double high = std::numeric_limits<double>::infinity();
+            if (i > 0) {
+                Node* l = nodes[i - 1].get();
+                low = node_layout_.at(l).x + (l->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
+            }
+            if (i < k - 1) {
+                Node* r = nodes[i + 1].get();
+                high = node_layout_.at(r).x - (node->getWidth() + r->getWidth()) * 0.5 - MIN_BLOCK_SEP;
+            }
+            if (low > high) return std::nullopt;
+            return std::pair<double, double>{ low, high };
+            };
+
+        auto moveBox = [&](Node* node, Port& port, double x) {
+            node_layout_.at(node).x = x;
+            port.x = x;
+            };
+
         // The following lambda tries to align one specific source port and one specific
         // target port of the same edge by moving both to the midpoint of the intersection of
         // their corresponding spans. The span of a port is the horizontal interval where it
         // can be moved without creating a conflict with its neighbour ports.
+        // If one of the nodes can take its box along (see movableBox), only that one moves,
+        // under or over the other's port; if both can, they meet at the point of their
+        // common range closest to the middle of their ports.
         auto alignPort = [&](Node* src_node, Node* tgt_node,
             std::vector<Port>& src_ports, int si,
             std::vector<Port>& tgt_ports, int ti) -> bool {
@@ -278,17 +314,35 @@ namespace port_assignment_internal {
                 double tgt_x = node_layout_.at(tgt_node).x;
 
                 if (src_node->isDummy() && tgt_node->isDummy()) return false;
+                if (src_ports[si].x == tgt_ports[ti].x) return true; // Already aligned
+
+                const std::optional<std::pair<double, double>> src_box = movableBox(src_node, true);
+                const std::optional<std::pair<double, double>> tgt_box = movableBox(tgt_node, false);
+                const double a = src_ports[si].x, b = tgt_ports[ti].x;
+                if (src_box && tgt_box) {
+                    const double lo = std::max(src_box->first, tgt_box->first);
+                    const double hi = std::min(src_box->second, tgt_box->second);
+                    if (lo <= hi) {
+                        const double x = std::clamp((a + b) * 0.5, lo, hi);
+                        moveBox(src_node, src_ports[si], x);
+                        moveBox(tgt_node, tgt_ports[ti], x);
+                        return true;
+                    }
+                }
+                else if (src_box && src_box->first <= b && b <= src_box->second) {
+                    moveBox(src_node, src_ports[si], b);
+                    return true;
+                }
+                else if (tgt_box && tgt_box->first <= a && a <= tgt_box->second) {
+                    moveBox(tgt_node, tgt_ports[ti], a);
+                    return true;
+                }
 
                 // Let's see if there is any port in between the two. If there is
                 // we don't align them but if there isn't we will align them.
-                if (src_ports[si].x != tgt_ports[ti].x) {
-                    bool src_moving_right = src_ports[si].x < tgt_ports[ti].x;
-                    if (wouldCrossNeighbour(src_node, src_ports, si, src_x, tgt_ports[ti].x, src_moving_right)) return false;
-                    if (wouldCrossNeighbour(tgt_node, tgt_ports, ti, tgt_x, src_ports[si].x, !src_moving_right)) return false;
-                }
-                else {
-                    return true; // Already aligned
-                }
+                bool src_moving_right = src_ports[si].x < tgt_ports[ti].x;
+                if (wouldCrossNeighbour(src_node, src_ports, si, src_x, tgt_ports[ti].x, src_moving_right)) return false;
+                if (wouldCrossNeighbour(tgt_node, tgt_ports, ti, tgt_x, src_ports[si].x, !src_moving_right)) return false;
 
                 std::pair<double, double> src_span, tgt_span;
 
@@ -2020,6 +2074,7 @@ namespace hypergraph_logic {
             assigners[layer]->solveVerticalOverlaps(min_spacing[layer]);
         }
         recentreNodesUnderPorts();
+        straightenSingleLinkChains();
         centerSingleHyperedgeTerminalNodes(assigner_ptrs);
     }
 
@@ -2141,6 +2196,151 @@ namespace hypergraph_logic {
 
             pass(0, k, 1);       // left  -> right
             pass(k - 1, -1, -1); // right -> left
+        }
+    }
+
+    // ── straightenSingleLinkChains ───────────────────────────────────────
+    //
+    // Brandes-Köpf puts a node with a single neighbour right under (or over) it,
+    // but once the ports are placed, recentreNodesUnderPorts centres every box
+    // between its own ports, and a chain hanging from an off-centre port becomes a
+    // staircase. This pass puts such chains back on one vertical line.
+    //
+    // A downward chain is a real head H with a single source port, followed by
+    // nodes N2..Nk each joined to the previous one by a hyperedge with that one
+    // source and that one target, every Ni having that single target port and,
+    // but the last, a single source port; Nk is a leaf. Dummies may be among
+    // N2..N(k-1). An upward chain is its mirror: a real tail with a single target
+    // port, hanging from a root. The whole chain (anchor included) moves to one X,
+    // the first of these that is feasible:
+    //   1. the middle of the anchor's other ports (its target ports for a head,
+    //      its source ports for a tail), so the anchor stays symmetric;
+    //   2. the anchor's current x (its other ports are then not symmetric).
+    // If neither is, nothing moves. X is feasible when every box of the chain fits
+    // there with MIN_BLOCK_SEP to its neighbours, the anchor's other ports stay on
+    // its box, and, in every gap the chain crosses, its vertical line keeps
+    // MIN_VERTICAL_SEP from every other port without sweeping past one, so no
+    // crossing is added or removed.
+    void GraphicalHypergraph::straightenSingleLinkChains() {
+        // The single port of 'node' on the given side, if it has exactly one.
+        auto onlyPort = [&](Node* node, bool source) -> Port* {
+            auto& ports = source ? node_layout_.at(node).source_ports : node_layout_.at(node).target_ports;
+            return ports.size() == 1 ? &ports.front() : nullptr;
+        };
+        // The node at the other end of a hyperedge with a single source and a single target.
+        auto across = [](const Port* port, bool from_source) -> Node* {
+            const auto sources = port->edge->getSources();
+            const auto targets = port->edge->getTargets();
+            if (sources.size() != 1 || targets.size() != 1) return nullptr;
+            return (from_source ? targets : sources).front().get();
+        };
+        // Where the centre of 'node', in 'layer', may go.
+        auto boxWindow = [&](int layer, Node* node) -> Interval {
+            const auto& nodes = layers_.at(layer).nodes;
+            const int k = static_cast<int>(nodes.size());
+            const int i = static_cast<int>(std::find_if(nodes.begin(), nodes.end(),
+                [node](const NodePtr& n) { return n.get() == node; }) - nodes.begin());
+            double low = -std::numeric_limits<double>::infinity();
+            double high = std::numeric_limits<double>::infinity();
+            if (i > 0) {
+                Node* l = nodes[i - 1].get();
+                low = node_layout_.at(l).x + (l->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
+            }
+            if (i < k - 1) {
+                Node* r = nodes[i + 1].get();
+                high = node_layout_.at(r).x - (node->getWidth() + r->getWidth()) * 0.5 - MIN_BLOCK_SEP;
+            }
+            return { low, high };
+        };
+
+        // The chain from 'anchor' (top to bottom when downward), or empty if there is none.
+        auto chainFrom = [&](Node* anchor, bool downward) {
+            std::vector<Node*> chain;
+            if (anchor->isDummy()) return chain;
+            Port* link = onlyPort(anchor, downward);
+            if (!link) return chain;
+            chain.push_back(anchor);
+            Node* current = anchor;
+            while (true) {
+                Node* next = across(link, downward);
+                if (!next || onlyPort(next, !downward) == nullptr) return std::vector<Node*>{};
+                chain.push_back(next);
+                current = next;
+                auto& onward = downward ? node_layout_.at(current).source_ports : node_layout_.at(current).target_ports;
+                if (onward.empty()) break; // the leaf (or the root) closes the chain
+                link = onlyPort(current, downward);
+                if (!link) return std::vector<Node*>{};
+            }
+            if (!downward) std::reverse(chain.begin(), chain.end());
+            return chain;
+        };
+
+        auto feasible = [&](const std::vector<Node*>& chain, Node* anchor, bool downward, double X) {
+            for (Node* node : chain) {
+                const Interval w = boxWindow(node->getLayer(), node);
+                if (X < w.first || X > w.second) return false;
+            }
+            // The anchor's other ports stay where they are, so they must still be on its box.
+            const double half = anchor->getWidth() * 0.5;
+            for (const Port& p : downward ? node_layout_.at(anchor).target_ports : node_layout_.at(anchor).source_ports)
+                if (p.x < X - half || p.x > X + half) return false;
+
+            for (size_t i = 0; i + 1 < chain.size(); ++i) {
+                Node* upper = chain[i];
+                Node* lower = chain[i + 1];
+                const Port& a = node_layout_.at(upper).source_ports.front();
+                const Port& b = node_layout_.at(lower).target_ports.front();
+                auto blocks = [&](const Port& q) {
+                    if (q.edge == a.edge) return false;
+                    if (std::abs(q.x - X) < MIN_VERTICAL_SEP) return true;
+                    auto strictlyBetween = [&](double from) { return std::min(from, X) < q.x && q.x < std::max(from, X); };
+                    return strictlyBetween(a.x) || strictlyBetween(b.x);
+                };
+                for (const auto& n : layers_.at(upper->getLayer()).nodes)
+                    for (const Port& q : node_layout_.at(n.get()).source_ports) if (blocks(q)) return false;
+                for (const auto& n : layers_.at(lower->getLayer()).nodes)
+                    for (const Port& q : node_layout_.at(n.get()).target_ports) if (blocks(q)) return false;
+            }
+            return true;
+        };
+
+        auto straighten = [&](Node* anchor, bool downward) {
+            const std::vector<Node*> chain = chainFrom(anchor, downward);
+            if (chain.empty()) return;
+
+            std::vector<double> candidates;
+            const auto& others = downward ? node_layout_.at(anchor).target_ports : node_layout_.at(anchor).source_ports;
+            if (!others.empty()) {
+                auto [lo, hi] = std::minmax_element(others.begin(), others.end(),
+                    [](const Port& p, const Port& q) { return p.x < q.x; });
+                candidates.push_back((lo->x + hi->x) * 0.5);
+            }
+            candidates.push_back(node_layout_.at(anchor).x);
+
+            for (double X : candidates) {
+                if (!feasible(chain, anchor, downward, X)) continue;
+                for (Node* node : chain) {
+                    NodeLayout& nl = node_layout_.at(node);
+                    nl.x = X;
+                    for (Port& p : nl.source_ports) if (node != anchor || downward) p.x = X;
+                    for (Port& p : nl.target_ports) if (node != anchor || !downward) p.x = X;
+                }
+                return;
+            }
+        };
+
+        // Downward chains, layer by layer from the top, then upward ones from the
+        // bottom; within a layer, left to right and back, since a move can make
+        // room for a neighbour's.
+        for (auto it = layers_.begin(); it != layers_.end(); ++it) {
+            const auto nodes = it->second.nodes;
+            for (const auto& n : nodes) straighten(n.get(), true);
+            for (auto r = nodes.rbegin(); r != nodes.rend(); ++r) straighten(r->get(), true);
+        }
+        for (auto it = layers_.rbegin(); it != layers_.rend(); ++it) {
+            const auto nodes = it->second.nodes;
+            for (const auto& n : nodes) straighten(n.get(), false);
+            for (auto r = nodes.rbegin(); r != nodes.rend(); ++r) straighten(r->get(), false);
         }
     }
 

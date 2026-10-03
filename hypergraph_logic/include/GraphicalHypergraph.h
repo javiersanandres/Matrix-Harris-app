@@ -393,6 +393,16 @@ namespace hypergraph_logic {
 		// margin to its own leftmost/rightmost port is equal.
 		void recentreNodesUnderPorts();
 
+		// ── Stage 4.55: put single-link chains back on one vertical line ─────────
+		//
+		// A real node with a single source port hanging a chain of nodes linked one
+		// to one down to a leaf (or, mirrored, a real node with a single target port
+		// under such a chain coming from a root) is moved, with the whole chain, to
+		// one x: the middle of the anchor's other ports or, failing that, its own x.
+		// Nothing moves if neither keeps every box and line separation and every
+		// crossing as they are.
+		void straightenSingleLinkChains();
+
 		// ── Stage 4.6: centre lone roots and leaves on their single hyperedge ─────
 		//
 		// For every root with exactly one outgoing hyperedge (a single source
