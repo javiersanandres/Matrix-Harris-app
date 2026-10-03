@@ -219,6 +219,10 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         QAction* license = add(ayuda, QStringLiteral("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
             [this] { gurobi::showGuide(gurobi::Guide::License, this); });
         ayuda->addSeparator();
+        // Shown once there is something to check with (setUpdateChecker).
+        action_actualizaciones_ = add(ayuda, QStringLiteral("Buscar actualizaciones…"), QKeySequence(), this,
+            [this] { if (update_checker_) update_checker_(); });
+        action_actualizaciones_->setVisible(false);
         add(ayuda, QStringLiteral("Acerca de Taller Matrix Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
 
         help_notifier_ = new HelpNotifier(menuBar(), ayuda, this);
@@ -1447,12 +1451,13 @@ QLabel#what { color: #3A4050; }
 
     void MainWindow::onAcercaDe() {
         StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Taller Matrix Harris"), this);
+        // The version is the project's (CMakeLists.txt), set by main().
         dlg.setMessage(QStringLiteral(
-            "Versión 1.0\n\n"
+            "Versión %1\n\n"
             "Herramienta para crear, organizar y dibujar esquemas Matrix Harris, "
             "así como cualquier otro tipo de esquema jerárquico, "
             "con un dibujo automático que minimiza los cruces.\n\n"
-            "Desarrollado por Javier San Andrés.\n"));
+            "Desarrollado por Javier San Andrés.\n").arg(QCoreApplication::applicationVersion()));
         dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();
     }
@@ -1464,7 +1469,7 @@ QLabel#what { color: #3A4050; }
     void MainWindow::closeEvent(QCloseEvent* event) {
         // During the tour the open project is the example: nothing to keep
         // (the user's own was saved or dropped when the tour began).
-        if (tutorial_running_) {
+        if (tutorial_running_ || closing_for_update_) { // nothing to keep / already asked
             event->accept();
             return;
         }
@@ -1484,6 +1489,17 @@ QLabel#what { color: #3A4050; }
         event->acceptProposedAction();
         // Opened once the drop has finished, so no dialog runs inside it.
         QMetaObject::invokeMethod(this, [this, path] { openProject(path); }, Qt::QueuedConnection);
+    }
+
+    void MainWindow::setUpdateChecker(std::function<void()> check) {
+        update_checker_ = std::move(check);
+        action_actualizaciones_->setVisible(static_cast<bool>(update_checker_));
+    }
+
+    bool MainWindow::prepareToCloseForUpdate() {
+        // During the tour the open project is the example: nothing to keep.
+        closing_for_update_ = tutorial_running_ || mayContinue();
+        return closing_for_update_;
     }
 
     bool MainWindow::mayContinue() {

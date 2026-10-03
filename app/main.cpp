@@ -1,5 +1,6 @@
 #include "MainWindow.h"
 #include "GurobiNotice.h"
+#include "Updates.h"
 #include <QApplication>
 #include <QIcon>
 #include <QLibraryInfo>
@@ -11,7 +12,7 @@ int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("Taller Matrix Harris"));
     app.setOrganizationName(QStringLiteral("Javier San Andrés"));
-    app.setApplicationVersion("0.1.0");
+    app.setApplicationVersion(QStringLiteral(APP_VERSION)); // from CMake's project VERSION
     // Title bar and taskbar of every window: the executable's own icon, with
     // all its sizes (read by Qt's ico plugin).
     app.setWindowIcon(QIcon(QStringLiteral(":/app/app.ico")));
@@ -19,16 +20,22 @@ int main(int argc, char* argv[]) {
     // The app is in Spanish, so Qt's own dialogs (colour picker, file dialogs,
     // message box buttons, ...) must be too. Look for Qt's Spanish translations
     // next to the executable first (deployed builds), then in the Qt install.
+    // windeployqt merges them into qt_es.qm; the Qt install also has qtbase_es.qm.
     QLocale::setDefault(QLocale(QLocale::Spanish, QLocale::Spain));
     QTranslator qt_translator;
     const QStringList dirs = {
         QApplication::applicationDirPath() + "/translations",
         QLibraryInfo::path(QLibraryInfo::TranslationsPath) };
+    bool translated = false;
     for (const QString& dir : dirs) {
-        if (qt_translator.load(QLocale(), "qtbase", "_", dir)) {
-            app.installTranslator(&qt_translator);
-            break;
+        for (const char* catalog : { "qt", "qtbase" }) {
+            if (qt_translator.load(QLocale(), catalog, "_", dir)) {
+                app.installTranslator(&qt_translator);
+                translated = true;
+                break;
+            }
         }
+        if (translated) break;
     }
 
     // The Gurobi developer options (see GurobiNotice.h) are taken out first,
@@ -37,6 +44,14 @@ int main(int argc, char* argv[]) {
     const ui::gurobi::StartupOptions gurobi_options = ui::gurobi::takeStartupOptions(args);
     // --tutorial: show the introductory tour even if it was already seen.
     const bool force_tutorial = args.removeAll(QStringLiteral("--tutorial")) > 0;
+    // --appcast=URL: look for updates there instead of the latest GitHub
+    // release (to try a release before publishing it).
+    QString appcast_url;
+    for (int i = static_cast<int>(args.size()) - 1; i > 0; --i) {
+        if (!args.at(i).startsWith(QStringLiteral("--appcast="))) continue;
+        appcast_url = args.at(i).mid(static_cast<int>(QStringLiteral("--appcast=").size()));
+        args.removeAt(i);
+    }
 
     ui::MainWindow window;
     window.showMaximized();
@@ -56,5 +71,11 @@ int main(int argc, char* argv[]) {
         window.startTutorialIfFirstRun(force_tutorial);
     });
 
-    return app.exec();
+    // Checks for a newer version (at most once a day) once the window is up;
+    // Ayuda › Buscar actualizaciones… checks right away.
+    updates::start(window, appcast_url);
+
+    const int result = app.exec();
+    updates::stop();
+    return result;
 }

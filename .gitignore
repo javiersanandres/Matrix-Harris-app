@@ -61,3 +61,5 @@ Makefile
 *.pidb
 *.svclog
 *.scc
+# Installers built by Inno Setup (attached to GitHub releases, not committed)
+installer/Output/

@@ -1,7 +1,7 @@
 ﻿cmake_minimum_required(VERSION 3.10)
 
 project(Matrix-Harris-app 
-    VERSION 0.1.0 
+    VERSION 1.0.0 
     LANGUAGES CXX
     DESCRIPTION "A hierarchical hypergraph visualization and manipulation tool"
 )

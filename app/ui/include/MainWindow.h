@@ -12,6 +12,7 @@
 #include <QActionGroup>
 #include <QMenu>
 #include <QToolButton>
+#include <functional>
 #include <memory>
 #include <vector>
 
@@ -78,6 +79,16 @@ namespace ui {
         // skipped once (always, with force: the --tutorial option). Skipping it
         // that first time points to its entry in Ayuda.
         void startTutorialIfFirstRun(bool force = false);
+
+        // ── Updates ───────────────────────────────────────────────────────────
+        // Shows Ayuda › Buscar actualizaciones…, which runs check (the update
+        // machinery lives outside the UI, see app/Updates.h).
+        void setUpdateChecker(std::function<void()> check);
+
+        // An update is about to be installed: asks about unsaved changes as when
+        // closing, and if the user goes on, the window will close without asking
+        // again. False if the user cancelled.
+        bool prepareToCloseForUpdate();
 
     protected:
         void closeEvent(QCloseEvent* event) override;
@@ -213,6 +224,9 @@ namespace ui {
         // Where a part the tour points at is, in this window's coordinates.
         QRect tutorialTarget(tutorial::Target target) const;
         bool tutorial_running_ = false;
+        bool closing_for_update_ = false; // see prepareToCloseForUpdate
+        QAction* action_actualizaciones_ = nullptr;
+        std::function<void()> update_checker_;
 
         HelpNotifier* help_notifier_ = nullptr;
 
