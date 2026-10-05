@@ -219,7 +219,7 @@ namespace sifting_internal {
 			for (int hub : S_.g1_in[S_.node_to_g1.at(lower[i].get())]) {
 				for (int u : S_.g1_in[hub]) {
 					Node* parent = S_.g1_nodes[u].original;
-					const bool follower = followers.count(parent) > 0;
+					bool follower = followers.count(parent) > 0;
 					const double w = follower ? FOLLOW_WEIGHT : 1.0;
 					follows[i] |= follower;
 					sum += w * upper_pos.at(parent);
@@ -683,7 +683,7 @@ namespace sifting_internal {
 		for (int round = 0; round < sifting_rounds; round++) {
 			BlockList snapshot = B_;
 			for (int bid : snapshot)
-				if (S_.blocks[bid].movable) siftingStep(bid);
+				if (S_.blocks[bid].movable) siftingStep(bid, stability);
 		}
 	}
 
