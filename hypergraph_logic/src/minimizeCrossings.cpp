@@ -9,6 +9,7 @@
 #include <vector>
 #include <stdexcept>
 #include <climits>
+#include <limits>
 #include <queue>
 
 // ==================================================================================
@@ -34,16 +35,28 @@ namespace sifting_internal {
 	// ── GlobalSifter: construction ────────────────────────────────────────────────
 
 	GlobalSifter::GlobalSifter(int start_layer, int end_layer,
-		std::map<int, LayerData>& layers, bool order, CrossingSeed seed)
+		std::map<int, LayerData>& layers, bool order, const Node* moved, std::unordered_set<Node*> group)
 		: start_layer_(start_layer)
 		, end_layer_(end_layer)
 		, layers_(layers)
+		, group_(std::move(group))
 	{
 		buildG1();
 		buildBlocks();
-		buildBlockOrder(seed);
+		buildBlockOrder(moved);
 		if (order) runEfficientBarycenter();
 		sortAdjacencies();
+		initial_pi_ = S_.pi;
+	}
+
+	std::vector<NodePtr> GlobalSifter::groupRow(const LayerData& data, std::vector<int>* slots) const {
+		std::vector<NodePtr> row;
+		for (int i = 0; i < static_cast<int>(data.nodes.size()); i++) {
+			if (!inGroup(data.nodes[i].get())) continue;
+			row.push_back(data.nodes[i]);
+			if (slots) slots->push_back(i);
+		}
+		return row;
 	}
 
 	// ── buildG1 ───────────────────────────────────────────────────────────────────
@@ -63,8 +76,8 @@ namespace sifting_internal {
 			if (layer < anchor_layer) continue;
 			if (layer > read_until) break;
 
-			// Register all nodes at this layer
-			for (const auto& node : data.nodes) {
+			// Register all nodes at this layer (those of the group, when there is one)
+			for (const auto& node : groupRow(data)) {
 				int idx = static_cast<int>(S_.g1_nodes.size());
 				S_.g1_nodes.emplace_back(node.get(), 2 * layer);
 				S_.node_to_g1[node.get()] = idx;
@@ -75,6 +88,8 @@ namespace sifting_internal {
 			// registered (previous iteration), targets are registered just above.
 			if (!incoming_edges.empty()) {
 				for (const auto& edge : incoming_edges) {
+					// The group is closed, so an edge is either wholly in it or wholly out.
+					if (!inGroup(edge->getSources().front().get())) continue;
 					int hub_idx = static_cast<int>(S_.g1_nodes.size());
 					S_.g1_nodes.emplace_back(nullptr, 2 * layer - 1);
 					S_.g1_layers[2 * layer - 1].push_back(hub_idx);
@@ -188,26 +203,51 @@ namespace sifting_internal {
 
 	// ── Layer and hub sorting ─────────────────────────────────────────────────────
 
-	void GlobalSifter::sortByParents(
+	void GlobalSifter::followMovedNode(
 		const std::unordered_map<Node*, int>& upper_pos,
-		std::vector<NodePtr>& lower)
+		std::unordered_set<Node*>& followers,
+		std::vector<NodePtr>& lower) const
 	{
-		std::unordered_map<Node*, int> left_of;
-		int previous_key = -1; // a root at the very left keeps its place
-		for (const auto& n : lower) {
-			int key = INT_MAX;
-			for (const auto& parent : n->getParents())
-				if (auto it = upper_pos.find(parent.get()); it != upper_pos.end())
-					key = std::min(key, it->second);
-			if (key == INT_MAX) key = previous_key; // root: stick to the left-hand neighbour
-			left_of[n.get()] = key;
-			previous_key = key;
+		const int n = static_cast<int>(lower.size());
+		std::vector<double> key(n, 0.0);
+		std::vector<char> follows(n, 0);
+		double previous_key = -std::numeric_limits<double>::infinity(); // a root at the very left keeps its place
+		for (int i = 0; i < n; i++) {
+			// Every node right above, through the hubs (so the dummies of a long connection
+			// count too), weighs once; the moved node and its descendants weigh more.
+			double sum = 0.0, weight = 0.0;
+			for (int hub : S_.g1_in[S_.node_to_g1.at(lower[i].get())]) {
+				for (int u : S_.g1_in[hub]) {
+					Node* parent = S_.g1_nodes[u].original;
+					const bool follower = followers.count(parent) > 0;
+					const double w = follower ? FOLLOW_WEIGHT : 1.0;
+					follows[i] |= follower;
+					sum += w * upper_pos.at(parent);
+					weight += w;
+				}
+			}
+			key[i] = weight > 0.0 ? sum / weight : previous_key; // root: stick to the left-hand neighbour
+			previous_key = key[i];
 		}
 
-		std::stable_sort(lower.begin(), lower.end(),
-			[&](const NodePtr& a, const NodePtr& b) {
-				return left_of.at(a.get()) < left_of.at(b.get());
-			});
+		std::vector<int> moving, staying;
+		for (int i = 0; i < n; i++) (follows[i] ? moving : staying).push_back(i);
+		if (moving.empty()) return;
+
+		// The descendants are sorted among themselves; the rest keep their relative order,
+		// and the two sequences are merged by key (ties: the order the layer had).
+		std::stable_sort(moving.begin(), moving.end(), [&](int a, int b) { return key[a] < key[b]; });
+		auto before = [&](int a, int b) { return key[a] < key[b] || (key[a] == key[b] && a < b); };
+		std::vector<NodePtr> merged;
+		merged.reserve(n);
+		size_t m = 0, s = 0;
+		while (m < moving.size() || s < staying.size()) {
+			const bool take_moving = s == staying.size()
+				|| (m < moving.size() && before(moving[m], staying[s]));
+			merged.push_back(lower[take_moving ? moving[m++] : staying[s++]]);
+		}
+		for (int i : moving) followers.insert(lower[i].get());
+		lower = std::move(merged);
 	}
 
 	void GlobalSifter::sortHubs(
@@ -258,27 +298,37 @@ namespace sifting_internal {
 
 	// ── buildBlockOrder ───────────────────────────────────────────────────────────
 
-	void GlobalSifter::buildBlockOrder(CrossingSeed seed) {
+	void GlobalSifter::buildBlockOrder(const Node* moved) {
 		const int anchor_layer = std::max(0, start_layer_ - 1);
 		const int read_until = (layers_.count(end_layer_ + 1) > 0) ? end_layer_ + 1 : end_layer_;
 
-		// 1. Rows: every node row takes its layer's order (re-sorted under the parents first
-		//    when asked, only inside the range), and every hub row is sorted from its neighbours.
+		// The moved node and, as they are found layer by layer, its descendants.
+		std::unordered_set<Node*> followers;
+		if (moved) followers.insert(const_cast<Node*>(moved));
+
+		// 1. Rows: every node row takes its layer's order (with the moved node's descendants
+		//    re-placed first when asked, only inside the range), and every hub row is sorted
+		//    from its neighbours.
 		std::unordered_map<Node*, int> upper_pos;
 		for (auto& [layer, data] : layers_) {
 			if (layer < anchor_layer) continue;
 			if (layer > read_until) break;
 
-			if (seed == CrossingSeed::FollowParents && layer > anchor_layer && layer <= end_layer_)
-				sortByParents(upper_pos, data.nodes);
+			// Positions are counted within the group: the other nodes are not in G1.
+			std::vector<int> slots;
+			std::vector<NodePtr> nodes = groupRow(data, &slots);
+			if (moved && layer > anchor_layer && layer <= end_layer_) {
+				followMovedNode(upper_pos, followers, nodes);
+				for (size_t i = 0; i < slots.size(); i++) data.nodes[slots[i]] = nodes[i];
+			}
 
 			std::unordered_map<Node*, int> lower_pos;
-			for (int i = 0; i < static_cast<int>(data.nodes.size()); i++)
-				lower_pos[data.nodes[i].get()] = i;
+			for (int i = 0; i < static_cast<int>(nodes.size()); i++)
+				lower_pos[nodes[i].get()] = i;
 
 			if (auto row = S_.g1_layers.find(2 * layer); row != S_.g1_layers.end()) {
 				row->second.clear();
-				for (const auto& node : data.nodes)
+				for (const auto& node : nodes)
 					row->second.push_back(S_.node_to_g1.at(node.get()));
 			}
 			if (layer > anchor_layer)
@@ -584,18 +634,39 @@ namespace sifting_internal {
 
 	// ── siftingStep ───────────────────────────────────────────────────────────────
 
-	int GlobalSifter::siftingStep(int a_id) {
+	int GlobalSifter::siftingStep(int a_id, bool stability) {
 		int numblocks = static_cast<int>(B_.size());
+
+		// No snapshot of where sifting started (a sifter set up by hand): from here, then.
+		if (initial_pi_.size() != S_.pi.size()) initial_pi_ = S_.pi;
 
 		int current_pos = S_.pi[a_id];
 		std::rotate(B_.begin(), B_.begin() + current_pos, B_.begin() + current_pos + 1);
 		sortAdjacencies();
 
-		int chi = 0, chi_star = 0, p_star = 0;
+		// Whether a block shares a row with A, so that their relative order shows.
+		const Block& A = S_.blocks[a_id];
+		const int a_top = S_.g1_nodes[A.upper()].g1_layer, a_bottom = S_.g1_nodes[A.lower()].g1_layer;
+		auto sharesRow = [&](int bid) {
+			const Block& b = S_.blocks[bid];
+			return S_.g1_nodes[b.upper()].g1_layer <= a_bottom && a_top <= S_.g1_nodes[b.lower()].g1_layer;
+		};
+		auto wasBefore = [&](int bid) { return initial_pi_[bid] < initial_pi_[a_id]; };
+
+		// disorder: blocks sharing a row with A that are on the other side of A than they
+		// were when sifting started. At the front, those that started before A.
+		int disorder = 0;
+		for (int p = 1; p < numblocks; p++)
+			if (sharesRow(B_[p]) && wasBefore(B_[p])) ++disorder;
+
+		int chi = 0, chi_star = 0, p_star = 0, disorder_star = disorder;
 		for (int p = 1; p < numblocks; p++) {
 			chi += siftingSwap(a_id, B_[p]);
+			if (sharesRow(B_[p])) disorder += wasBefore(B_[p]) ? -1 : 1;
 			std::swap(B_[p - 1], B_[p]);
-			if (chi < chi_star) { chi_star = chi; p_star = p; }
+			if (chi < chi_star || (chi == chi_star && (stability ? disorder < disorder_star : true))) {
+				chi_star = chi; p_star = p; disorder_star = disorder;
+			}
 		}
 		// a_id is now at B_.back(); rotate it to p_star
 		std::rotate(B_.begin() + p_star, B_.end() - 1, B_.end());
@@ -608,7 +679,7 @@ namespace sifting_internal {
 
 	// ── runSifting ────────────────────────────────────────────────────────────────
 
-	void GlobalSifter::runSifting(int sifting_rounds) {
+	void GlobalSifter::runSifting(int sifting_rounds, bool stability) {
 		for (int round = 0; round < sifting_rounds; round++) {
 			BlockList snapshot = B_;
 			for (int bid : snapshot)
@@ -787,12 +858,17 @@ namespace sifting_internal {
 		for (auto& [layer, data] : layers_) {
 			if (layer < start_layer_ || layer > end_layer_) continue;
 
-			std::sort(data.nodes.begin(), data.nodes.end(),
-				[&](NodePtr a, NodePtr b) {
-					G1Node ga = S_.g1_nodes[S_.node_to_g1.at(a.get())];
-					G1Node gb = S_.g1_nodes[S_.node_to_g1.at(b.get())];
+			// The group's nodes are sorted among themselves and go back into the places
+			// they occupied (all of them when there is no group).
+			std::vector<int> slots;
+			std::vector<NodePtr> nodes = groupRow(data, &slots);
+			std::sort(nodes.begin(), nodes.end(),
+				[&](const NodePtr& a, const NodePtr& b) {
+					const G1Node& ga = S_.g1_nodes[S_.node_to_g1.at(a.get())];
+					const G1Node& gb = S_.g1_nodes[S_.node_to_g1.at(b.get())];
 					return S_.pi[ga.block_id] < S_.pi[gb.block_id];
 				});
+			for (size_t i = 0; i < slots.size(); i++) data.nodes[slots[i]] = nodes[i];
 		}
 	}
 
@@ -878,22 +954,104 @@ namespace hypergraph_logic {
 
 	using namespace sifting_internal;
 
+	// ── crossingGroup ────────────────────────────────────────────────────────────
+	//
+	// Components come from the connections between consecutive layers (segments
+	// included, so a long connection's dummies join its ends), over every layer:
+	// two nodes linked outside the rows read are still one component.
+	std::unordered_set<Node*> Hypergraph::crossingGroup(const std::vector<Node*>& seeds,
+		int first_layer, int last_layer) const
+	{
+		std::unordered_set<Node*> group;
+		if (seeds.empty()) return group;
+
+		// Union-find over every node of the graph.
+		std::unordered_map<Node*, Node*> parent;
+		for (const auto& [layer, data] : layers_)
+			for (const auto& n : data.nodes) parent[n.get()] = n.get();
+		auto find = [&](Node* n) {
+			Node* root = n;
+			while (parent.at(root) != root) root = parent.at(root);
+			while (parent.at(n) != root) { Node* next = parent.at(n); parent[n] = root; n = next; }
+			return root;
+		};
+		for (const auto& [layer, data] : layers_) {
+			for (const auto& e : data.outgoing_edges) {
+				Node* first = nullptr;
+				auto join = [&](const NodePtr& n) {
+					if (!parent.count(n.get())) return;
+					if (!first) { first = find(n.get()); return; }
+					parent[find(n.get())] = first;
+					first = find(first);
+				};
+				for (const auto& s : e->getSources()) join(s);
+				for (const auto& t : e->getTargets()) join(t);
+			}
+		}
+		std::unordered_map<Node*, std::vector<Node*>> components;
+		for (const auto& [n, _] : parent) components[find(n)].push_back(n);
+
+		auto addComponentOf = [&](Node* n) {
+			if (group.count(n) || !parent.count(n)) return false;
+			for (Node* m : components.at(find(n))) group.insert(m);
+			return true;
+		};
+		for (Node* n : seeds) addComponentOf(n);
+
+		// Overlap closure. In every row that is read, another component is to the left of
+		// the group, to its right, or mixed with it. It joins the group if it is mixed in
+		// some row, or to the left in one row and to the right in another (their
+		// connections cross), until none does: only components that stay on one side of
+		// the group all the way down are left out.
+		enum Side : unsigned char { Left = 1, Right = 2, Mixed = 4 };
+		bool grew = true;
+		while (grew) {
+			grew = false;
+			std::unordered_map<Node*, unsigned char> sides; // component root -> sides seen
+			for (const auto& [layer, data] : layers_) {
+				if (layer < first_layer || layer > last_layer) continue;
+				const auto& nodes = data.nodes;
+				int lo = -1, hi = -1;
+				for (int i = 0; i < static_cast<int>(nodes.size()); i++)
+					if (group.count(nodes[i].get())) { if (lo < 0) lo = i; hi = i; }
+				if (lo < 0) continue; // nothing of the group here to be on a side of
+				for (int i = 0; i < static_cast<int>(nodes.size()); i++) {
+					Node* n = nodes[i].get();
+					if (group.count(n) || !parent.count(n)) continue;
+					sides[find(n)] |= i < lo ? Left : i > hi ? Right : Mixed;
+				}
+			}
+			for (const auto& [root, seen] : sides)
+				if ((seen & Mixed) || (seen & (Left | Right)) == (Left | Right))
+					grew |= addComponentOf(root);
+		}
+		return group;
+	}
+
 	// ── minimizeCrossings ────────────────────────────────────────────────────────
 	//
 	// Runs the global sifting algorithm over [start_layer, end_layer] (the last layer
 	// when end_layer is -1), writing the optimised order back to LayerData::nodes and
-	// returning the crossing count.
-	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer, int end_layer, CrossingSeed seed) {
+	// returning the crossing count (of the group sifted, when there is one).
+	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer, int end_layer,
+		const std::vector<Node*>& affected, const Node* moved)
+	{
 		if (getLayers().empty()) return 0;
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 		if (end_layer < 0 || end_layer > last_layer) end_layer = last_layer;
 		if (start_layer > end_layer) return 0;
 		placeUnpositionedNodes(start_layer, end_layer);
+
+		std::vector<Node*> seeds = affected;
+		if (moved) seeds.push_back(const_cast<Node*>(moved));
+		std::unordered_set<Node*> group = crossingGroup(seeds, std::max(0, start_layer - 1), end_layer + 1);
+		if (!seeds.empty() && group.empty()) return 0; // none of them is in the graph any more
+
 		// No barycenter seeding here: it would reorder every layer, and inner calls are
 		// meant to keep the current orders as much as possible.
-		GlobalSifter sifter(start_layer, end_layer, layers_, false, seed);
+		GlobalSifter sifter(start_layer, end_layer, layers_, false, moved, std::move(group));
 		// No need to sift if we are already optimal, but the seed order may differ from
-		// the layers (FollowParents), so it is still written back.
+		// the layers (the moved node's descendants), so it is still written back.
 		if (sifter.countCrossings() == 0) { sifter.writeBack(); return 0; }
 		sifter.runSifting(sifting_rounds);
 		sifter.writeBack();
@@ -903,9 +1061,10 @@ namespace hypergraph_logic {
 	// ── minimizeCrossingsForNodes ────────────────────────────────────────────────
 	//
 	// Builds G1 over [start_layer, end_layer] (plus the one layer below end_layer
-	// for crossing information), then sifts only the blocks that contain the given
-	// nodes to find their locally best positions within the current ordering.
-	// The result is written back to LayerData::nodes.
+	// for crossing information), restricted to the nodes' components (crossingGroup),
+	// then sifts only the blocks that contain the given nodes to find their locally
+	// best positions within the current ordering. The result is written back to
+	// LayerData::nodes.
 
 	int Hypergraph::minimizeCrossingsForNodes(
 		const std::vector<Node*>& nodes,
@@ -915,7 +1074,9 @@ namespace hypergraph_logic {
 		if (getLayers().empty() || nodes.empty()) return 0;
 
 		placeUnpositionedNodes(start_layer, end_layer);
-		GlobalSifter sifter(start_layer, end_layer, layers_, false);
+		std::unordered_set<Node*> group = crossingGroup(nodes, std::max(0, start_layer - 1), end_layer + 1);
+		if (group.empty()) return 0;
+		GlobalSifter sifter(start_layer, end_layer, layers_, false, nullptr, std::move(group));
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.siftNodes(nodes);
 		sifter.writeBack();

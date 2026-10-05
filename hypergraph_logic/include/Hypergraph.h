@@ -7,6 +7,7 @@
 #include <map>
 #include <set>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace hypergraph_logic {
@@ -20,14 +21,6 @@ namespace hypergraph_logic {
 		std::vector<NodePtr> nodes;                  // Nodes in this layer (in order)
 		std::vector<HyperedgePtr> outgoing_edges;    // Hyperedges from this layer to the next
 	};
-
-	// How crossing minimization seeds its initial order (see GlobalSifter::buildBlockOrder).
-	//   - KeepOrder: every layer starts in its current order, so the user's mental map is kept
-	//     and sifting only has to fix what is actually wrong.
-	//   - FollowParents: every layer in range is first re-sorted so each node sits under its
-	//     leftmost parent (roots stay right after their left-hand neighbour). Used when the user
-	//     reorders a layer by hand and the subgraphs below are expected to follow.
-	enum class CrossingSeed { KeepOrder, FollowParents };
 
 	// The range of layers an operation placed nodes at (new dummies, new nodes, relocated
 	// nodes): crossing minimization after the operation only needs to cover [min, max], since
@@ -1017,10 +1010,33 @@ namespace hypergraph_logic {
 		// the disruption is large; lower values (e.g. 3) are used when fewer nodes are affected and
 		// preserving the existing layout matters more than reaching a global optimum.
 		//
-		// Returns the crossing count after sifting.
+		// Every layer starts from its current order, so the user's mental map is kept and
+		// sifting only has to fix what is actually wrong. When the user has just moved a node
+		// sideways in its layer (moved, at start_layer - 1), its descendants are first re-placed
+		// in each layer of the range so that they follow it, and every other node keeps its
+		// relative order (see GlobalSifter::buildBlockOrder).
+		//
+		// affected: the nodes the operation changed (moved counts as one). Only their
+		// crossingGroup is sifted, and every other node stays exactly where it was; with none,
+		// the whole graph is. Among orders with the same crossings, sifting keeps the one
+		// closest to where it started (see GlobalSifter::siftingStep).
+		//
+		// Returns the crossing count after sifting (of the group sifted, when there is one).
 		//
 		int minimizeCrossings(int sifting_rounds, int start_layer, int end_layer = -1,
-			CrossingSeed seed = CrossingSeed::KeepOrder);
+			const std::vector<Node*>& affected = {}, const Node* moved = nullptr);
+
+		// ── crossingGroup ───────────────────────────────────────────────────────────────────────────
+		//
+		// What crossing minimization works on after an operation that changed the given nodes:
+		// their connected components, plus, for as long as there is one, any other component
+		// that, in the layers of [first_layer, last_layer], is mixed with the group in some
+		// layer, or to its left in one layer and to its right in another. A component that
+		// stays on one side of the group all the way down never crosses it, so it is left
+		// untouched; any other could, so it is sifted together with the group.
+		// Seeds that are not in the graph are ignored; with no seeds, the group is empty.
+		std::unordered_set<Node*> crossingGroup(const std::vector<Node*>& seeds,
+			int first_layer, int last_layer) const;
 
 		// ── minimizeCrossingsILP ────────────────────────────────────────────────
 		//
@@ -1043,8 +1059,10 @@ namespace hypergraph_logic {
 		// new nodes are introduced (a new real node, or the dummy nodes from a single edge split)
 		// and the rest of the graph should be disturbed as little as possible.
 		//
-		// The sifting is performed over [start_layer, end_layer]. The result is written back to
-		// LayerData::nodes. Returns the crossing count after the pass.
+		// The sifting is performed over [start_layer, end_layer], and only among the nodes'
+		// crossingGroup: the given nodes never jump into another part of the drawing, and every
+		// node outside it stays exactly where it was. The result is written back to
+		// LayerData::nodes. Returns the crossing count of that group after the pass.
 		//
 		int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer);
 

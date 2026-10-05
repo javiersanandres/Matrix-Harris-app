@@ -576,7 +576,7 @@ namespace hypergraph_logic {
 		if (sifter.countCrossings() == 0) { sifter.writeBack(); return 0; }
 
 		// Strong heuristic baseline
-		sifter.runSifting(kFallbackSiftingRounds);
+		sifter.runSifting(kFallbackSiftingRounds, false);
 		int fallback_crossings = sifter.countCrossings();
 		if (fallback_crossings == 0) { sifter.writeBack(); return 0; }
 		

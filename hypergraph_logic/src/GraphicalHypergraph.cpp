@@ -311,9 +311,9 @@ namespace hypergraph_logic {
 			if (minimize_crossings) {
 				// Avoid being too aggressive with crossing minimisation, since the user
 				// is making a manual adjustment and may not want the layout to change too much.
-				// The layers below are re-sorted under their parents first, so that the
-				// subgraphs follow the swap instead of pulling the nodes back.
-				Hypergraph::minimizeCrossings(3, node->getLayer() + 1, -1, CrossingSeed::FollowParents);
+				// The node's descendants are re-placed in the layers below first, so that its
+				// subgraph follows the swap instead of pulling the nodes back.
+				Hypergraph::minimizeCrossings(3, node->getLayer() + 1, -1, {}, node.get());
 				if (out_altered_layers) {
 					// We need to add those layers where the span of hyperedges could have changed.
 					// Since the node moved and many others all the way down, we need to collect all

@@ -261,7 +261,9 @@ namespace hypergraph_logic {
 
 	bool Hypergraph::relocateAndMinimize(const std::vector<NodePtr>& nodes, std::set<int>* out_altered_layers, int sifting_rounds, LayerSpan touched) {
 		if (!relocateNodes(nodes, &touched, out_altered_layers)) return false;
-		minimizeCrossings(sifting_rounds, touched.min, touched.max);
+		std::vector<Node*> affected;
+		for (const auto& n : nodes) affected.push_back(n.get());
+		minimizeCrossings(sifting_rounds, touched.min, touched.max, affected);
 		return true;
 	}
 
@@ -346,7 +348,7 @@ namespace hypergraph_logic {
 			// No specific position requested, so we will insert it at the less disruptive position
 			// in the layer. A long edge also brings new dummy nodes along, which need a place too:
 			// they sit between the parent and the node, and nothing else changed.
-			if (new_dummies) minimizeCrossings(3, parent->getLayer() + 1, node->getLayer());
+			if (new_dummies) minimizeCrossings(3, parent->getLayer() + 1, node->getLayer(), { node.get() });
 			else             minimizeCrossingsForNodes({ node.get() }, node->getLayer(), node->getLayer());
 		}
 
@@ -367,7 +369,7 @@ namespace hypergraph_logic {
 			// We needed to relocate, so we will apply crossing minimization globally from
 			// layer 0 to the deepest layer, since the disruption is global. Also, the relocation
 			// will have assigned the new edge to a layer, so we don't need to do it here.
-			minimizeCrossings(10, 0);
+			minimizeCrossings(10, 0, -1, { child.get() });
 		}
 		else {
 			// No relocation will be needed. The parent is located in the inmediate upper layer.
@@ -431,7 +433,7 @@ namespace hypergraph_logic {
 		// Apply crossing minimization to the new node and all possible new dummy nodes created by splitting the edge
 		// or as a consequence of relocating the targets. We will decrease the number of sifting rounds by the purpose
 		// of preserving the mental map as much as possible, while obviously minimizing crossings as well.
-		minimizeCrossings(3, touched.min, touched.max);
+		minimizeCrossings(3, touched.min, touched.max, { node.get() });
 		return node;
 	}
 
@@ -651,7 +653,7 @@ namespace hypergraph_logic {
 				// in between the layers. Therefore, at this point, we run global sifting over the touched range.
 				// This case is less disruptive than the worst case, since fewer nodes are affected by the change,
 				// so we will allow fewer rounds of sifting.
-				minimizeCrossings(3, touched.min, touched.max);
+				minimizeCrossings(3, touched.min, touched.max, { parent.get(), child.get() });
 			}
 			else {
 				// If no new dummy nodes were created when removing redudant connections, then we only need to minimize 
@@ -805,7 +807,7 @@ namespace hypergraph_logic {
 			if (outside_disruption) {
 				// touched already reflects everything merged in above: outside disruption plus
 				// (if k < 0) this edge's own footprint, so it's used directly as the final range.
-				minimizeCrossings(3, touched.min, touched.max);
+				minimizeCrossings(3, touched.min, touched.max, { source.get() });
 			}
 		}
 		else {
@@ -813,7 +815,7 @@ namespace hypergraph_logic {
 				out_altered_layers->insert(edge_layer_before);
 			}
 			// The targets were relocated by the test above: sift what it placed.
-			minimizeCrossings(10, touched.min, touched.max);
+			minimizeCrossings(10, touched.min, touched.max, { source.get() });
 		}
 	}
 	
@@ -940,7 +942,7 @@ namespace hypergraph_logic {
 			if (out_altered_layers && !edge_was_dissolved && edge_layer_before >= 0 && edge->getLayer() == edge_layer_before) {
 				out_altered_layers->insert(edge_layer_before);
 			}
-			minimizeCrossings(10, touched.min, touched.max);
+			minimizeCrossings(10, touched.min, touched.max, { target.get() });
 		}
 		else {
 			bool outside_disruption = (!touched.empty());
@@ -967,7 +969,7 @@ namespace hypergraph_logic {
 			if (outside_disruption) {
 				// touched already reflects everything merged in above: outside disruption plus
 				// (if k < 0) this edge's own footprint, so it's used directly as the final range.
-				minimizeCrossings(3, touched.min, touched.max);
+				minimizeCrossings(3, touched.min, touched.max, { target.get() });
 			}
 		}
 	}
@@ -1557,12 +1559,12 @@ namespace hypergraph_logic {
 		trimmed |= removeDuplicateConnections(survivor, inherited_edges, &touched, out_altered_layers);
 
 		if (relocated) {
-			minimizeCrossings(10, touched.min, touched.max);
+			minimizeCrossings(10, touched.min, touched.max, { survivor.get() });
 		}
 		else if (trimmed && !touched.empty()) {
 			// Trimmed edges were re-split with new dummies: same treatment as addConnection gives
 			// its transitive removals.
-			minimizeCrossings(3, touched.min, touched.max);
+			minimizeCrossings(3, touched.min, touched.max, { survivor.get() });
 		}
 		else {
 			minimizeCrossingsForNodes({ survivor.get() }, survivor->getLayer(), survivor->getLayer());
@@ -1675,7 +1677,7 @@ namespace hypergraph_logic {
 			// the layers something was placed at, the node's own layer included, so it only
 			// moves away from where choosePositionForRelocatedNode put it if that removes
 			// crossings.
-			minimizeCrossings(3, touched.min, touched.max);
+			minimizeCrossings(3, touched.min, touched.max, { node.get() });
 		}
 		// An isolated node just lands where choosePositionForRelocatedNode put it: nothing
 		// else was placed.

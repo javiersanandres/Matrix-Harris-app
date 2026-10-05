@@ -101,8 +101,13 @@ namespace sifting_internal {
 		// order: run the Efficient Barycenter pass after building the block order. Only the
 		// global minimization (minimizeCrossingsILP) asks for it; every other call keeps the
 		// current orders as its starting point.
+		// moved: the node the user just moved sideways, if any (see buildBlockOrder).
+		// group: the only nodes sifted, empty for all of them. It must be closed (whole
+		// connected components, see Hypergraph::crossingGroup): G1 holds only these nodes
+		// and their connections, and writeBack puts them back into the places they had in
+		// each layer, so every other node stays exactly where it was.
 		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order = true,
-			CrossingSeed seed = CrossingSeed::KeepOrder);
+			const Node* moved = nullptr, std::unordered_set<Node*> group = {});
 #ifdef GS_TEST
 		// No-op constructor for unit tests. Skips the full pipeline so tests can
 		// set S_ and B_ directly. layers_ is bound to a local dummy that is never
@@ -137,17 +142,16 @@ namespace sifting_internal {
 		// two layers); the stuck block with the smallest key is then taken first anyway, and
 		// sifting sorts out the rest.
 		//
-		// What the rows contain depends on the seed:
-		//   - KeepOrder: every layer as it currently is. Nodes that never had a position have
-		//     already been placed by Hypergraph::placeUnpositionedNodes, so the current orders
-		//     are the user's mental map and sifting only fixes what is actually wrong.
-		//   - FollowParents: every layer in [start_layer, end_layer] is first re-sorted so that
-		//     each node sits under its leftmost parent (sortByParents). This is what we want when
-		//     the client swaps two nodes of a layer by hand: minimizeCrossings does not take them
-		//     back to their original order, it rather tries to find a good order where the
-		//     subgraph of the first node goes before the subgraph of the second one.
+		// The rows contain every layer as it currently is. Nodes that never had a position have
+		// already been placed by Hypergraph::placeUnpositionedNodes, so the current orders are
+		// the user's mental map and sifting only fixes what is actually wrong.
+		// When the user has just moved a node sideways in its layer (moved, in the anchor layer),
+		// each layer in [start_layer, end_layer] first re-places that node's descendants so that
+		// they follow it (followMovedNode), without touching the relative order of the rest:
+		// minimizeCrossings does not take the subgraph back to where it was, nor reshuffles
+		// parts of the drawing the move has nothing to do with.
 		// Hub rows are always sorted with sortHubs from the rows around them.
-		void buildBlockOrder(CrossingSeed seed = CrossingSeed::KeepOrder);
+		void buildBlockOrder(const Node* moved = nullptr);
 
 		// ── buildBlockListFromRows ───────────────────────────────────────────────────────────────────
 		//
@@ -170,7 +174,7 @@ namespace sifting_internal {
 		void runEfficientBarycenter(int max_iterations = 100);
 
 		// Run up to sifting_rounds rounds of the global sifting sweep (movable blocks only).
-		void runSifting(int sifting_rounds);
+		void runSifting(int sifting_rounds, bool stability = true);
 
 		// Solve an ILP to minimize crossings.
 		int runCrossingILP(double time_budget_seconds);
@@ -199,6 +203,13 @@ namespace sifting_internal {
 		int start_layer_;
 		int end_layer_;
 		std::map<int, LayerData>& layers_;
+		std::unordered_set<Node*> group_;   // empty: every node
+		std::vector<int> initial_pi_;       // each block's position when sifting started
+
+		bool inGroup(Node* n) const { return group_.empty() || group_.count(n) > 0; }
+
+		// The nodes of the group in data, in their order, and the places they occupy there.
+		std::vector<NodePtr> groupRow(const LayerData& data, std::vector<int>* slots = nullptr) const;
 
 		// ── G1 construction ───────────────────────────────────────────────────────
 		//
@@ -239,12 +250,16 @@ namespace sifting_internal {
 
 		// ── Layer and hub sorting ─────────────────────────────────────────────────
 		//
-		// sortByParents (FollowParents seed only) sorts the nodes of a layer based on
-		// the position of their parents in the upper layer: given some node A, left(A)
-		// = minimum position of the parents of A, and nodes are stably sorted by it.
-		// A root (no parent in the upper layer) takes the key of its left-hand
-		// neighbour, so it stays right after it instead of drifting to either end.
+		// followMovedNode (only after a node was moved sideways) re-places, in one layer,
+		// the descendants of the moved node: the nodes with a neighbour right above (through
+		// the hubs, so a long connection's dummies count too) among `followers`, which then
+		// takes them in. Every node gets a key, the weighted average of the positions of its
+		// neighbours above, the followers weighing FOLLOW_WEIGHT and the rest 1; a root takes
+		// the key of its left-hand neighbour, so it stays right after it. The descendants are
+		// sorted by key and merged, by key, into the other nodes, which keep their relative
+		// order (ties: the order the layer had).
 		//
+
 		// We sort the hubs by their barycenter: the average position of all their
 		// endpoints (parents in the upper layer and children in the lower one), each
 		// position normalized by its row size so both rows weigh the same, and every
@@ -255,9 +270,11 @@ namespace sifting_internal {
 		// hyperedges share a source, then they cannot share a target, and vice versa.
 		// Therefore, if two hubs share a parent, they cannot share a child, so there
 		// cannot be ties in both the upper and lower layer positions.
-		static void sortByParents(
+		static constexpr double FOLLOW_WEIGHT = 3.0;
+		void followMovedNode(
 			const std::unordered_map<Node*, int>& upper_pos,
-			std::vector<NodePtr>& lower);
+			std::unordered_set<Node*>& followers,
+			std::vector<NodePtr>& lower) const;
 
 		void sortHubs(
 			const std::unordered_map<Node*, int>& upper_pos,
@@ -301,7 +318,12 @@ namespace sifting_internal {
 		// Places A at the front of B', sweeps it right one swap at a time, records
 		// the position p* with the minimum cumulative crossing delta, then rotates
 		// A to p*.
-		int siftingStep(int a_id);
+		// Among positions with the same crossings, A takes the one that leaves it out
+		// of order with the fewest blocks, compared with the order sifting started from
+		// (initial_pi_), counting only blocks that share a row with A (the others' order
+		// relative to A never shows). So a block stays where it is, or goes back to where
+		// it was, unless moving it actually removes crossings: the user's mental map.
+		int siftingStep(int a_id, bool stability = true);
 
 		// ── Crossing count ────────────────────────────────────────────────────────
 		//

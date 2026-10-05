@@ -25,8 +25,14 @@ namespace hypergraph_logic {
                 int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer) {
 					return GraphicalHypergraph::minimizeCrossingsForNodes(nodes, start_layer, end_layer);
                 }
-                int sift(int rounds, int start_layer, int end_layer = -1, CrossingSeed seed = CrossingSeed::KeepOrder) {
-                    return Hypergraph::minimizeCrossings(rounds, start_layer, end_layer, seed);
+                int sift(int rounds, int start_layer, int end_layer = -1, const Node* moved = nullptr) {
+                    return Hypergraph::minimizeCrossings(rounds, start_layer, end_layer, {}, moved);
+                }
+                int siftAffected(int rounds, int start_layer, const std::vector<Node*>& affected) {
+                    return Hypergraph::minimizeCrossings(rounds, start_layer, -1, affected);
+                }
+                std::unordered_set<Node*> group(const std::vector<Node*>& seeds, int first, int last) const {
+                    return crossingGroup(seeds, first, last);
                 }
                 void placeUnpositioned(int first, int last) { placeUnpositionedNodes(first, last); }
                 std::optional<double> guess(const Node* n) const { return guessX(n, {}); }
@@ -863,23 +869,196 @@ namespace hypergraph_logic {
                 EXPECT_TRUE(a1.movable);
             }
 
-            TEST(SeedOrder, FollowParentsKeepsRootsAfterTheirLeftNeighbour) {
-                TestGraph G("roots");
+            // ── Following a node moved sideways ──────────────────────────────────
+            //
+            // In these tests the user has just moved A to the right of B in layer 0; the
+            // layers below still have the order they had before.
+
+            TEST(FollowMovedNode, DescendantsFollowItDownEveryLayer) {
+                TestGraph G("follow");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr b1 = G.createNode("b1", 1, 1, B);
+                NodePtr a2 = G.createNode("a2", 2, 0, a1);
+                NodePtr b2 = G.createNode("b2", 2, 1, b1);
+                G.layers().at(0).nodes = { B, A };
+                G.layers().at(1).nodes = { a1, b1 };
+                G.layers().at(2).nodes = { a2, b2 };
+
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), a1.get() }));
+                EXPECT_EQ(layerNodes(G, 2), (std::vector<Node*>{ b2.get(), a2.get() }));
+                EXPECT_EQ(sifter.countCrossings(), 0);
+            }
+
+            TEST(FollowMovedNode, UnrelatedNodesKeepTheirOrder) {
+                // U and V have nothing to do with the move: their children stay in the
+                // order the user had (v1 before u1), even though it crosses.
+                TestGraph G("follow_unrelated");
+                NodePtr U = G.createNode("U", 0, 0, nullptr);
+                NodePtr V = G.createNode("V", 0, 1, nullptr);
+                NodePtr A = G.createNode("A", 0, 2, nullptr);
+                NodePtr B = G.createNode("B", 0, 3, nullptr);
+                NodePtr u1 = G.createNode("u1", 1, 0, U);
+                NodePtr v1 = G.createNode("v1", 1, 1, V);
+                NodePtr a1 = G.createNode("a1", 1, 2, A);
+                NodePtr b1 = G.createNode("b1", 1, 3, B);
+                G.layers().at(0).nodes = { U, V, B, A };
+                G.layers().at(1).nodes = { v1, u1, a1, b1 };
+
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ v1.get(), u1.get(), b1.get(), a1.get() }));
+            }
+
+            TEST(FollowMovedNode, RootsStayAfterTheirLeftNeighbour) {
+                TestGraph G("follow_roots");
                 NodePtr A = G.createNode("A", 0, 0, nullptr);
                 NodePtr B = G.createNode("B", 0, 1, nullptr);
                 NodePtr a1 = G.createNode("a1", 1, 0, A);
                 NodePtr b1 = G.createNode("b1", 1, 1, B);
                 NodePtr R = G.createNode("R", 1, 0, nullptr); // a root at layer 1
                 ASSERT_EQ(R->getLayer(), 1);
+                G.layers().at(0).nodes = { B, A };
+                G.layers().at(1).nodes = { a1, b1, R };
+
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), R.get(), a1.get() }));
+            }
+
+            TEST(FollowMovedNode, ALongConnectionFollowsThroughItsDummies) {
+                // A reaches a2 two layers down: its dummy in layer 1 and a2 follow A.
+                TestGraph G("follow_long");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr b1 = G.createNode("b1", 1, 0, B);
+                NodePtr b2 = G.createNode("b2", 2, 0, b1);
+                NodePtr a2 = G.createNode("a2", 2, 0, A);
+                Node* d = dummyAt(G, 1);
+                ASSERT_NE(d, nullptr);
+                NodePtr dummy = d->shared_from_this();
+                G.layers().at(0).nodes = { B, A };
+                G.layers().at(1).nodes = { dummy, b1 };
+                G.layers().at(2).nodes = { a2, b2 };
+
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), d }));
+                EXPECT_EQ(layerNodes(G, 2), (std::vector<Node*>{ b2.get(), a2.get() }));
+            }
+
+            TEST(FollowMovedNode, ASharedChildLeansTowardsTheMovedNode) {
+                // s hangs from both A and B: weighted towards A, it goes between b1 and a1,
+                // on A's side, instead of staying with B's subtree.
+                TestGraph G("follow_shared");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr s = G.createNode("s", 1, 1, A);
+                NodePtr b1 = G.createNode("b1", 1, 2, B);
+                G.addConnection(B, s);
+                G.layers().at(0).nodes = { B, A };
+                G.layers().at(1).nodes = { a1, s, b1 };
+
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), s.get(), a1.get() }));
+            }
+
+            TEST(FollowMovedNode, RelocatingABoxTakesItsSubtreeAlong) {
+                // End to end: dragging A past B in the drawing.
+                TestGraph G("follow_relocate");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr b1 = G.createNode("b1", 1, 1, B);
+                NodePtr a2 = G.createNode("a2", 2, 0, a1);
+                NodePtr b2 = G.createNode("b2", 2, 1, b1);
+                G.computeLayout({});
+                ASSERT_EQ(layerNodes(G, 0), (std::vector<Node*>{ A.get(), B.get() }));
+
+                G.relocateNodeInLayer(A, G.getX(B) + 1.0);
+                EXPECT_EQ(layerNodes(G, 0), (std::vector<Node*>{ B.get(), A.get() }));
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), a1.get() }));
+                EXPECT_EQ(layerNodes(G, 2), (std::vector<Node*>{ b2.get(), a2.get() }));
+            }
+
+            // ── Sifting only what an operation affected ──────────────────────────
+
+            TEST(CrossingGroup, OnlyTheAffectedComponentsAreSifted) {
+                // Four one-connection components. The operation touched r's; s's crosses it
+                // (s is left of r below, S right of R above), so it joins. P's and Q's also
+                // cross each other, but stay left of the group all the way down: their
+                // crossing is not the operation's business, and it stays.
+                TestGraph G("group_only_affected");
+                NodePtr P = G.createNode("P", 0, 0, nullptr);
+                NodePtr Q = G.createNode("Q", 0, 1, nullptr);
+                NodePtr R = G.createNode("R", 0, 2, nullptr);
+                NodePtr S = G.createNode("S", 0, 3, nullptr);
+                NodePtr p = G.createNode("p", 1, 0, P);
+                NodePtr q = G.createNode("q", 1, 1, Q);
+                NodePtr r = G.createNode("r", 1, 2, R);
+                NodePtr s = G.createNode("s", 1, 3, S);
+                G.computeLayout(); // laid out: nothing is placed again before sifting
+                G.layers().at(0).nodes = { P, Q, R, S };
+                G.layers().at(1).nodes = { q, p, s, r };
+
+                G.siftAffected(3, 1, { r.get() });
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ q.get(), p.get(), r.get(), s.get() }));
+            }
+
+            TEST(CrossingGroup, AComponentMixedWithTheGroupJoinsIt) {
+                // R's component sits between P and Q, both parents of x: it joins.
+                // S's component is to the right everywhere: it stays out.
+                TestGraph G("group_mixed");
+                NodePtr P = G.createNode("P", 0, 0, nullptr);
+                NodePtr R = G.createNode("R", 0, 1, nullptr);
+                NodePtr Q = G.createNode("Q", 0, 2, nullptr);
+                NodePtr S = G.createNode("S", 0, 3, nullptr);
+                NodePtr x = G.createNode("x", 1, 0, P);
+                G.addConnection(Q, x);
+                NodePtr r = G.createNode("r", 1, 1, R);
+                NodePtr s = G.createNode("s", 1, 2, S);
+                G.layers().at(0).nodes = { P, R, Q, S };
+                G.layers().at(1).nodes = { x, r, s };
+
+                const auto group = G.group({ x.get() }, 0, 1);
+                for (Node* n : { P.get(), Q.get(), x.get(), R.get(), r.get() }) EXPECT_TRUE(group.count(n)) << n->getName();
+                for (Node* n : { S.get(), s.get() }) EXPECT_FALSE(group.count(n)) << n->getName();
+            }
+
+            TEST(CrossingGroup, AComponentChangingSidesJoinsIt) {
+                // B is right of A in layer 0 but its child is left of A's: they cross.
+                TestGraph G("group_sides");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr B = G.createNode("B", 0, 1, nullptr);
+                NodePtr a = G.createNode("a", 1, 0, A);
+                NodePtr b = G.createNode("b", 1, 1, B);
                 G.layers().at(0).nodes = { A, B };
+                G.layers().at(1).nodes = { b, a };
 
-                G.layers().at(1).nodes = { R, b1, a1 };
-                GlobalSifter first(1, lastLayer(G), G.layers(), false, CrossingSeed::FollowParents);
-                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ R.get(), a1.get(), b1.get() }));
+                const auto group = G.group({ a.get() }, 0, 1);
+                EXPECT_TRUE(group.count(B.get()));
+                EXPECT_TRUE(group.count(b.get()));
+                // Read from layer 1 only, they never change sides: B stays out.
+                EXPECT_FALSE(G.group({ a.get() }, 1, 1).count(B.get()));
+            }
 
-                G.layers().at(1).nodes = { b1, R, a1 };
-                GlobalSifter second(1, lastLayer(G), G.layers(), false, CrossingSeed::FollowParents);
-                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ a1.get(), b1.get(), R.get() }));
+            TEST(CrossingGroup, SiftingKeepsTheStartingPlaceOnATie) {
+                // R, a lone box at the end of layer 1, crosses nothing wherever it goes:
+                // the crossing between P and Q is removed, and R stays where it was.
+                TestGraph G("stable_tie");
+                NodePtr P = G.createNode("P", 0, 0, nullptr);
+                NodePtr Q = G.createNode("Q", 0, 1, nullptr);
+                NodePtr p = G.createNode("p", 1, 0, P);
+                NodePtr q = G.createNode("q", 1, 1, Q);
+                NodePtr R = G.createNode("R", 1, 2, nullptr);
+                ASSERT_EQ(R->getLayer(), 1);
+                G.computeLayout(); // laid out: nothing is placed again before sifting
+                G.layers().at(0).nodes = { P, Q };
+                G.layers().at(1).nodes = { q, p, R };
+
+                G.sift(3, 0);
+                EXPECT_EQ(layerCrossings(G), 0);
+                EXPECT_EQ(layerNodes(G, 1).back(), R.get());
             }
 
             TEST(SeedOrder, BarycenterNeverWorsensTheOrderItStartsFrom) {
