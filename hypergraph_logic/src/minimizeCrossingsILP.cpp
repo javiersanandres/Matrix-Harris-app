@@ -571,6 +571,7 @@ namespace hypergraph_logic {
 		}
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 
+		const KeepEquivalencesTogether keep_together{ *this };
 		placeUnpositionedNodes(0, last_layer);
 		GlobalSifter sifter(0, last_layer, layers_, true);
 		if (sifter.countCrossings() == 0) { sifter.writeBack(); return 0; }

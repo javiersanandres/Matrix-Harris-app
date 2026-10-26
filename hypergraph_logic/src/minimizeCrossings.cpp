@@ -35,7 +35,7 @@ namespace sifting_internal {
 	// ── GlobalSifter: construction ────────────────────────────────────────────────
 
 	GlobalSifter::GlobalSifter(int start_layer, int end_layer,
-		std::map<int, LayerData>& layers, bool order, const Node* moved, std::unordered_set<Node*> group)
+		std::map<int, LayerData>& layers, bool order, const std::vector<Node*>& moved, std::unordered_set<Node*> group)
 		: start_layer_(start_layer)
 		, end_layer_(end_layer)
 		, layers_(layers)
@@ -298,13 +298,12 @@ namespace sifting_internal {
 
 	// ── buildBlockOrder ───────────────────────────────────────────────────────────
 
-	void GlobalSifter::buildBlockOrder(const Node* moved) {
+	void GlobalSifter::buildBlockOrder(const std::vector<Node*>& moved) {
 		const int anchor_layer = std::max(0, start_layer_ - 1);
 		const int read_until = (layers_.count(end_layer_ + 1) > 0) ? end_layer_ + 1 : end_layer_;
 
-		// The moved node and, as they are found layer by layer, its descendants.
-		std::unordered_set<Node*> followers;
-		if (moved) followers.insert(const_cast<Node*>(moved));
+		// The moved nodes and, as they are found layer by layer, their descendants.
+		std::unordered_set<Node*> followers(moved.begin(), moved.end());
 
 		// 1. Rows: every node row takes its layer's order (with the moved node's descendants
 		//    re-placed first when asked, only inside the range), and every hub row is sorted
@@ -317,7 +316,7 @@ namespace sifting_internal {
 			// Positions are counted within the group: the other nodes are not in G1.
 			std::vector<int> slots;
 			std::vector<NodePtr> nodes = groupRow(data, &slots);
-			if (moved && layer > anchor_layer && layer <= end_layer_) {
+			if (!moved.empty() && layer > anchor_layer && layer <= end_layer_) {
 				followMovedNode(upper_pos, followers, nodes);
 				for (size_t i = 0; i < slots.size(); i++) data.nodes[slots[i]] = nodes[i];
 			}
@@ -988,6 +987,12 @@ namespace hypergraph_logic {
 				for (const auto& t : e->getTargets()) join(t);
 			}
 		}
+		// Equivalent nodes are linked too: they stay side by side.
+		for (const auto& chain : equivalences_) {
+			Node* first = chain.members.front().get();
+			for (const auto& m : chain.members)
+				if (parent.count(m.get()) && parent.count(first)) parent[find(m.get())] = find(first);
+		}
 		std::unordered_map<Node*, std::vector<Node*>> components;
 		for (const auto& [n, _] : parent) components[find(n)].push_back(n);
 
@@ -1034,16 +1039,17 @@ namespace hypergraph_logic {
 	// when end_layer is -1), writing the optimised order back to LayerData::nodes and
 	// returning the crossing count (of the group sifted, when there is one).
 	int Hypergraph::minimizeCrossings(int sifting_rounds, int start_layer, int end_layer,
-		const std::vector<Node*>& affected, const Node* moved)
+		const std::vector<Node*>& affected, const std::vector<Node*>& moved)
 	{
 		if (getLayers().empty()) return 0;
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 		if (end_layer < 0 || end_layer > last_layer) end_layer = last_layer;
 		if (start_layer > end_layer) return 0;
+		const KeepEquivalencesTogether keep_together{ *this };
 		placeUnpositionedNodes(start_layer, end_layer);
 
 		std::vector<Node*> seeds = affected;
-		if (moved) seeds.push_back(const_cast<Node*>(moved));
+		seeds.insert(seeds.end(), moved.begin(), moved.end());
 		std::unordered_set<Node*> group = crossingGroup(seeds, std::max(0, start_layer - 1), end_layer + 1);
 		if (!seeds.empty() && group.empty()) return 0; // none of them is in the graph any more
 
@@ -1073,10 +1079,11 @@ namespace hypergraph_logic {
 	{
 		if (getLayers().empty() || nodes.empty()) return 0;
 
+		const KeepEquivalencesTogether keep_together{ *this };
 		placeUnpositionedNodes(start_layer, end_layer);
 		std::unordered_set<Node*> group = crossingGroup(nodes, std::max(0, start_layer - 1), end_layer + 1);
 		if (group.empty()) return 0;
-		GlobalSifter sifter(start_layer, end_layer, layers_, false, nullptr, std::move(group));
+		GlobalSifter sifter(start_layer, end_layer, layers_, false, {}, std::move(group));
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.siftNodes(nodes);
 		sifter.writeBack();

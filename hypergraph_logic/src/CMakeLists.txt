@@ -78,6 +78,7 @@ add_library(hypergraph)
 target_sources(hypergraph
     PRIVATE
         Hypergraph.cpp
+        HypergraphEquivalences.cpp
         minimizeCrossings.cpp
         minimizeCrossingsILP.cpp
         GurobiRuntime.cpp

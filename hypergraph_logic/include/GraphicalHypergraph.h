@@ -144,6 +144,14 @@ namespace hypergraph_logic {
 		// only as an ordering signal — actual coordinates are reassigned by
 		// computeLayout() which is called internally at the end.
 		//
+		// Equivalence chains (see Hypergraph::addEquivalence) stay together:
+		//   - A member dropped strictly between its chain's outer members takes
+		//     its place among them; every line keeps its style where it is.
+		//   - A member dropped anywhere else takes its whole chain along, as it is,
+		//     moved by as much as it was dragged.
+		//   - Any other node dropped inside a chain goes to its nearer end.
+		// Throws std::invalid_argument if the order of the layer does not change.
+		//
 		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate,
 								std::set<int>* out_altered_layers = nullptr);
 
@@ -244,7 +252,7 @@ namespace hypergraph_logic {
 		// Blocks
 		//
 		// A block is a connected component: a maximal set of boxes linked by
-		// connections (dummies included). Its span is [min(x - width/2),
+		// connections or equivalences (dummies included). Its span is [min(x - width/2),
 		// max(x + width/2)] over its boxes, and the occupied regions are the union
 		// of all spans, merged into disjoint closed intervals. Both are computed
 		// from the current structure and layout on every call (linear in the size
@@ -463,6 +471,21 @@ namespace hypergraph_logic {
 		// arbitrary.
 		//
 		int choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const override;
+
+		// ── horizontalPosition (override) ─────────────────────────────────────────
+		//
+		// The node's x from the last layout; the base class's index in its layer
+		// if it has none.
+		//
+		double horizontalPosition(const NodePtr& node) const override;
+
+		// ── relocateChainInLayer ──────────────────────────────────────────────────
+		//
+		// relocateNodeInLayer for a node of chain (see there). Returns whether
+		// crossing minimization is needed below: some boxes with children
+		// changed their order.
+		//
+		bool relocateChainInLayer(const EquivalenceChain& chain, const NodePtr& node, double new_x);
 
 		// ── placeUnpositionedNodes (override) ─────────────────────────────────────
 		//

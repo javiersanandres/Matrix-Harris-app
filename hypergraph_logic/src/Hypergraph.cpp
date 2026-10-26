@@ -6,6 +6,13 @@
 #include <tuple>
 
 namespace hypergraph_logic {
+	// The layer the depth rule gives node on its own: one below its deepest parent.
+	static int depthRuleLayer(const Node& node) {
+		int layer = 0;
+		for (const auto& p : node.getParents()) layer = std::max(layer, p->getLayer() + 1);
+		return layer;
+	}
+
 	// ============================================================================
 	// Constructor
 	// ============================================================================
@@ -351,6 +358,9 @@ namespace hypergraph_logic {
 			if (new_dummies) minimizeCrossings(3, parent->getLayer() + 1, node->getLayer(), { node.get() });
 			else             minimizeCrossingsForNodes({ node.get() }, node->getLayer(), node->getLayer());
 		}
+		else {
+			keepEquivalencesTogether(layer); // a position inside a chain goes to its nearer end
+		}
 
 		return node;
 	}
@@ -445,9 +455,13 @@ namespace hypergraph_logic {
 		int layer = node->getLayer();
 		const auto& layer_nodes = layers_.at(layer).nodes;
 
+		// Next to a chain means next to its end on that side: nothing goes in between.
+		const auto equivalents = equivalentNodes(node);
+		const NodePtr& neighbour = left ? equivalents.front() : equivalents.back();
+
 		int position = -1;
 		for (size_t i = 0; i < layer_nodes.size(); i++) {
-			if (layer_nodes[i] == node) {
+			if (layer_nodes[i] == neighbour) {
 				position = left ? static_cast<int>(i) : static_cast<int>(i) + 1;
 				break;
 			}
@@ -983,6 +997,9 @@ namespace hypergraph_logic {
 		const auto parents = node->getParents();
 		const auto children = node->getChildren();
 
+		// Its equivalents stay equivalent among themselves, and may go back up once it is gone.
+		const std::vector<NodePtr> former_equivalents = leaveEquivalence(node);
+
 		// Snapshot the hyperedges before modifying them.
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> snapshot = all_hyperedges_;
 
@@ -1043,6 +1060,7 @@ namespace hypergraph_logic {
 		all_nodes_.erase(std::remove(all_nodes_.begin(), all_nodes_.end(), node), all_nodes_.end());
 		removeNodeFromLayer(node->getLayer(), node);
 		cleanUp();
+		relocateAndMinimize(former_equivalents, out_altered_layers);
 	}
 
 	void Hypergraph::removeConnection(const NodePtr& parent, const NodePtr& child, std::set<int>* out_altered_layers) {
@@ -1392,6 +1410,14 @@ namespace hypergraph_logic {
 		const NodePtr& survivor = (node1->getLayer() <= node2->getLayer()) ? node1 : node2;
 		const NodePtr& absorbed = (survivor == node1) ? node2 : node1;
 
+		// The fused node joins both nodes' chains: no path may join them, counting each chain
+		// as one node (two members of the same chain can never reach each other).
+		const int chain1 = chainIndexOf(node1.get());
+		if ((chain1 < 0 || chain1 != chainIndexOf(node2.get())) &&
+			(classReaches(node1.get(), node2.get()) || classReaches(node2.get(), node1.get()))) {
+			throw std::logic_error("Fusionar estas cajas crearía un ciclo en el esquema.");
+		}
+
 		// Store the previous configuration of the nodes to be able to rollback in case of cycle creation.
 		const auto parents_absorbed = absorbed->getParents();
 		const auto children_absorbed = absorbed->getChildren();
@@ -1446,6 +1472,7 @@ namespace hypergraph_logic {
 		}
 
 		// Now we know that no cycles are added, we can safely fuse the nodes.
+		fuseEquivalences(survivor, absorbed); // while absorbed still has its place
 		survivor->setAttributes(new_attributes);
 		if (survivor->getLayer() != absorbed->getLayer()) {
 			survivor->setDesiredLayer(absorbed->getDesiredLayer());
@@ -1605,9 +1632,25 @@ namespace hypergraph_logic {
 		if (!node || layers_.empty()) return;
 
 		int last_layer = prev(layers_.end())->first;
-		// Relocating only ever changes layers: parents and children stay the same.
-		const auto parents = node->getParents();
-		const bool no_parents = parents.empty(), no_children = node->getChildren().empty();
+		// The node's whole chain moves with it. Relocating only ever changes layers: parents and
+		// children stay the same.
+		const auto members = equivalentNodes(node);
+		bool no_parents = true, no_children = true;
+		int depth_rule_layer = 0;
+		for (const auto& m : members) {
+			no_parents = no_parents && m->getParents().empty();
+			no_children = no_children && m->getChildren().empty();
+			depth_rule_layer = std::max(depth_rule_layer, depthRuleLayer(*m));
+		}
+		// Whether the chain is all there is in that layer.
+		auto onlyTheChainIn = [&](int layer) {
+			return node->getLayer() == layer && layers_.at(layer).nodes.size() == members.size();
+		};
+		// The override asked for is the node's: its equivalents' old ones would only hold it back.
+		auto clearEquivalentsOverrides = [&] {
+			for (const auto& m : members)
+				if (m != node) m->setDesiredLayer(-1);
+		};
 		LayerSpan touched;
 
 		if (desired_layer == -1) {
@@ -1618,7 +1661,7 @@ namespace hypergraph_logic {
 				throw std::logic_error("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.");
 			}
 
-			if (node->getLayer() == 0 && layers_.at(0).nodes.size() == 1) {
+			if (onlyTheChainIn(0)) {
 				// Moving the node could potentially cause a gap, so we do not allow it.
 				throw std::logic_error("La caja ya está en el nivel más alto.");
 			}
@@ -1630,7 +1673,7 @@ namespace hypergraph_logic {
 			for (const auto& root : layers_.at(1).nodes) {
 				root->setDesiredLayer(1);
 			}
-			node->setDesiredLayer(-1);
+			for (const auto& m : members) m->setDesiredLayer(-1);
 
 			relocateNodes({ node }, &touched, out_altered_layers); // This will for sure relocate it.
 		}
@@ -1638,24 +1681,20 @@ namespace hypergraph_logic {
 			// Another special case, we want to create another layer (deeper than the last)
 			// and place the node in it.
 
-			if (no_parents &&
-				node->getLayer() == last_layer &&
-				layers_.at(last_layer).nodes.size() == 1) {
+			if (no_parents && onlyTheChainIn(last_layer)) {
 				// Moving the node could potentially originate a gap, so we do not allow it.
 				throw std::logic_error("La caja ya está en el nivel más bajo.");
 			}
 
 			node->setDesiredLayer(last_layer + 1);
+			clearEquivalentsOverrides();
 			relocateNodes({ node }, &touched, out_altered_layers);
 		}
 		else {
-			int depth_rule_layer = no_parents ? 0
-				: (*std::max_element(parents.begin(), parents.end(),
-					[](const NodePtr& a, const NodePtr& b) { return a->getLayer() < b->getLayer(); }
-				))->getLayer() + 1;
-
 			if (desired_layer < depth_rule_layer) {
-				throw std::logic_error("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.");
+				throw std::logic_error(members.size() > 1
+					? "Las cajas equivalentes no pueden quedar al mismo nivel ni por encima de una caja de la que cuelgue alguna."
+					: "La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.");
 			}
 
 			// Checked before touching anything, so a refused move leaves the node as it was.
@@ -1664,7 +1703,10 @@ namespace hypergraph_logic {
 			}
 
 			node->setDesiredLayer(desired_layer == depth_rule_layer ? -1 : desired_layer);
-			applyRelocationAndPropagate({ {node, desired_layer} }, &touched, out_altered_layers);
+			clearEquivalentsOverrides();
+			std::vector<std::pair<NodePtr, int>> relocations;
+			for (const auto& m : members) relocations.push_back({ m, desired_layer });
+			applyRelocationAndPropagate(relocations, &touched, out_altered_layers);
 		}
 
 		// The relocation ends with cleanUp(), which may drop a layer the node left empty and
@@ -2155,25 +2197,25 @@ namespace hypergraph_logic {
 	}
 
 	int Hypergraph::resolveTargetLayer(const NodePtr& node) {
-		auto parents = node->getParents();
-		int depth_rule_layer = parents.empty() ? 0
-			: (*std::max_element(parents.begin(), parents.end(),
-				[](const NodePtr& a, const NodePtr& b) { return a->getLayer() < b->getLayer(); }
-			))->getLayer() + 1;
+		// The whole chain shares one layer: the deepest any of its members asks for.
+		const auto members = equivalentNodes(node);
+		int depth_rule_layer = 0;
+		for (const auto& m : members) depth_rule_layer = std::max(depth_rule_layer, depthRuleLayer(*m));
 
-		int desired = node->getDesiredLayer();
-		if (desired == -1) return depth_rule_layer;
+		int desired = -1;
+		for (const auto& m : members)
+			if (m->getDesiredLayer() > depth_rule_layer) desired = std::max(desired, m->getDesiredLayer());
 
-		if (desired <= depth_rule_layer) {
-			node->setDesiredLayer(-1);
-			return depth_rule_layer;
-		}
-		return desired;                  
+		// Overrides that no longer do anything (or are no longer valid) are cleared.
+		for (const auto& m : members)
+			if (m->getDesiredLayer() != -1 && m->getDesiredLayer() != desired) m->setDesiredLayer(-1);
+
+		return desired == -1 ? depth_rule_layer : desired;
 	}
 
 	bool Hypergraph::relocateNodes(const std::vector<NodePtr>& nodes, LayerSpan* out_new_layers, std::set<int>* out_altered_layers) {
 		std::vector<std::pair<NodePtr, int>> relocations;
-		for (const auto& node : nodes) {
+		for (const auto& node : withEquivalents(nodes)) {
 			int target_layer = resolveTargetLayer(node);
 			if (target_layer != node->getLayer())
 				relocations.push_back({ node, target_layer });
@@ -2225,12 +2267,28 @@ namespace hypergraph_logic {
 		// ====================================================================
 		std::unordered_set<Node*> affected_nodes = getAllDescendants(vec_relocated_nodes);
 
+		// Equivalent nodes share a layer: a descendant's chain may have to follow it, and so
+		// may everything hanging from that chain.
+		for (bool grew = !equivalences_.empty(); grew;) {
+			grew = false;
+			std::vector<NodePtr> joining;
+			for (Node* n : affected_nodes)
+				for (const auto& m : equivalentNodes(n->shared_from_this()))
+					if (!affected_nodes.count(m.get()) && !relocated_nodes.count(m.get()))
+						joining.push_back(m);
+			if (joining.empty()) break;
+			for (const auto& m : joining) affected_nodes.insert(m.get());
+			for (Node* d : getAllDescendants(joining)) affected_nodes.insert(d);
+			grew = true;
+		}
+
 		// Remove relocated nodes themselves from affected_nodes: they are
 		// already in their correct layer and must not be moved again.
 		for (const auto& node : relocated_nodes)
 			affected_nodes.erase(node);
 
 		if (affected_nodes.empty()) {
+			keepEquivalencesTogether();
 			cleanUp();
 			return;
 		}
@@ -2273,6 +2331,8 @@ namespace hypergraph_logic {
 			resettleEdge(edge->shared_from_this(), out_new_layers, out_altered_layers);
 		}
 
+		// Each member of a chain landed where its own x pointed: gather them again.
+		keepEquivalencesTogether();
 		cleanUp();
 	}
 
@@ -2401,7 +2461,14 @@ namespace hypergraph_logic {
 		return descendants;
 	}
 
-	static bool checkCyclesUtil(Node* node, std::unordered_set<Node*>& visited, std::unordered_set<Node*>& path) {
+	// Each equivalence chain is a single node, named by its first member.
+	using ChainOf = std::unordered_map<Node*, const EquivalenceChain*>;
+	static Node* classNode(Node* node, const ChainOf& chain_of) {
+		auto it = chain_of.find(node);
+		return it == chain_of.end() ? node : it->second->members.front().get();
+	}
+
+	static bool checkCyclesUtil(Node* node, std::unordered_set<Node*>& visited, std::unordered_set<Node*>& path, const ChainOf& chain_of) {
 		// The implemented algorithm for cycle detection uses DFS and keeps track of visited nodes and the current path.
 		// For a more detailed explanation: https://takeuforward.org/data-structure/detect-cycle-in-a-directed-graph-using-dfs-g-19
 		// I use unordered_set for path to allow O(1) lookup when checking for back edges, which is more efficient than using a vector.
@@ -2409,20 +2476,27 @@ namespace hypergraph_logic {
 		visited.insert(node);
 		path.insert(node);
 
-		const auto& adjacentNodes = node->getChildren();
+		// A chain's children are those of all of its members.
+		std::vector<Node*> members{ node };
+		if (auto it = chain_of.find(node); it != chain_of.end()) {
+			members.clear();
+			for (const auto& m : it->second->members) members.push_back(m.get());
+		}
 
-		for (const auto& adjNodePtr : adjacentNodes) {
-			if (!adjNodePtr) continue;
-			Node* adjNode = adjNodePtr.get();
+		for (Node* member : members) {
+			for (const auto& adjNodePtr : member->getChildren()) {
+				if (!adjNodePtr) continue;
+				Node* adjNode = classNode(adjNodePtr.get(), chain_of);
 
-			if (visited.count(adjNode) == 0) { // the adjacent node has not been visited yet
-				if (checkCyclesUtil(adjNode, visited, path)) {
+				if (visited.count(adjNode) == 0) { // the adjacent node has not been visited yet
+					if (checkCyclesUtil(adjNode, visited, path, chain_of)) {
+						return true;
+					}
+				}
+				else if (path.count(adjNode) > 0) {
+					// Cycle detected (a member with a child in its own chain included).
 					return true;
 				}
-			}
-			else if (path.count(adjNode) > 0) {
-				// Cycle detected, extract the cycle path
-				return true;
 			}
 		}
 
@@ -2434,8 +2508,11 @@ namespace hypergraph_logic {
 		// Wrapper function for cycle detection
 		std::unordered_set<Node*> visited;
 		std::unordered_set<Node*> path;
+		ChainOf chain_of;
+		for (const auto& chain : equivalences_)
+			for (const auto& m : chain.members) chain_of[m.get()] = &chain;
 
-		return checkCyclesUtil(node.get(), visited, path);
+		return checkCyclesUtil(classNode(node.get(), chain_of), visited, path, chain_of);
 	}
 	// ============================================================================
 	// Operation feasibility queries
@@ -2459,8 +2536,7 @@ namespace hypergraph_logic {
 			return false;
 		}
 		if (parentIsInAncestors({ child }, parent)) return false; // Already implied.
-		if (parentIsInAncestors({ parent }, child)) return false; // Would close a cycle.
-		return true;
+		return !classReaches(child.get(), parent.get()); // Would close a cycle.
 	}
 
 	bool Hypergraph::canAddSourceToEdge(const HyperedgePtr& edge, const NodePtr& source) const {
@@ -2473,7 +2549,7 @@ namespace hypergraph_logic {
 		if (!linked && parentIsInAncestors(targets, source)) return false; // Already implied.
 
 		for (const auto& t : targets)
-			if (parentIsInAncestors({ source }, t)) return false; // Would close a cycle.
+			if (classReaches(t.get(), source.get())) return false; // Would close a cycle.
 		return true;
 	}
 
@@ -2486,7 +2562,8 @@ namespace hypergraph_logic {
 		for (const auto& s : sources) linked = linked || isDirectParent(s, target);
 		if (!linked && childIsInDescendants(sources, target)) return false; // Already implied.
 
-		if (parentIsInAncestors(sources, target)) return false; // Would close a cycle.
+		for (const auto& s : sources)
+			if (classReaches(target.get(), s.get())) return false; // Would close a cycle.
 		return true;
 	}
 
@@ -2496,7 +2573,9 @@ namespace hypergraph_logic {
 
 	bool Hypergraph::canFuseNodes(const NodePtr& node1, const NodePtr& node2) const {
 		if (!node1 || !node2 || node1 == node2) return false;
-		return !parentIsInAncestors({ node2 }, node1) && !parentIsInAncestors({ node1 }, node2);
+		const int chain = chainIndexOf(node1.get());
+		if (chain >= 0 && chain == chainIndexOf(node2.get())) return true; // one layer: no path between them
+		return !classReaches(node1.get(), node2.get()) && !classReaches(node2.get(), node1.get());
 	}
 
 } // namespace hypergraph_logic

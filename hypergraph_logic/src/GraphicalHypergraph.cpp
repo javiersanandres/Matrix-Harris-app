@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <climits>
+#include <limits>
 #include <unordered_set>
 
 namespace hypergraph_logic {
@@ -263,57 +264,72 @@ namespace hypergraph_logic {
 		bool pos_changed = false;
 		bool no_children = node->getChildren().empty();
 		double current_x = node_layout_[node.get()].x;
+		const std::vector<NodePtr> order_before = layer_data.nodes;
+		// The nodes whose subgraphs follow the move: the node, or its whole chain.
+		std::vector<Node*> moved{ node.get() };
 
-		// Find the iterator to the node being moved once, used in both branches.
-		auto node_it = std::find(layer_data.nodes.begin(), layer_data.nodes.end(), node);
-
-		if (new_x_coordinate < current_x) {
-			// Moving left: find the rightmost neighbour to the left that the node has crossed.
-			for (auto it = layer_data.nodes.rbegin(); it != layer_data.nodes.rend(); ++it) {
-				if (node_layout_[it->get()].x >= current_x) {
-					// Skip nodes that are currently to the right of the node being moved.
-					continue;
-				}
-				if (node_layout_[it->get()].x > new_x_coordinate) {
-					if (!no_children && !(*it)->getChildren().empty()) {
-						// Both have children, so we will need to run the crossing minimisation
-						// algorithm after the swap, to ensure the new layout is as good as possible.
-						minimize_crossings = true;
-					}
-					auto neighbour_it = it.base() - 1;
-					std::iter_swap(neighbour_it, node_it);
-					node_it = neighbour_it;
-					pos_changed = true;
-				}
-			}
+		if (const EquivalenceChain* chain = getEquivalenceChain(node.get())) {
+			moved.clear();
+			for (const auto& m : chain->members) moved.push_back(m.get());
+			minimize_crossings = relocateChainInLayer(*chain, node, new_x_coordinate);
+			pos_changed = layer_data.nodes != order_before;
 		}
-		else if (new_x_coordinate > current_x) {
-			// Moving right: find the leftmost neighbour to the right that the node has crossed.
-			for (auto it = layer_data.nodes.begin(); it != layer_data.nodes.end(); ++it) {
-				if (node_layout_[it->get()].x <= current_x) {
-					// Skip nodes that are currently to the left of the node being moved.
-					continue;
-				}
-				if (node_layout_[it->get()].x < new_x_coordinate) {
-					if (!no_children && !(*it)->getChildren().empty()) {
-						// Both have children, so we will need to run the crossing minimisation
-						// algorithm after the swap, to ensure the new layout is as good as possible.
-						minimize_crossings = true;
+		else {
+			// Find the iterator to the node being moved once, used in both branches.
+			auto node_it = std::find(layer_data.nodes.begin(), layer_data.nodes.end(), node);
+
+			if (new_x_coordinate < current_x) {
+				// Moving left: find the rightmost neighbour to the left that the node has crossed.
+				for (auto it = layer_data.nodes.rbegin(); it != layer_data.nodes.rend(); ++it) {
+					if (node_layout_[it->get()].x >= current_x) {
+						// Skip nodes that are currently to the right of the node being moved.
+						continue;
 					}
-					std::iter_swap(it, node_it);
-					node_it = it;
-					pos_changed = true;
+					if (node_layout_[it->get()].x > new_x_coordinate) {
+						if (!no_children && !(*it)->getChildren().empty()) {
+							// Both have children, so we will need to run the crossing minimisation
+							// algorithm after the swap, to ensure the new layout is as good as possible.
+							minimize_crossings = true;
+						}
+						auto neighbour_it = it.base() - 1;
+						std::iter_swap(neighbour_it, node_it);
+						node_it = neighbour_it;
+						pos_changed = true;
+					}
 				}
 			}
+			else if (new_x_coordinate > current_x) {
+				// Moving right: find the leftmost neighbour to the right that the node has crossed.
+				for (auto it = layer_data.nodes.begin(); it != layer_data.nodes.end(); ++it) {
+					if (node_layout_[it->get()].x <= current_x) {
+						// Skip nodes that are currently to the left of the node being moved.
+						continue;
+					}
+					if (node_layout_[it->get()].x < new_x_coordinate) {
+						if (!no_children && !(*it)->getChildren().empty()) {
+							// Both have children, so we will need to run the crossing minimisation
+							// algorithm after the swap, to ensure the new layout is as good as possible.
+							minimize_crossings = true;
+						}
+						std::iter_swap(it, node_it);
+						node_it = it;
+						pos_changed = true;
+					}
+				}
+			}
+
+			// Dropped inside a chain, the node goes to its nearer end.
+			keepEquivalencesTogether(node->getLayer());
+			pos_changed = pos_changed && layer_data.nodes != order_before;
 		}
 
 		if (pos_changed) {
 			if (minimize_crossings) {
 				// Avoid being too aggressive with crossing minimisation, since the user
 				// is making a manual adjustment and may not want the layout to change too much.
-				// The node's descendants are re-placed in the layers below first, so that its
-				// subgraph follows the swap instead of pulling the nodes back.
-				Hypergraph::minimizeCrossings(3, node->getLayer() + 1, -1, {}, node.get());
+				// The moved nodes' descendants are re-placed in the layers below first, so that
+				// their subgraphs follow the swap instead of pulling the nodes back.
+				Hypergraph::minimizeCrossings(3, node->getLayer() + 1, -1, {}, moved);
 				if (out_altered_layers) {
 					// We need to add those layers where the span of hyperedges could have changed.
 					// Since the node moved and many others all the way down, we need to collect all
@@ -336,6 +352,60 @@ namespace hypergraph_logic {
 		else {
 			throw std::invalid_argument("La nueva posición no cambia el orden de la caja en su nivel.");
 		}
+	}
+
+	bool GraphicalHypergraph::relocateChainInLayer(const EquivalenceChain& chain, const NodePtr& node, double new_x) {
+		auto& nodes = layers_[node->getLayer()].nodes;
+		auto xOf = [&](const NodePtr& n) { return node_layout_[n.get()].x; };
+		double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+		for (const auto& m : chain.members) { lo = std::min(lo, xOf(m)); hi = std::max(hi, xOf(m)); }
+		auto hasChildren = [](const NodePtr& n) { return !n->getChildren().empty(); };
+
+		if (lo < new_x && new_x < hi) {
+			// Within the chain: the node takes its place among the other members, and every
+			// line keeps its style where it is.
+			std::vector<NodePtr> order = chain.members;
+			std::stable_sort(order.begin(), order.end(), [&](const NodePtr& a, const NodePtr& b) {
+				return (a == node ? new_x : xOf(a)) < (b == node ? new_x : xOf(b));
+			});
+			if (order == chain.members) return false;
+			const std::unordered_set<Node*> members = [&] {
+				std::unordered_set<Node*> s;
+				for (const auto& m : order) s.insert(m.get());
+				return s;
+			}();
+			size_t k = 0;
+			for (auto& n : nodes)
+				if (members.count(n.get())) n = order[k++];
+			equivalences_[chainIndexOf(node.get())].members = order;
+			return hasChildren(node) && std::count_if(order.begin(), order.end(), hasChildren) > 1;
+		}
+
+		// Elsewhere: the whole chain moves as it is, by as much as the node was dragged, past
+		// every other node it crosses (left of it when moving left, right of it when moving right).
+		const double delta = new_x - xOf(node);
+		if (delta == 0) return false;
+		const double from = delta < 0 ? lo + delta : hi;
+		const double to = delta < 0 ? lo : hi + delta;
+		std::vector<NodePtr> rest;
+		bool crosses_children = false;
+		size_t at = 0;
+		for (const auto& n : nodes) {
+			if (getEquivalenceChain(n.get()) == &chain) continue;
+			const double x = xOf(n);
+			if (lo < x && x < hi) {
+				// A dummy between two members: on the side of the chain's middle it ends up on.
+				if (x < (lo + hi) / 2.0 + delta) ++at;
+			}
+			else {
+				if (from < x && x < to) crosses_children = crosses_children || hasChildren(n);
+				if (delta < 0 ? x <= from : x < to) ++at;
+			}
+			rest.push_back(n);
+		}
+		rest.insert(rest.begin() + static_cast<std::ptrdiff_t>(at), chain.members.begin(), chain.members.end());
+		nodes = std::move(rest);
+		return crosses_children && std::any_of(chain.members.begin(), chain.members.end(), hasChildren);
 	}
 
 	void GraphicalHypergraph::relocateNodeToLayer(const NodePtr& node, double new_y_coordinate, std::set<int>* out_altered_layers) {
@@ -535,6 +605,11 @@ namespace hypergraph_logic {
 
 			nodes = std::move(order);
 		}
+	}
+
+	double GraphicalHypergraph::horizontalPosition(const NodePtr& node) const {
+		if (const NodeLayout* layout = validLayout(node.get())) return layout->x;
+		return Hypergraph::horizontalPosition(node);
 	}
 
 	int GraphicalHypergraph::choosePositionForRelocatedNode(int new_layer, const NodePtr& node) const {

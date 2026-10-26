@@ -101,13 +101,13 @@ namespace sifting_internal {
 		// order: run the Efficient Barycenter pass after building the block order. Only the
 		// global minimization (minimizeCrossingsILP) asks for it; every other call keeps the
 		// current orders as its starting point.
-		// moved: the node the user just moved sideways, if any (see buildBlockOrder).
+		// moved: the nodes the user just moved sideways, if any (see buildBlockOrder).
 		// group: the only nodes sifted, empty for all of them. It must be closed (whole
 		// connected components, see Hypergraph::crossingGroup): G1 holds only these nodes
 		// and their connections, and writeBack puts them back into the places they had in
 		// each layer, so every other node stays exactly where it was.
 		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order = true,
-			const Node* moved = nullptr, std::unordered_set<Node*> group = {});
+			const std::vector<Node*>& moved = {}, std::unordered_set<Node*> group = {});
 #ifdef GS_TEST
 		// No-op constructor for unit tests. Skips the full pipeline so tests can
 		// set S_ and B_ directly. layers_ is bound to a local dummy that is never
@@ -145,13 +145,14 @@ namespace sifting_internal {
 		// The rows contain every layer as it currently is. Nodes that never had a position have
 		// already been placed by Hypergraph::placeUnpositionedNodes, so the current orders are
 		// the user's mental map and sifting only fixes what is actually wrong.
-		// When the user has just moved a node sideways in its layer (moved, in the anchor layer),
-		// each layer in [start_layer, end_layer] first re-places that node's descendants so that
-		// they follow it (followMovedNode), without touching the relative order of the rest:
+		// When the user has just moved nodes sideways in their layer (moved, in the anchor layer:
+		// a node, or a whole equivalence chain), each layer in [start_layer, end_layer] first
+		// re-places their descendants so that they follow them (followMovedNode), without
+		// touching the relative order of the rest:
 		// minimizeCrossings does not take the subgraph back to where it was, nor reshuffles
 		// parts of the drawing the move has nothing to do with.
 		// Hub rows are always sorted with sortHubs from the rows around them.
-		void buildBlockOrder(const Node* moved = nullptr);
+		void buildBlockOrder(const std::vector<Node*>& moved = {});
 
 		// ── buildBlockListFromRows ───────────────────────────────────────────────────────────────────
 		//
@@ -250,8 +251,8 @@ namespace sifting_internal {
 
 		// ── Layer and hub sorting ─────────────────────────────────────────────────
 		//
-		// followMovedNode (only after a node was moved sideways) re-places, in one layer,
-		// the descendants of the moved node: the nodes with a neighbour right above (through
+		// followMovedNode (only after nodes were moved sideways) re-places, in one layer,
+		// the descendants of the moved nodes: the nodes with a neighbour right above (through
 		// the hubs, so a long connection's dummies count too) among `followers`, which then
 		// takes them in. Every node gets a key, the weighted average of the positions of its
 		// neighbours above, the followers weighing FOLLOW_WEIGHT and the rest 1; a root takes

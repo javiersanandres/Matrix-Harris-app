@@ -187,12 +187,21 @@ namespace hypergraph_logic {
 		for (const auto& [raw, y] : edge_layout_)
 			copy.edge_layout_[edge_map.at(raw).get()] = y;
 
+		// 6. Equivalence chains.
+		for (const auto& chain : equivalences_) {
+			EquivalenceChain new_chain{ {}, chain.continuous };
+			for (const auto& m : chain.members) new_chain.members.push_back(node_map.at(m.get()));
+			copy.equivalences_.push_back(std::move(new_chain));
+		}
+
 		return copy;
 	}
 
 	void GraphicalHypergraph::mergeFrom(GraphicalHypergraph&& other, bool left) {
 		for (const auto& node : other.all_nodes_)
 			all_nodes_.push_back(node);
+		for (auto& chain : other.equivalences_)
+			equivalences_.push_back(std::move(chain));
 
 		for (auto& [orig, segs] : other.all_hyperedges_)
 			all_hyperedges_[orig] = std::move(segs);
@@ -226,6 +235,8 @@ namespace hypergraph_logic {
 	{
 		for (const auto& node : other.all_nodes_)
 			all_nodes_.push_back(node);
+		for (auto& chain : other.equivalences_)
+			equivalences_.push_back(std::move(chain));
 
 		for (auto& [orig, segs] : other.all_hyperedges_)
 			all_hyperedges_[orig] = std::move(segs);

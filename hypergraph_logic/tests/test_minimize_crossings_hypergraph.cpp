@@ -25,7 +25,7 @@ namespace hypergraph_logic {
                 int minimizeCrossingsForNodes(const std::vector<Node*>& nodes, int start_layer, int end_layer) {
 					return GraphicalHypergraph::minimizeCrossingsForNodes(nodes, start_layer, end_layer);
                 }
-                int sift(int rounds, int start_layer, int end_layer = -1, const Node* moved = nullptr) {
+                int sift(int rounds, int start_layer, int end_layer = -1, const std::vector<Node*>& moved = {}) {
                     return Hypergraph::minimizeCrossings(rounds, start_layer, end_layer, {}, moved);
                 }
                 int siftAffected(int rounds, int start_layer, const std::vector<Node*>& affected) {
@@ -886,7 +886,7 @@ namespace hypergraph_logic {
                 G.layers().at(1).nodes = { a1, b1 };
                 G.layers().at(2).nodes = { a2, b2 };
 
-                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, { A.get() });
                 EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), a1.get() }));
                 EXPECT_EQ(layerNodes(G, 2), (std::vector<Node*>{ b2.get(), a2.get() }));
                 EXPECT_EQ(sifter.countCrossings(), 0);
@@ -907,7 +907,7 @@ namespace hypergraph_logic {
                 G.layers().at(0).nodes = { U, V, B, A };
                 G.layers().at(1).nodes = { v1, u1, a1, b1 };
 
-                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, { A.get() });
                 EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ v1.get(), u1.get(), b1.get(), a1.get() }));
             }
 
@@ -922,7 +922,7 @@ namespace hypergraph_logic {
                 G.layers().at(0).nodes = { B, A };
                 G.layers().at(1).nodes = { a1, b1, R };
 
-                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, { A.get() });
                 EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), R.get(), a1.get() }));
             }
 
@@ -941,7 +941,7 @@ namespace hypergraph_logic {
                 G.layers().at(1).nodes = { dummy, b1 };
                 G.layers().at(2).nodes = { a2, b2 };
 
-                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, { A.get() });
                 EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), d }));
                 EXPECT_EQ(layerNodes(G, 2), (std::vector<Node*>{ b2.get(), a2.get() }));
             }
@@ -959,8 +959,25 @@ namespace hypergraph_logic {
                 G.layers().at(0).nodes = { B, A };
                 G.layers().at(1).nodes = { a1, s, b1 };
 
-                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, A.get());
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, { A.get() });
                 EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), s.get(), a1.get() }));
+            }
+
+            TEST(FollowMovedNode, SeveralMovedNodesAreAllFollowed) {
+                // A and C (an equivalence chain, say) moved past B together: both subtrees
+                // follow, not only the first one's.
+                TestGraph G("follow_several");
+                NodePtr A = G.createNode("A", 0, 0, nullptr);
+                NodePtr C = G.createNode("C", 0, 1, nullptr);
+                NodePtr B = G.createNode("B", 0, 2, nullptr);
+                NodePtr a1 = G.createNode("a1", 1, 0, A);
+                NodePtr c1 = G.createNode("c1", 1, 1, C);
+                NodePtr b1 = G.createNode("b1", 1, 2, B);
+                G.layers().at(0).nodes = { B, A, C };
+                G.layers().at(1).nodes = { a1, c1, b1 };
+
+                GlobalSifter sifter(1, lastLayer(G), G.layers(), false, { A.get(), C.get() });
+                EXPECT_EQ(layerNodes(G, 1), (std::vector<Node*>{ b1.get(), a1.get(), c1.get() }));
             }
 
             TEST(FollowMovedNode, RelocatingABoxTakesItsSubtreeAlong) {

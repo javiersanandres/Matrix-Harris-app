@@ -36,6 +36,21 @@ namespace hypergraph_logic {
 	};
 
 	// ============================================================================
+	// EquivalenceChain
+	//
+	// A set of real nodes the user marked as equivalent. They share a layer and sit next
+	// to each other in it, in this order from left to right, with nothing in between but
+	// dummy nodes. Each two neighbours are joined by a horizontal line: continuous[i] is
+	// the style of the one between members[i] and members[i + 1]. A style belongs to the
+	// gap, not to the nodes: reordering the members leaves every gap's style as it was.
+	// A chain always has at least two members.
+	// ============================================================================
+	struct EquivalenceChain {
+		std::vector<NodePtr> members;
+		std::vector<bool> continuous;   // members.size() - 1 entries
+	};
+
+	// ============================================================================
 	// Hypergraph
 	//
 	// A directed layered hierarchical hypergraph  H = (V, E, λ).
@@ -321,6 +336,9 @@ namespace hypergraph_logic {
 		// In all cases the node is erased from all_nodes_ and from its layer, and a cleanUp is
 		// performed to remove any layers that become empty as a result.
 		//
+		// A node in an equivalence chain leaves it first (see leaveEquivalence): its equivalents
+		// stay equivalent among themselves, and go back up if it was what held them down.
+		//
 		void removeNode(const NodePtr& node, std::set<int>* out_altered_layers = nullptr);
 
 		// ── removeConnection ─────────────────────────────────────────────────────────────────────────
@@ -408,6 +426,9 @@ namespace hypergraph_logic {
 		// nodes, global sifting (3 rounds) is run from the shallowest of them; otherwise only the
 		// fused node is re-placed within its layer.
 		//
+		// The fused node belongs to the equivalence chains of both nodes, which become one (see
+		// fuseEquivalences); a fusion that would close a cycle through a chain is refused too.
+		//
 		void fuseNodes(const NodePtr& node1, const NodePtr& node2, const NodeAttributes& new_attributes, std::set<int>* out_altered_layers = nullptr);
 
 		// ============================================================================
@@ -444,7 +465,65 @@ namespace hypergraph_logic {
 		// empty is closed up by the automatic compaction in cleanUp(), which every relocation path
 		// ultimately funnels through.
 		//
+		// A node in an equivalence chain takes the whole chain along: the rule (1) then applies to
+		// every member, the "no parents", "no children" and "sole occupant" conditions to the
+		// chain as a whole, and the override is recorded on node alone (its equivalents' are
+		// cleared).
+		//
 		void relocateNodeToLayer(const NodePtr& node, int desired_layer, std::set<int>* out_altered_layers = nullptr);
+
+		// ============================================================================
+		// Equivalence management
+		// ============================================================================
+		//
+		// Equivalent nodes form a chain (see EquivalenceChain) that behaves, for the layering,
+		// as a single node:
+		//   - Its layer is the deepest of the layers its members would have on their own (the
+		//     depth rule, or a valid desired layer): see resolveTargetLayer. Nothing about the
+		//     equivalence is stored in the nodes, so splitting a chain lets every part go back
+		//     to the layer its own members ask for.
+		//   - No directed path may join two members, nor run from one chain to another and
+		//     back: the graph with every chain contracted into one node stays acyclic. Every
+		//     operation that adds connections (or fuses nodes) refuses to break this.
+		//   - Relocating a member to another layer takes the whole chain along, and so does
+		//     every relocation the depth rule makes.
+		// A node has at most one equivalent on each side: only chain ends can be linked.
+
+		// The chains, in no particular order.
+		const std::vector<EquivalenceChain>& getEquivalences() const { return equivalences_; }
+
+		// The chain node belongs to, or nullptr.
+		const EquivalenceChain* getEquivalenceChain(const Node* node) const;
+
+		// ── addEquivalence ───────────────────────────────────────────────────────────────────────
+		//
+		// Marks a and b as equivalent, joining their chains into one. The one further left (see
+		// horizontalPosition; a on a tie) must have no equivalent to its right, and the other none
+		// to its left. Throws std::invalid_argument for null, equal or dummy nodes, and
+		// std::logic_error if they already are equivalent, a side is taken or a cycle would close.
+		//
+		// The chain that moves is the shallower one, which comes down to the other's layer
+		// (pushing its descendants down as any relocation does); with both on the same layer, the
+		// shorter one (the right one on a tie). It moves towards the other chain's end only as far
+		// as the rule needs: past the real nodes between them, which keep their order and take
+		// the place it left, but not past the dummies next to that end, which stay in the gap
+		// (with only dummies between the chains, nothing moves sideways). The layers above and
+		// below are then sifted around it (its subgraph following it), with the merged chain's
+		// layer left as placed.
+		//
+		void addEquivalence(const NodePtr& a, const NodePtr& b, bool continuous = true, std::set<int>* out_altered_layers = nullptr);
+
+		// ── removeEquivalence ────────────────────────────────────────────────────────────────────
+		//
+		// Removes the line between a and b, which must be neighbours in a chain, splitting it in
+		// two (a part with a single node is no chain any more). Every part then takes the layer
+		// its own members ask for. Throws std::logic_error if they are not neighbours.
+		//
+		void removeEquivalence(const NodePtr& a, const NodePtr& b, std::set<int>* out_altered_layers = nullptr);
+
+		// The style of the line between neighbours a and b (throw std::logic_error otherwise).
+		bool isEquivalenceContinuous(const NodePtr& a, const NodePtr& b) const;
+		void setEquivalenceContinuous(const NodePtr& a, const NodePtr& b, bool continuous);
 
 		// ============================================================================
 		// Operation feasibility queries
@@ -469,8 +548,15 @@ namespace hypergraph_logic {
 		bool canRemoveConnection(const NodePtr& parent, const NodePtr& child) const;
 
 		// fuseNodes(node1, node2, ...): neither node may reach the other (fusing them would
-		// otherwise close a cycle, a direct connection included).
+		// otherwise close a cycle, a direct connection included), counting each chain as one
+		// node unless both are in the same one.
 		bool canFuseNodes(const NodePtr& node1, const NodePtr& node2) const;
+
+		// addEquivalence(a, b).
+		bool canAddEquivalence(const NodePtr& a, const NodePtr& b) const;
+
+		// removeEquivalence(a, b), and the style of the line: a and b are neighbours in a chain.
+		bool canRemoveEquivalence(const NodePtr& a, const NodePtr& b) const;
 
 	protected:
 		std::string name_;
@@ -492,6 +578,82 @@ namespace hypergraph_logic {
 		// hyperedges created when the original edge spans more than one layer.
 		// A short edge has an empty segment list.
 		std::unordered_map<HyperedgePtr, std::vector<HyperedgePtr>, HyperedgePtrHash> all_hyperedges_;
+
+		// Every equivalence chain (see EquivalenceChain).
+		std::vector<EquivalenceChain> equivalences_;
+
+		// Off while an operation places a chain's members by hand (keepEquivalencesTogether
+		// does nothing meanwhile).
+		bool keep_equivalences_together_ = true;
+
+		// ============================================================================
+		// Equivalence helpers
+		// ============================================================================
+
+		// Index in equivalences_ of the chain node belongs to, or -1.
+		int chainIndexOf(const Node* node) const;
+
+		// node's chain members from left to right, or just node when it has no chain.
+		std::vector<NodePtr> equivalentNodes(const NodePtr& node) const;
+
+		// The same for several nodes: every member of their chains, each once.
+		std::vector<NodePtr> withEquivalents(const std::vector<NodePtr>& nodes) const;
+
+		// ── classReaches ─────────────────────────────────────────────────────────────────────────
+		//
+		// Whether a directed path leads from from's chain (or from itself) to to's, where a path
+		// may go on from any member of a chain it enters: what would close a cycle if a
+		// connection, equivalence or fusion joined the two ends. True if both are in the same
+		// chain (or are the same node).
+		//
+		bool classReaches(const Node* from, const Node* to) const;
+
+		// ── leaveEquivalence ─────────────────────────────────────────────────────────────────────
+		//
+		// Takes node out of its chain, closing the gap it leaves: the line that replaces its two
+		// is discontinuous only if both of them were. A chain left with a single node is dropped. Returns
+		// the other members (empty if node had no chain).
+		//
+		std::vector<NodePtr> leaveEquivalence(const NodePtr& node);
+
+		// ── fuseEquivalences ─────────────────────────────────────────────────────────────────────
+		//
+		// Used by fuseNodes, before absorbed leaves the graph: the fused node (survivor) belongs to
+		// both nodes' chains. Within a single chain, absorbed just leaves it (leaveEquivalence).
+		// Otherwise the members of both chains form one, ordered by horizontalPosition (the fused
+		// node at survivor's); two members that were neighbours and still are keep their line's
+		// style, and every new line is continuous.
+		//
+		void fuseEquivalences(const NodePtr& survivor, const NodePtr& absorbed);
+
+		// ── horizontalPosition ───────────────────────────────────────────────────────────────────
+		//
+		// Where node stands horizontally, to compare nodes, even in different layers: which one
+		// of two nodes is to the left of the other. The base class has nothing better than the
+		// node's index in its layer; GraphicalHypergraph uses its x coordinate.
+		//
+		virtual double horizontalPosition(const NodePtr& node) const;
+
+		// ── keepEquivalencesTogether ─────────────────────────────────────────────────────────────
+		//
+		// Restores, in every layer, the chains' rule: members next to each other in chain order,
+		// with nothing in between but dummy nodes. A layer that already follows it is left exactly
+		// as it is. Otherwise each chain is gathered as one unit at the middle of the positions its
+		// members span, and every other real node there goes to the end nearer to it (the left one
+		// on a tie), keeping its order with the rest; dummies within the span stay in the gap they
+		// were in. Called after every operation that may have placed nodes freely: insertions at a
+		// given position, relocations, and the crossing minimizations, which do not know about
+		// chains yet.
+		//
+		void keepEquivalencesTogether();
+		void keepEquivalencesTogether(int layer);
+
+		// Calls keepEquivalencesTogether() when it goes out of scope: on every way out of the
+		// crossing minimizations.
+		struct KeepEquivalencesTogether {
+			Hypergraph& graph;
+			~KeepEquivalencesTogether() { graph.keepEquivalencesTogether(); }
+		};
 
 		// ============================================================================
 		// Node management
@@ -845,13 +1007,18 @@ namespace hypergraph_logic {
 		//
 		// Computes the layer a node should currently occupy, following the depth rule or desired_layer
 		// field of the node. The computation is performed in the following manner:
-		// 
+		//
 		//   - If node has no override (getDesiredLayer() == -1), returns the depth-rule layer.
 		//   - If the override is still strictly deeper than the depth-rule layer, it is honoured
 		//     as-is and returned unchanged.
-		//   - If the override is no longer doing anything (it now equals the depth-rule layer) or is 
+		//   - If the override is no longer doing anything (it now equals the depth-rule layer) or is
 		//     no longer valid (it is now shallower than the depth-rule layer), the override is cleared
 		//     and the plain depth-rule layer is returned instead.
+		//
+		// A node in an equivalence chain shares its layer with the whole chain: the depth-rule
+		// layer is then the deepest among the members' own, and the override the deepest among
+		// theirs that is still deeper than that. Every other member's override is cleared, so an
+		// active override always equals the layer its node sits at.
 		//
 		int resolveTargetLayer(const NodePtr& node);
 
@@ -987,6 +1154,9 @@ namespace hypergraph_logic {
 		// current DFS path (tracked in a hash set for O(1) lookup); if a child is already on the path,
 		// a cycle exists.
 		//
+		// Each equivalence chain counts as a single node: its children are those of all of its
+		// members, and a member with a child in its own chain is a cycle.
+		//
 		// Called before permanently committing any structural change that adds new parent/child links,
 		// so that the graph can be rolled back if a cycle would be introduced.
 		//
@@ -1011,12 +1181,13 @@ namespace hypergraph_logic {
 		// preserving the existing layout matters more than reaching a global optimum.
 		//
 		// Every layer starts from its current order, so the user's mental map is kept and
-		// sifting only has to fix what is actually wrong. When the user has just moved a node
-		// sideways in its layer (moved, at start_layer - 1), its descendants are first re-placed
-		// in each layer of the range so that they follow it, and every other node keeps its
-		// relative order (see GlobalSifter::buildBlockOrder).
+		// sifting only has to fix what is actually wrong. When the user has just moved nodes
+		// sideways in their layer (moved, at start_layer - 1: a node, or a whole equivalence
+		// chain), their descendants are first re-placed in each layer of the range so that they
+		// follow them, and every other node keeps its relative order (see
+		// GlobalSifter::buildBlockOrder).
 		//
-		// affected: the nodes the operation changed (moved counts as one). Only their
+		// affected: the nodes the operation changed (the moved ones count too). Only their
 		// crossingGroup is sifted, and every other node stays exactly where it was; with none,
 		// the whole graph is. Among orders with the same crossings, sifting keeps the one
 		// closest to where it started (see GlobalSifter::siftingStep).
@@ -1024,7 +1195,7 @@ namespace hypergraph_logic {
 		// Returns the crossing count after sifting (of the group sifted, when there is one).
 		//
 		int minimizeCrossings(int sifting_rounds, int start_layer, int end_layer = -1,
-			const std::vector<Node*>& affected = {}, const Node* moved = nullptr);
+			const std::vector<Node*>& affected = {}, const std::vector<Node*>& moved = {});
 
 		// ── crossingGroup ───────────────────────────────────────────────────────────────────────────
 		//

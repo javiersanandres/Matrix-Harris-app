@@ -46,6 +46,14 @@ namespace hypergraph_logic {
 			join(*orig);
 			for (const auto& seg : segs) join(*seg);
 		}
+		// Equivalences link boxes too.
+		for (const auto& chain : equivalences_) {
+			auto first = index.find(chain.members.front().get());
+			for (const auto& m : chain.members) {
+				auto it = index.find(m.get());
+				if (it != index.end() && first != index.end()) parent[find(it->second)] = find(first->second);
+			}
+		}
 
 		std::unordered_map<int, size_t> block_of_root;
 		std::vector<Block> blocks;
@@ -243,6 +251,9 @@ namespace hypergraph_logic {
 			std::erase_if(data.nodes, [&](const NodePtr& n) { return doomed.count(n.get()) > 0; });
 			std::erase_if(data.outgoing_edges, [&](const HyperedgePtr& e) { return doomed_edges.count(e.get()) > 0; });
 		}
+		// Every chain it touches is normally wholly in it; any other member stays in its chain.
+		for (Node* n : doomed)
+			if (chainIndexOf(n) >= 0) leaveEquivalence(n->shared_from_this());
 		for (Node* n : doomed) node_layout_.erase(n);
 		for (Hyperedge* e : doomed_edges) edge_layout_.erase(e);
 		for (const auto& e : doomed_originals) all_hyperedges_.erase(e);
@@ -263,6 +274,12 @@ namespace hypergraph_logic {
 			for (const auto& t : orig->getTargets()) (group.count(t.get()) ? inside : outside) = true;
 			if (inside && outside)
 				throw std::invalid_argument("Las cajas que se copian están conectadas con otras.");
+		}
+		for (const auto& chain : equivalences_) {
+			bool inside = false, outside = false;
+			for (const auto& m : chain.members) (group.count(m.get()) ? inside : outside) = true;
+			if (inside && outside)
+				throw std::invalid_argument("Las cajas que se copian son equivalentes a otras.");
 		}
 
 		// clone() keeps all_nodes_ in order: the copy's i-th box is this graph's i-th.
@@ -303,9 +320,11 @@ namespace hypergraph_logic {
 	void GraphicalHypergraph::refreshLayerOverrides() {
 		for (const auto& n : all_nodes_) {
 			if (n->isDummy()) continue;
+			// A chain's depth rule is the deepest of its members'.
 			int depth_rule_layer = 0;
-			for (const auto& p : n->getParents())
-				depth_rule_layer = std::max(depth_rule_layer, p->getLayer() + 1);
+			for (const auto& m : equivalentNodes(n))
+				for (const auto& p : m->getParents())
+					depth_rule_layer = std::max(depth_rule_layer, p->getLayer() + 1);
 			n->setDesiredLayer(n->getLayer() > depth_rule_layer ? n->getLayer() : -1);
 		}
 	}
