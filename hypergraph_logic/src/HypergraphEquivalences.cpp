@@ -190,6 +190,37 @@ namespace hypergraph_logic {
 		nodes = std::move(ordered);
 	}
 
+	std::vector<EquivalenceChain> Hypergraph::equivalencesToSift() const {
+		if (keep_equivalences_together_) return equivalences_;
+		std::vector<EquivalenceChain> together;
+		for (const auto& chain : equivalences_) {
+			const int layer = chain.members.front()->getLayer();
+			auto it = layers_.find(layer);
+			if (it == layers_.end()) continue;
+			const auto& nodes = it->second.nodes;
+			std::unordered_map<Node*, int> index;
+			for (int i = 0; i < static_cast<int>(nodes.size()); ++i) index[nodes[i].get()] = i;
+			const bool here = std::all_of(chain.members.begin(), chain.members.end(),
+				[&](const NodePtr& m) { return index.count(m.get()) > 0; });
+			if (here && followsTheRule(chain.members, nodes, index)) together.push_back(chain);
+		}
+		return together;
+	}
+
+	void Hypergraph::syncEquivalenceOrder() {
+		for (auto& chain : equivalences_) {
+			auto it = layers_.find(chain.members.front()->getLayer());
+			if (it == layers_.end()) continue;
+			const auto& nodes = it->second.nodes;
+			std::unordered_map<Node*, size_t> index;
+			for (size_t i = 0; i < nodes.size(); ++i) index[nodes[i].get()] = i;
+			if (!std::all_of(chain.members.begin(), chain.members.end(),
+				[&](const NodePtr& m) { return index.count(m.get()) > 0; })) continue;
+			std::stable_sort(chain.members.begin(), chain.members.end(),
+				[&](const NodePtr& a, const NodePtr& b) { return index.at(a.get()) < index.at(b.get()); });
+		}
+	}
+
 	// ============================================================================
 	// Changing the chains
 	// ============================================================================

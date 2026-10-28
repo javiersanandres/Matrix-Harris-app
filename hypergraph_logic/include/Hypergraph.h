@@ -642,18 +642,19 @@ namespace hypergraph_logic {
 		// members span, and every other real node there goes to the end nearer to it (the left one
 		// on a tie), keeping its order with the rest; dummies within the span stay in the gap they
 		// were in. Called after every operation that may have placed nodes freely: insertions at a
-		// given position, relocations, and the crossing minimizations, which do not know about
-		// chains yet.
+		// given position, relocations, and placing the nodes that had no position yet. The crossing
+		// minimizations keep the rule themselves (see GlobalSifter).
 		//
 		void keepEquivalencesTogether();
 		void keepEquivalencesTogether(int layer);
 
-		// Calls keepEquivalencesTogether() when it goes out of scope: on every way out of the
-		// crossing minimizations.
-		struct KeepEquivalencesTogether {
-			Hypergraph& graph;
-			~KeepEquivalencesTogether() { graph.keepEquivalencesTogether(); }
-		};
+		// The chains the crossing minimizations keep together: all of them, but only those that
+		// already are while an operation places a chain's members by hand.
+		std::vector<EquivalenceChain> equivalencesToSift() const;
+
+		// After a minimization that may reorder a chain's members: every chain's members in
+		// their layer's order again (the lines' styles stay with the gaps).
+		void syncEquivalenceOrder();
 
 		// ============================================================================
 		// Node management

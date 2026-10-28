@@ -1,6 +1,8 @@
 #include "GraphicalHypergraph.h"
+#include "GlobalSifting.h"
 #include <gtest/gtest.h>
 
+#include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -531,7 +533,9 @@ namespace hypergraph_logic {
 
             g.minimizeCrossings();
             expectChainsTogether(g);
-            EXPECT_EQ(chainOf(g, c2), (std::vector<std::string>{ "c2", "c3", "c4" }));
+            auto members = chainOf(g, c2); // the global minimization may reorder it
+            std::sort(members.begin(), members.end());
+            EXPECT_EQ(members, (std::vector<std::string>{ "c2", "c3", "c4" }));
         }
 
         // ── Fusion ────────────────────────────────────────────────────────────
@@ -679,6 +683,289 @@ namespace hypergraph_logic {
             EXPECT_EQ(row(g, 0), (std::vector<std::string>{ "x", "a", "b" }));
             g.removeComponent(a.get());
             EXPECT_TRUE(g.getEquivalences().empty());
+        }
+
+        // ── Crossing minimization ─────────────────────────────────────────────
+        //
+        // The layers set by hand, then sifted as the editing operations do (only the
+        // layers given; the one below is read, never changed) or by the sifter itself.
+
+        struct Sifted : Graph {
+            using Graph::Graph;
+            std::map<int, LayerData>& layers() { return layers_; }
+            int sift(int rounds, int start, int end) { return Hypergraph::minimizeCrossings(rounds, start, end); }
+            void syncChains() { syncEquivalenceOrder(); } // after the sifter itself reordered one
+            int siftFor(const std::vector<Node*>& nodes, int start, int end) {
+                return Graph::minimizeCrossingsForNodes(nodes, start, end);
+            }
+            // The crossings of the whole drawing, the chains' lines included or not.
+            int crossings(bool with_lines) {
+                sifting_internal::GlobalSifter s(0, layers_.rbegin()->first, layers_, false, {}, {},
+                    with_lines ? equivalences_ : std::vector<EquivalenceChain>{});
+                return s.countCrossings();
+            }
+        };
+
+        // Parents fixed in layer 0 (sifting starts at layer 1); every edge has a hub of its
+        // own between the layers, so a box can only gain by moving where its hub already is.
+        struct Anchored {
+            Sifted g{ "anchored" };
+            std::vector<NodePtr> top, bottom;
+            NodePtr parent(const char* name) { top.push_back(boxAtEnd(g, name, 0)); return top.back(); }
+            NodePtr child(const char* name, const NodePtr& p) { bottom.push_back(childAtEnd(g, name, p)); return bottom.back(); }
+            void rows(std::vector<NodePtr> upper, std::vector<NodePtr> lower) {
+                g.layers().at(0).nodes = std::move(upper);
+                g.layers().at(1).nodes = std::move(lower);
+            }
+        };
+
+        // P -> b and Q -> a, with a ≡ b: in this order their connections cross.
+        struct Crossed : Anchored {
+            NodePtr P = parent("P"), Q = parent("Q");
+            NodePtr a = child("a", Q), b = child("b", P);
+            Crossed() {
+                g.computeLayout();
+                g.addEquivalence(a, b);
+                g.computeLayout();
+                rows({ P, Q }, { a, b });
+            }
+        };
+
+        // P -> {a, b} and Q -> C two layers down, its dummy d at layer 1 between a ≡ b.
+        struct DummyInside {
+            Sifted g{ "dummy inside" };
+            NodePtr P = box(g, "P", 0), Q = boxAtEnd(g, "Q", 0);
+            NodePtr a = childAtEnd(g, "a", P), b = childAtEnd(g, "b", P), C = childAtEnd(g, "C", a);
+            NodePtr d;
+            DummyInside() {
+                g.addConnection(Q, C);
+                for (const auto& n : g.getNodesAt(1)) if (n->isDummy()) d = n;
+                g.computeLayout();
+                g.addEquivalence(a, b);
+                g.computeLayout();
+                g.layers().at(0).nodes = { P, Q };
+                g.layers().at(1).nodes = { a, d, b };
+            }
+            std::vector<std::string> fullRow() {
+                std::vector<std::string> names;
+                for (const auto& n : g.getNodesAt(1)) names.push_back(n->isDummy() ? "." : n->getName());
+                return names;
+            }
+        };
+
+        TEST(EquivalenceSifting, ADummyBetweenMembersCrossesTheirLine) {
+            DummyInside t;
+            ASSERT_TRUE(t.d);
+            ASSERT_EQ(t.fullRow(), (std::vector<std::string>{ "a", ".", "b" }));
+            EXPECT_EQ(t.g.crossings(true), t.g.crossings(false) + 1);
+        }
+
+        TEST(EquivalenceSifting, TheDummyLeavesTheChainWhenThatRemovesCrossings) {
+            DummyInside t;
+            ASSERT_EQ(t.g.crossings(true), 2); // the line, and Q's connection with P -> b
+            t.g.sift(3, 1, 1);
+            EXPECT_EQ(t.fullRow(), (std::vector<std::string>{ "a", "b", "." }));
+            EXPECT_EQ(t.g.crossings(true), 0);
+            expectChainsTogether(t.g);
+        }
+
+        // P1, P2 -> a and R1, R2 -> b, with Q -> C two layers down in between: its dummy d,
+        // right of a ≡ b, crosses both of b's connections, but only the line between them.
+        struct DummyWanted : DummyInside {
+            DummyWanted() {
+                // DummyInside's P -> b is replaced by two connections from the right.
+                g.removeConnection(P, b);
+                R1 = boxAtEnd(g, "R1", 0);
+                R2 = boxAtEnd(g, "R2", 0);
+                P2 = box(g, "P2", 0);
+                g.addConnection(P2, a);
+                g.addConnection(R1, b);
+                g.addConnection(R2, b);
+                g.computeLayout();
+                g.layers().at(0).nodes = { P, P2, Q, R1, R2 };
+                g.layers().at(1).nodes = { a, b, d };
+            }
+            NodePtr P2, R1, R2;
+        };
+
+        struct StepSifter : sifting_internal::GlobalSifter {
+            using GlobalSifter::GlobalSifter;
+            using GlobalSifter::chainStep;
+            // x's block right after y's in B, the hubs staying where they are.
+            void putAfter(Node* x, Node* y) {
+                const int bx = S_.g1_nodes[S_.node_to_g1.at(x)].block_id;
+                const int by = S_.g1_nodes[S_.node_to_g1.at(y)].block_id;
+                B_.erase(std::find(B_.begin(), B_.end(), bx));
+                B_.insert(std::find(B_.begin(), B_.end(), by) + 1, bx);
+                orderLayersByBlockOrder();
+                sortAdjacencies();
+            }
+        };
+
+        TEST(EquivalenceSifting, AChainStepCanTakeADummyBetweenItsMembers) {
+            // The hubs are sorted for a . b, then d goes right of b: the chain, moving as one
+            // block, only gets back to a . b by stopping around d.
+            DummyWanted t;
+            t.g.layers().at(1).nodes = { t.a, t.d, t.b };
+            StepSifter s(1, 1, t.g.layers(), false, {}, {}, t.g.getEquivalences());
+            s.putAfter(t.d.get(), t.b.get());
+            const int before = s.countCrossings();
+            s.chainStep(0, false, false);
+            EXPECT_LT(s.countCrossings(), before);
+            s.writeBack();
+            EXPECT_EQ(t.fullRow(), (std::vector<std::string>{ "a", ".", "b" }));
+        }
+
+        TEST(EquivalenceSifting, PlacingAChainCanTakeADummyBetweenItsMembers) {
+            DummyWanted t;
+            const int before = t.g.crossings(true);
+            t.g.siftFor({ t.a.get() }, 1, 1);
+            EXPECT_EQ(t.fullRow(), (std::vector<std::string>{ "a", ".", "b" }));
+            EXPECT_LT(t.g.crossings(true), before);
+            expectChainsTogether(t.g);
+        }
+
+        TEST(EquivalenceSifting, ARealBoxNeverStopsInsideAChain) {
+            // Q -> a, P -> x, R -> b with P between Q and R: x would cross nothing between
+            // a and b, which it may not take.
+            Anchored t;
+            auto Q = t.parent("Q"), P = t.parent("P"), R = t.parent("R");
+            auto a = t.child("a", Q), b = t.child("b", R), x = t.child("x", P);
+            t.g.computeLayout();
+            t.g.addEquivalence(a, b);
+            t.g.computeLayout();
+            t.rows({ Q, P, R }, { a, b, x });
+            ASSERT_EQ(t.g.crossings(true), 1);
+
+            t.g.sift(5, 1, 1);
+            const auto names = row(t.g, 1);
+            EXPECT_NE(names, (std::vector<std::string>{ "a", "x", "b" }));
+            EXPECT_EQ(t.g.crossings(true), 1);
+            EXPECT_EQ(chainOf(t.g, a), (std::vector<std::string>{ "a", "b" }));
+            expectChainsTogether(t.g);
+        }
+
+        TEST(EquivalenceSifting, TheLightCallsKeepTheChainsOrder) {
+            Crossed t;
+            ASSERT_EQ(t.g.crossings(true), 1);
+            t.g.sift(5, 1, 1);
+            EXPECT_EQ(row(t.g, 1), (std::vector<std::string>{ "a", "b" }));
+        }
+
+        TEST(EquivalenceSifting, TheGlobalSiftingReordersAChain) {
+            Crossed t;
+            sifting_internal::GlobalSifter s(1, 1, t.g.layers(), false, {}, {}, t.g.getEquivalences());
+            s.runSifting(3, false, true);
+            EXPECT_EQ(s.countCrossings(), 0);
+            s.writeBack();
+            EXPECT_EQ(row(t.g, 1), (std::vector<std::string>{ "b", "a" }));
+        }
+
+        TEST(EquivalenceSifting, TheBarycenterSortsAChainAsOneUnitAndThenItsMembers) {
+            Crossed t;
+            sifting_internal::GlobalSifter s(1, 1, t.g.layers(), true, {}, {}, t.g.getEquivalences());
+            EXPECT_EQ(s.countCrossings(), 0);
+            s.writeBack();
+            EXPECT_EQ(row(t.g, 1), (std::vector<std::string>{ "b", "a" }));
+        }
+
+        TEST(EquivalenceSifting, TheBarycenterNeverPutsABoxInsideAChain) {
+            // x's own barycenter falls between b's and a's.
+            Anchored t;
+            auto P = t.parent("P"), R = t.parent("R"), Q = t.parent("Q");
+            auto a = t.child("a", Q), b = t.child("b", P), x = t.child("x", R);
+            t.g.computeLayout();
+            t.g.addEquivalence(a, b);
+            t.g.computeLayout();
+            t.rows({ P, R, Q }, { a, b, x });
+
+            sifting_internal::GlobalSifter s(1, 1, t.g.layers(), true, {}, {}, t.g.getEquivalences());
+            s.writeBack();
+            t.g.syncChains();
+            EXPECT_NE(row(t.g, 1), (std::vector<std::string>{ "b", "x", "a" }));
+            expectChainsTogether(t.g);
+        }
+
+        TEST(EquivalenceSifting, PlacingANodesChainMovesItWholeInItsOrder) {
+            // x crosses both of the chain's connections; the chain moves past it as one.
+            Anchored t;
+            auto X = t.parent("X"), P = t.parent("P"), Q = t.parent("Q");
+            auto a = t.child("a", P), b = t.child("b", Q), x = t.child("x", X);
+            t.g.computeLayout();
+            t.g.addEquivalence(a, b);
+            t.g.computeLayout();
+            t.rows({ X, P, Q }, { a, b, x });
+            const int before = t.g.crossings(true);
+
+            t.g.siftFor({ a.get() }, 1, 1);
+            EXPECT_LE(t.g.crossings(true), before);
+            EXPECT_EQ(chainOf(t.g, a), (std::vector<std::string>{ "a", "b" }));
+            expectChainsTogether(t.g);
+        }
+
+        TEST(EquivalenceSifting, AChainFollowsAMovedParentAsOne) {
+            // A was moved past B; c hangs from A and d, its equivalent, from B.
+            Sifted g("follow");
+            auto A = boxAtEnd(g, "A", 0), B = boxAtEnd(g, "B", 0);
+            auto a1 = childAtEnd(g, "a1", A), c = childAtEnd(g, "c", A);
+            auto d = childAtEnd(g, "d", B), b1 = childAtEnd(g, "b1", B);
+            g.computeLayout();
+            ASSERT_EQ(row(g, 1), (std::vector<std::string>{ "a1", "c", "d", "b1" }));
+            g.addEquivalence(c, d);
+            g.computeLayout();
+            g.layers().at(0).nodes = { B, A };
+            g.layers().at(1).nodes = { a1, c, d, b1 };
+
+            sifting_internal::GlobalSifter s(1, 1, g.layers(), false, { A.get() }, {}, g.getEquivalences());
+            EXPECT_EQ(row(g, 1), (std::vector<std::string>{ "b1", "c", "d", "a1" }));
+        }
+
+        TEST(EquivalenceSifting, TheGlobalMinimizationCountsTheLinesAndKeepsTheChainsInOrder) {
+            DummyInside t;
+            const int crossings = t.g.minimizeCrossings();
+            expectChainsTogether(t.g);
+            EXPECT_EQ(crossings, t.g.crossings(true));
+        }
+
+        TEST(EquivalenceSifting, RandomEditsKeepEveryChainTogetherAndInItsOrder) {
+            auto orders = [](const Graph& g) {
+                std::vector<std::vector<Node*>> all;
+                for (const auto& chain : g.getEquivalences()) {
+                    all.emplace_back();
+                    for (const auto& m : chain.members) all.back().push_back(m.get());
+                }
+                return all;
+            };
+            for (unsigned seed = 1; seed <= 25; ++seed) {
+                std::mt19937 rng(seed);
+                auto pick = [&](const std::vector<NodePtr>& v) { return v[rng() % v.size()]; };
+                Graph g("random");
+                std::vector<NodePtr> boxes;
+                for (int i = 0; i < 4; ++i) boxes.push_back(boxAtEnd(g, ("r" + std::to_string(i)).c_str(), 0));
+                for (int i = 0; i < 12; ++i)
+                    boxes.push_back(childAtEnd(g, ("n" + std::to_string(i)).c_str(), pick(boxes)));
+                g.computeLayout();
+                for (int k = 0; k < 40 && g.getEquivalences().size() < 3; ++k) {
+                    auto a = pick(boxes), b = pick(boxes);
+                    if (!g.canAddEquivalence(a, b)) continue;
+                    g.addEquivalence(a, b);
+                    g.computeLayout();
+                    expectChainsTogether(g);
+                }
+                // Each connection sifts the layers it touches, lightly.
+                for (int k = 0; k < 20; ++k) {
+                    auto a = pick(boxes), b = pick(boxes);
+                    if (!g.canAddConnection(a, b)) continue;
+                    const auto before = orders(g);
+                    g.addConnection(a, b);
+                    g.computeLayout();
+                    expectChainsTogether(g);
+                    EXPECT_EQ(orders(g), before) << "seed " << seed;
+                }
+                g.minimizeCrossings();
+                expectChainsTogether(g);
+                expectLayering(g);
+            }
         }
 
     } // namespace equivalence_tests

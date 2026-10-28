@@ -571,16 +571,26 @@ namespace hypergraph_logic {
 		}
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 
-		const KeepEquivalencesTogether keep_together{ *this };
 		placeUnpositionedNodes(0, last_layer);
-		GlobalSifter sifter(0, last_layer, layers_, true);
-		if (sifter.countCrossings() == 0) { sifter.writeBack(); return 0; }
+		GlobalSifter sifter(0, last_layer, layers_, true, {}, {}, equivalencesToSift());
+		// The barycenter pass and the baseline may reorder a chain's members.
+		auto commitSifting = [&] { sifter.writeBack(); syncEquivalenceOrder(); };
+		if (sifter.countCrossings() == 0) { commitSifting(); return 0; }
 
 		// Strong heuristic baseline
-		sifter.runSifting(kFallbackSiftingRounds, false);
+		sifter.runSifting(kFallbackSiftingRounds, false, true);
 		int fallback_crossings = sifter.countCrossings();
-		if (fallback_crossings == 0) { sifter.writeBack(); return 0; }
-		
+		if (fallback_crossings == 0) { commitSifting(); return 0; }
+
+		// The exact model does not know about equivalences yet: with any, the baseline it is
+		// (the hooks armed for the solve are dropped, as the solve itself would).
+		if (!equivalences_.empty()) {
+			g_active_cancel_token = nullptr;
+			g_ilp_backend_override = ILPBackendOverride::kAuto;
+			commitSifting();
+			return fallback_crossings;
+		}
+
 		int ilp_crossings = sifter.runCrossingILP(kILPTimeBudgetSeconds);
 		if (ilp_crossings >= 0 && ilp_crossings <= fallback_crossings) {
 			sifter.writeBackFromG1Order();

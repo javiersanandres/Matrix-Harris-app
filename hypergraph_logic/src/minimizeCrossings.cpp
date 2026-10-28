@@ -35,7 +35,8 @@ namespace sifting_internal {
 	// ── GlobalSifter: construction ────────────────────────────────────────────────
 
 	GlobalSifter::GlobalSifter(int start_layer, int end_layer,
-		std::map<int, LayerData>& layers, bool order, const std::vector<Node*>& moved, std::unordered_set<Node*> group)
+		std::map<int, LayerData>& layers, bool order, const std::vector<Node*>& moved, std::unordered_set<Node*> group,
+		const std::vector<EquivalenceChain>& equivalences)
 		: start_layer_(start_layer)
 		, end_layer_(end_layer)
 		, layers_(layers)
@@ -43,6 +44,7 @@ namespace sifting_internal {
 	{
 		buildG1();
 		buildBlocks();
+		buildChains(equivalences);
 		buildBlockOrder(moved);
 		if (order) runEfficientBarycenter();
 		sortAdjacencies();
@@ -201,6 +203,162 @@ namespace sifting_internal {
 		S_.pi.resize(S_.blocks.size(), 0);
 	}
 
+	// ── Equivalence chains ────────────────────────────────────────────────────────
+
+	void GlobalSifter::buildChains(const std::vector<EquivalenceChain>& equivalences) {
+		chain_of_.assign(S_.blocks.size(), -1);
+		for (const auto& equivalence : equivalences) {
+			Chain chain;
+			bool here = equivalence.members.size() >= 2;
+			for (const auto& m : equivalence.members) {
+				auto it = S_.node_to_g1.find(m.get());
+				if (it == S_.node_to_g1.end()) { here = false; break; }
+				const G1Node& g1 = S_.g1_nodes[it->second];
+				if (chain.row >= 0 && g1.g1_layer != chain.row) { here = false; break; }
+				chain.row = g1.g1_layer;
+				chain.blocks.push_back(g1.block_id);
+			}
+			if (!here) continue;
+
+			const int c = static_cast<int>(chains_.size());
+			for (int bid : chain.blocks) chain_of_[bid] = c;
+			for (const auto& m : equivalence.members) chain_of_node_[m.get()] = c;
+			chains_at_row_[chain.row].push_back(c);
+			chains_.push_back(std::move(chain));
+		}
+	}
+
+	std::vector<int> GlobalSifter::orderedMembers(int c) const {
+		std::vector<int> members = chains_[c].blocks;
+		std::sort(members.begin(), members.end(), [&](int a, int b) { return S_.pi[a] < S_.pi[b]; });
+		return members;
+	}
+
+	int GlobalSifter::equivalenceCrossings() const {
+		int total = 0;
+		for (const auto& [row, chain_ids] : chains_at_row_) {
+			const auto& ids = S_.g1_layers.at(row);
+			for (int c : chain_ids) {
+				int lo = INT_MAX, hi = -1;
+				for (int i = 0; i < static_cast<int>(ids.size()); ++i) {
+					if (chain_of_[S_.g1_nodes[ids[i]].block_id] != c) continue;
+					lo = std::min(lo, i);
+					hi = std::max(hi, i);
+				}
+				for (int i = lo + 1; i < hi; ++i)
+					if (S_.g1_nodes[ids[i]].original->isDummy()) ++total;
+			}
+		}
+		return total;
+	}
+
+	void GlobalSifter::gatherChains() {
+		if (chains_.empty()) return;
+		orderLayersByBlockOrder();
+
+		for (const auto& [row, chain_ids] : chains_at_row_) {
+			const auto& ids = S_.g1_layers.at(row);
+			auto isReal = [&](int g1) { return !S_.g1_nodes[g1].original->isDummy(); };
+			auto chainAt = [&](int i) { return chain_of_[S_.g1_nodes[ids[i]].block_id]; };
+
+			// Every chain's span in the row, and whether a real node of another is inside it.
+			std::map<int, std::pair<int, int>> spans;
+			for (int i = 0; i < static_cast<int>(ids.size()); ++i) {
+				const int c = chainAt(i);
+				if (c < 0) continue;
+				auto [it, fresh] = spans.try_emplace(c, i, i);
+				if (!fresh) it->second.second = i;
+			}
+			bool broken = false;
+			for (const auto& [c, span] : spans)
+				for (int i = span.first + 1; i < span.second && !broken; ++i)
+					broken = isReal(ids[i]) && chainAt(i) != c;
+			if (!broken) continue;
+
+			// As Hypergraph::keepEquivalencesTogether: every chain is one unit at the middle of
+			// its span, in its order; every other node, a unit at its own position, except
+			// dummies within a span, which stay in the gap they were in.
+			struct Unit {
+				double key;
+				std::vector<int> nodes;
+			};
+			std::vector<Unit> units;
+			std::map<int, size_t> unit_of_chain;
+			std::map<int, std::vector<int>> members;  // chain -> positions of its members
+			for (const auto& [c, span] : spans) {
+				unit_of_chain[c] = units.size();
+				units.push_back({ (span.first + span.second) / 2.0 + 0.25, {} });
+			}
+			std::vector<std::vector<int>> after(ids.size());  // dummies kept right after a member
+			for (int i = 0; i < static_cast<int>(ids.size()); ++i) {
+				const int c = chainAt(i);
+				if (c >= 0) { members[c].push_back(i); continue; }
+				bool kept_in_gap = false;
+				if (!isReal(ids[i])) {
+					for (const auto& [d, span] : spans) {
+						if (i <= span.first || i >= span.second) continue;
+						int last_member = span.first;
+						for (int j = span.first; j < i; ++j)
+							if (chainAt(j) == d) last_member = j;
+						after[last_member].push_back(i);
+						kept_in_gap = true;
+						break;
+					}
+				}
+				if (!kept_in_gap) units.push_back({ static_cast<double>(i), { i } });
+			}
+			for (const auto& [c, positions] : members) {
+				auto& nodes = units[unit_of_chain[c]].nodes;
+				for (size_t k = 0; k < positions.size(); ++k) {
+					nodes.push_back(positions[k]);
+					if (k + 1 < positions.size())
+						nodes.insert(nodes.end(), after[positions[k]].begin(), after[positions[k]].end());
+				}
+			}
+			std::stable_sort(units.begin(), units.end(), [](const Unit& a, const Unit& b) { return a.key < b.key; });
+			std::vector<int> ordered;  // positions in ids, in their new order
+			for (const auto& u : units) ordered.insert(ordered.end(), u.nodes.begin(), u.nodes.end());
+
+			// Into B. The dummies keep their relative order and their places in B; the real
+			// nodes, blocks of their own that only show in this row, go right after the dummy
+			// before them in the new order (those before every dummy, right before the first).
+			std::unordered_set<int> real_blocks;
+			for (int g1 : ids) if (isReal(g1)) real_blocks.insert(S_.g1_nodes[g1].block_id);
+			std::vector<int> leading;
+			std::unordered_map<int, std::vector<int>> trailing;  // dummy's block -> real blocks after it
+			int previous_dummy = -1;
+			for (int i : ordered) {
+				const int bid = S_.g1_nodes[ids[i]].block_id;
+				if (!isReal(ids[i])) previous_dummy = bid;
+				else if (previous_dummy < 0) leading.push_back(bid);
+				else trailing[previous_dummy].push_back(bid);
+			}
+			const bool any_dummy = previous_dummy >= 0;
+			BlockList rebuilt;
+			rebuilt.reserve(B_.size());
+			bool leading_placed = false;
+			auto placeLeading = [&] {
+				rebuilt.insert(rebuilt.end(), leading.begin(), leading.end());
+				leading_placed = true;
+			};
+			for (int bid : B_) {
+				if (real_blocks.count(bid)) {
+					// With no dummy in the row, the real nodes go where the first of them was.
+					if (!any_dummy && !leading_placed) placeLeading();
+					continue;
+				}
+				if (any_dummy && !leading_placed && getNodeAtLevel(S_, S_.blocks[bid], row) >= 0)
+					placeLeading();
+				rebuilt.push_back(bid);
+				if (auto it = trailing.find(bid); it != trailing.end())
+					rebuilt.insert(rebuilt.end(), it->second.begin(), it->second.end());
+			}
+			if (!leading_placed) rebuilt.insert(rebuilt.end(), leading.begin(), leading.end());
+			B_ = std::move(rebuilt);
+			orderLayersByBlockOrder();
+		}
+	}
+
 	// ── Layer and hub sorting ─────────────────────────────────────────────────────
 
 	void GlobalSifter::followMovedNode(
@@ -228,6 +386,19 @@ namespace sifting_internal {
 			}
 			key[i] = weight > 0.0 ? sum / weight : previous_key; // root: stick to the left-hand neighbour
 			previous_key = key[i];
+		}
+
+		// A chain is one unit: it follows if any member does, at its members' average key,
+		// in its own order (ties keep the order the layer had).
+		std::unordered_map<int, std::vector<int>> chain_members;
+		for (int i = 0; i < n; i++)
+			if (auto it = chain_of_node_.find(lower[i].get()); it != chain_of_node_.end())
+				chain_members[it->second].push_back(i);
+		for (const auto& [c, positions] : chain_members) {
+			double sum = 0.0;
+			char follower = 0;
+			for (int i : positions) { sum += key[i]; follower |= follows[i]; }
+			for (int i : positions) { key[i] = sum / static_cast<double>(positions.size()); follows[i] = follower; }
 		}
 
 		std::vector<int> moving, staying;
@@ -338,6 +509,7 @@ namespace sifting_internal {
 
 		// 2. B from the rows.
 		buildBlockListFromRows();
+		gatherChains();
 	}
 
 	// ── buildBlockListFromRows ────────────────────────────────────────────────────
@@ -427,21 +599,49 @@ namespace sifting_internal {
 				const int size = static_cast<int>(slots.size());
 				if (size < 2) continue;
 
+				auto barycenter = [&](const std::vector<int>& up_ids, const std::vector<int>& down_ids, double own_x) {
+					const auto up = mean(up_ids);
+					const auto down = mean(down_ids);
+					if (up && down) return (*up + *down) / 2.0;
+					if (up)         return *up;
+					if (down)       return *down;
+					return own_x; // isolated: don't move it
+				};
 				std::vector<double> bary(size);
 				for (int k = 0; k < size; k++) {
 					const int g1_idx = ids[slots[k]];
-					const auto up = mean(S_.g1_in[g1_idx]);
-					const auto down = mean(S_.g1_out[g1_idx]);
-					if (up && down) bary[k] = (*up + *down) / 2.0;
-					else if (up)    bary[k] = *up;
-					else if (down)  bary[k] = *down;
-					else            bary[k] = x[g1_idx]; // isolated: don't move it
+					bary[k] = barycenter(S_.g1_in[g1_idx], S_.g1_out[g1_idx], x[g1_idx]);
+				}
+
+				// A chain is sorted as one unit, by all its members' neighbours together; its
+				// members then by their own barycenters, within the places it takes.
+				std::vector<double> unit_bary = bary;
+				std::vector<int> unit(size, -1);
+				if (auto chains = chains_at_row_.find(row); chains != chains_at_row_.end()) {
+					for (int c : chains->second) {
+						std::vector<int> members, up_ids, down_ids;
+						double x_sum = 0.0;
+						for (int k = 0; k < size; k++) {
+							const int g1_idx = ids[slots[k]];
+							if (chain_of_[S_.g1_nodes[g1_idx].block_id] != c) continue;
+							members.push_back(k);
+							up_ids.insert(up_ids.end(), S_.g1_in[g1_idx].begin(), S_.g1_in[g1_idx].end());
+							down_ids.insert(down_ids.end(), S_.g1_out[g1_idx].begin(), S_.g1_out[g1_idx].end());
+							x_sum += x[g1_idx];
+						}
+						if (members.empty()) continue;
+						const double b = barycenter(up_ids, down_ids, x_sum / static_cast<double>(members.size()));
+						for (int k : members) { unit_bary[k] = b; unit[k] = c; }
+					}
 				}
 
 				std::vector<int> order(size);
 				std::iota(order.begin(), order.end(), 0);
-				std::stable_sort(order.begin(), order.end(),
-					[&](int a, int b) { return bary[a] < bary[b]; });
+				std::stable_sort(order.begin(), order.end(), [&](int a, int b) {
+					if (unit_bary[a] != unit_bary[b]) return unit_bary[a] < unit_bary[b];
+					if (unit[a] != unit[b]) return unit[a] < unit[b]; // a node before a chain at the same place
+					return unit[a] >= 0 && bary[a] < bary[b];
+				});
 
 				for (int k = 0; k < size; k++) {
 					if (order[k] != k) changed = true;
@@ -460,6 +660,7 @@ namespace sifting_internal {
 
 		// Rows sorted on their own may disagree about a chain; the merge settles it.
 		buildBlockListFromRows();
+		gatherChains();
 		if (countCrossings() > original_crossings) {
 			B_ = original;
 			orderLayersByBlockOrder();
@@ -658,12 +859,17 @@ namespace sifting_internal {
 		for (int p = 1; p < numblocks; p++)
 			if (sharesRow(B_[p]) && wasBefore(B_[p])) ++disorder;
 
+		// At the front, every chain is to A's right.
+		std::vector<ChainWatch> watch = watchChains({ a_id }, false);
+		int blocked = 0;
+
 		int chi = 0, chi_star = 0, p_star = 0, disorder_star = disorder;
 		for (int p = 1; p < numblocks; p++) {
 			chi += siftingSwap(a_id, B_[p]);
+			chi += passMember(watch, B_[p], +1, blocked);
 			if (sharesRow(B_[p])) disorder += wasBefore(B_[p]) ? -1 : 1;
 			std::swap(B_[p - 1], B_[p]);
-			if (chi < chi_star || (chi == chi_star && (stability ? disorder < disorder_star : true))) {
+			if (blocked == 0 && (chi < chi_star || (chi == chi_star && (stability ? disorder < disorder_star : true)))) {
 				chi_star = chi; p_star = p; disorder_star = disorder;
 			}
 		}
@@ -676,59 +882,237 @@ namespace sifting_internal {
 		return chi_star;
 	}
 
+	// ── Chains while sifting ──────────────────────────────────────────────────────
+
+	std::vector<GlobalSifter::ChainWatch> GlobalSifter::watchChains(const std::vector<int>& moving, bool members_to_the_left) const {
+		std::vector<ChainWatch> watch;
+		if (chains_.empty()) return watch;
+		const std::unordered_set<int> moving_set(moving.begin(), moving.end());
+		for (int bid : moving) {
+			for (int g1 : S_.blocks[bid].g1_nodes) {
+				auto chains = chains_at_row_.find(S_.g1_nodes[g1].g1_layer);
+				if (chains == chains_at_row_.end()) continue;
+				for (int c : chains->second) {
+					if (moving_set.count(chains_[c].blocks.front())) continue; // its own chain
+					auto w = std::find_if(watch.begin(), watch.end(), [&](const ChainWatch& x) { return x.chain == c; });
+					if (w == watch.end()) {
+						const int left = members_to_the_left ? static_cast<int>(chains_[c].blocks.size()) : 0;
+						watch.push_back({ c, 0, 0, left });
+						w = watch.end() - 1;
+					}
+					(S_.g1_nodes[g1].original->isDummy() ? w->dummies : w->reals)++;
+				}
+			}
+		}
+		return watch;
+	}
+
+	int GlobalSifter::passMember(std::vector<ChainWatch>& watch, int member, int direction, int& blocked) const {
+		const int c = chainOf(member);
+		if (c < 0) return 0;
+		auto w = std::find_if(watch.begin(), watch.end(), [&](const ChainWatch& x) { return x.chain == c; });
+		if (w == watch.end()) return 0;
+		const int size = static_cast<int>(chains_[c].blocks.size());
+		const int was_inside = w->left > 0 && w->left < size;
+		w->left += direction;
+		const int inside = (w->left > 0 && w->left < size) - was_inside;
+		blocked += w->reals * inside;
+		return w->dummies * inside;
+	}
+
+	bool GlobalSifter::dummyFitsBetween(int left, int right, int x) {
+		const int c = chainOf(left);
+		if (c < 0 || chainOf(right) != c) return false;
+		const int g1 = getNodeAtLevel(S_, S_.blocks[x], chains_[c].row);
+		return g1 >= 0 && S_.g1_nodes[g1].original && S_.g1_nodes[g1].original->isDummy();
+	}
+
+	int GlobalSifter::crossingsAround(int row) {
+		auto sorted = [&](int r) -> const std::vector<int>* {
+			auto it = S_.g1_layers.find(r);
+			if (it == S_.g1_layers.end()) return nullptr;
+			std::sort(it->second.begin(), it->second.end(), [&](int a, int b) {
+				return S_.pi[S_.g1_nodes[a].block_id] < S_.pi[S_.g1_nodes[b].block_id];
+			});
+			return &it->second;
+		};
+		const auto* above = sorted(row - 1);
+		const auto* here = sorted(row);
+		const auto* below = sorted(row + 1);
+		int total = 0;
+		if (above && here) total += countBilayerCrossings(*above, *here, S_.g1_out);
+		if (here && below) total += countBilayerCrossings(*here, *below, S_.g1_out);
+		return total;
+	}
+
+	// ── chainStep ─────────────────────────────────────────────────────────────────
+
+	void GlobalSifter::chainStep(int c, bool stability, bool reorder) {
+		if (initial_pi_.size() != S_.pi.size()) initial_pi_ = S_.pi;
+		const BlockList before_B = B_;
+		const int before = countCrossings(); // also sets pi from B
+
+		// The members to the front, side by side and in their order.
+		const std::vector<int> members = orderedMembers(c);
+		const int k = static_cast<int>(members.size());
+		const int numblocks = static_cast<int>(B_.size());
+		const std::unordered_set<int> member_set(members.begin(), members.end());
+		std::stable_partition(B_.begin(), B_.end(), [&](int bid) { return member_set.count(bid) > 0; });
+		sortAdjacencies();
+
+		// disorder, as in siftingStep, over every member: blocks of the chain's row on the
+		// other side of a member than they were when sifting started.
+		const int row = chains_[c].row;
+		auto sharesRow = [&](int bid) { return getNodeAtLevel(S_, S_.blocks[bid], row) >= 0; };
+		auto wasBefore = [&](int bid, int m) { return initial_pi_[bid] < initial_pi_[m]; };
+		int disorder = 0;
+		for (int p = k; p < numblocks; p++)
+			if (sharesRow(B_[p]))
+				for (int m : members) disorder += wasBefore(B_[p], m);
+
+		std::vector<ChainWatch> watch = watchChains(members, false);
+		int blocked = 0;
+		// split_star: how many members stay left of the block before p_star, a dummy of the
+		// chain's row stopped between them (0: none).
+		int chi = 0, chi_star = 0, p_star = 0, split_star = 0, disorder_star = disorder;
+		auto better = [&](int at_chi) {
+			return blocked == 0 && (at_chi < chi_star || (at_chi == chi_star && (stability ? disorder < disorder_star : true)));
+		};
+		for (int p = k; p < numblocks; p++) {
+			// The next block passes the whole chain, right to left. A dummy of the chain's
+			// row may stop between two members, crossing their line.
+			const int x = B_[p];
+			const bool in_row = sharesRow(x);
+			for (int j = p - 1; j >= p - k; j--) {
+				chi += siftingSwap(B_[j], x);
+				if (in_row) disorder += wasBefore(x, B_[j]) ? -1 : 1;
+				std::swap(B_[j], B_[j + 1]);
+				if (j > 0 && dummyFitsBetween(B_[j - 1], B_[j + 1], x) && better(chi + 1)) {
+					chi_star = chi + 1; p_star = p - k + 1; split_star = j - (p - k); disorder_star = disorder;
+				}
+			}
+			chi += passMember(watch, x, +1, blocked);
+			if (better(chi)) {
+				chi_star = chi; p_star = p - k + 1; split_star = 0; disorder_star = disorder;
+			}
+		}
+		// The chain is now at the back; to p_star, and the block before it into its gap.
+		std::rotate(B_.begin() + p_star, B_.end() - k, B_.end());
+		if (split_star > 0)
+			std::rotate(B_.begin() + p_star - 1, B_.begin() + p_star, B_.begin() + p_star + split_star);
+		for (int i = 0; i < numblocks; i++) S_.pi[B_[i]] = i;
+
+		if (reorder) reorderMembers(c);
+
+		const int after = countCrossings();
+		if (after > before || (stability && after == before)) {
+			B_ = before_B;
+			orderLayersByBlockOrder();
+		}
+	}
+
+	void GlobalSifter::reorderMembers(int c) {
+		std::vector<int> order = orderedMembers(c);
+		std::vector<int> places;
+		for (int m : order) places.push_back(S_.pi[m]);
+		auto apply = [&](const std::vector<int>& o) {
+			for (size_t i = 0; i < o.size(); i++) { B_[places[i]] = o[i]; S_.pi[o[i]] = places[i]; }
+		};
+
+		const int row = chains_[c].row;
+		int best = crossingsAround(row);
+		const std::vector<int> members = order;
+		for (int m : members) {
+			std::vector<int> rest = order;
+			rest.erase(std::find(rest.begin(), rest.end(), m));
+			std::vector<int> best_order = order;
+			for (size_t t = 0; t <= rest.size(); t++) {
+				std::vector<int> candidate = rest;
+				candidate.insert(candidate.begin() + static_cast<std::ptrdiff_t>(t), m);
+				if (candidate == order) continue;
+				apply(candidate);
+				const int crossings = crossingsAround(row);
+				if (crossings < best) { best = crossings; best_order = candidate; }
+			}
+			order = best_order;
+			apply(order);
+		}
+	}
+
 	// ── runSifting ────────────────────────────────────────────────────────────────
 
-	void GlobalSifter::runSifting(int sifting_rounds, bool stability) {
+	void GlobalSifter::runSifting(int sifting_rounds, bool stability, bool reorder_chains) {
 		for (int round = 0; round < sifting_rounds; round++) {
 			BlockList snapshot = B_;
-			for (int bid : snapshot)
-				if (S_.blocks[bid].movable) siftingStep(bid, stability);
+			std::vector<char> chain_done(chains_.size(), 0);
+			for (int bid : snapshot) {
+				if (!S_.blocks[bid].movable) continue;
+				const int c = chainOf(bid);
+				if (c < 0) siftingStep(bid, stability);
+				else if (!chain_done[c]) { chain_done[c] = 1; chainStep(c, stability, reorder_chains); }
+			}
 		}
 	}
 
 	// ── siftNodesSearch ──────────────────────────────────────────────────────────
 	//
-	// Recursive helper for siftNodes. Places the movable block at B_[movable_start]
-	// by sweeping it left through consecutive fixed blocks, stopping before another
-	// movable block. At each position it recurses to place the next movable block.
+	// Recursive helper for siftNodes. Places movable unit u (a block, or a chain's
+	// members side by side), which starts at B_[starts[u]], by sweeping it left through
+	// consecutive fixed blocks, stopping before another movable unit. At each position
+	// it recurses to place the next unit, and also where a fixed block with a dummy in a
+	// chain's row stops between two of its members as it passes (one more crossing, with
+	// their line). A position where some unit has a real node inside a chain (blocked)
+	// is not taken.
 	// S_.blocks and S_.pi are snapshotted before each recursive call and restored
 	// afterwards, giving free backtracking.
 
 	void GlobalSifter::siftNodesSearch(
-		int movable_start, int nb, int last_block,
+		const std::vector<std::vector<int>>& units, const std::vector<int>& starts, size_t u,
 		const std::unordered_set<int>& movable_set,
-		int chi, int& best_chi, BlockList& best_B)
+		int chi, int blocked, int& best_chi, BlockList& best_B)
 	{
-		int pos = movable_start;
-		while (pos < nb && !movable_set.count(B_[pos]))
-			pos++;
+		const int k = static_cast<int>(units[u].size());
+		int pos = starts[u];
+		// Every fixed block is still to the unit's left.
+		std::vector<ChainWatch> watch = watchChains(units[u], true);
+		int unit_blocked = 0;
 
-		int a_id = B_[pos];
-
-		while (true) {
-			if (a_id == last_block) {
-				if (chi < best_chi) {
-					best_chi = chi;
+		// The unit stops here, at_chi: the last unit records it, any other places the next.
+		auto visit = [&](int at_chi) {
+			if (u + 1 == units.size()) {
+				if (blocked + unit_blocked == 0 && at_chi < best_chi) {
+					best_chi = at_chi;
 					best_B = B_;
 				}
+				return;
 			}
-			else {
-				auto saved_blocks = S_.blocks;
-				auto saved_pi = S_.pi;
-				auto saved_B = B_;
+			auto saved_blocks = S_.blocks;
+			auto saved_pi = S_.pi;
+			auto saved_B = B_;
 
-				siftNodesSearch(movable_start + 1, nb, last_block, movable_set, chi, best_chi, best_B);
+			siftNodesSearch(units, starts, u + 1, movable_set, at_chi, blocked + unit_blocked, best_chi, best_B);
 
-				S_.blocks = std::move(saved_blocks);
-				S_.pi = std::move(saved_pi);
-				B_ = std::move(saved_B);
-			}
+			S_.blocks = std::move(saved_blocks);
+			S_.pi = std::move(saved_pi);
+			B_ = std::move(saved_B);
+		};
+
+		while (true) {
+			visit(chi);
 
 			if (pos == 0) break;
-			if (movable_set.count(B_[pos - 1])) break;
+			const int fixed = B_[pos - 1];
+			if (movable_set.count(fixed)) break;
 
-			chi += siftingSwap(B_[pos - 1], a_id);
-			std::swap(B_[pos - 1], B_[pos]);
+			// The fixed block passes the unit, left to right. A dummy of a chain's row may
+			// stop between two of its members, crossing their line.
+			for (int j = pos - 1; j < pos - 1 + k; j++) {
+				chi += siftingSwap(B_[j], B_[j + 1]);
+				std::swap(B_[j], B_[j + 1]);
+				if (j + 2 < static_cast<int>(B_.size()) && dummyFitsBetween(B_[j], B_[j + 2], fixed))
+					visit(chi + 1);
+			}
+			chi += passMember(watch, fixed, -1, unit_blocked);
 			pos--;
 		}
 	}
@@ -764,10 +1148,16 @@ namespace sifting_internal {
 			auto it = S_.node_to_g1.find(node);
 			if (it == S_.node_to_g1.end()) continue;
 			int block_id = S_.g1_nodes[it->second].block_id;
-			if (S_.blocks[block_id].movable)
+			if (!S_.blocks[block_id].movable) continue;
+			// A chain moves whole.
+			if (const int c = chainOf(block_id); c >= 0)
+				movable_set.insert(chains_[c].blocks.begin(), chains_[c].blocks.end());
+			else
 				movable_set.insert(block_id);
 		}
 		if (movable_set.empty()) return;
+		const BlockList original_B = B_;
+		const int original_crossings = countCrossings(); // also sets pi from B
 
 		// Promote hub blocks whose every source and target are already movable.
 		for (const auto& [g1_layer, layer_nodes] : S_.g1_layers) {
@@ -792,61 +1182,97 @@ namespace sifting_internal {
 		// blocks fill the tail in their current relative order.
 		std::stable_partition(B_.begin(), B_.end(),
 			[&](int bid) { return !movable_set.count(bid); });
+
+		// The units: every movable block on its own, but a chain's members side by side,
+		// in their order, where its first member was.
+		int nb = static_cast<int>(B_.size());
+		int mb = static_cast<int>(movable_set.size());
+		std::vector<std::vector<int>> units;
+		{
+			std::vector<char> chain_placed(chains_.size(), 0);
+			for (int p = nb - mb; p < nb; p++) {
+				const int c = chainOf(B_[p]);
+				if (c < 0) { units.push_back({ B_[p] }); continue; }
+				if (chain_placed[c]) continue;
+				chain_placed[c] = 1;
+				units.push_back(orderedMembers(c));
+			}
+			int p = nb - mb;
+			for (const auto& unit : units)
+				for (int bid : unit) B_[p++] = bid;
+		}
+		std::vector<int> starts;
+		{
+			int p = nb - mb;
+			for (const auto& unit : units) { starts.push_back(p); p += static_cast<int>(unit.size()); }
+		}
 		sortAdjacencies();
 
 		// ── Recursive exhaustive search ───────────────────────────────────────────
 		//
-		// movable: the tail of B_ that still needs to be placed, given as the index
-		//          of the first movable block in B_ (they occupy [movable_start, end)).
+		// units:   the movable units, at the tail of B_, each starting at starts[u].
 		// chi:     cumulative crossing delta from the initial right-biased position.
 		// best_chi / best_B: tracking the global minimum found so far.
 
-		int nb = static_cast<int>(B_.size());
-		int mb = static_cast<int>(movable_set.size());
-
-		// Guard: C(nb, mb) can grow extremely fast. If the number of positions to
-		// explore exceeds the threshold we skip the exhaustive search entirely and
-		// run the regular global sifting algorithm instead, at the cost of altering
-		// the user's mental map.
+		// Guard: C(nf + U, U) (nf fixed blocks, U units) can grow extremely fast. If the
+		// number of positions to explore exceeds the threshold we skip the exhaustive search
+		// entirely and run the regular global sifting algorithm instead, at the cost of
+		// altering the user's mental map.
+		const int nf = nb - mb;
+		const int nu = static_cast<int>(units.size());
 		double combinations = 1.0;
-		for (int i = 0; i < mb; i++) {
-			combinations *= static_cast<double>(nb - i);
+		for (int i = 0; i < nu; i++) {
+			combinations *= static_cast<double>(nf + nu - i);
 			combinations /= static_cast<double>(i + 1);
 			if (combinations > 1e6) {
 				// Treat all movable blocks as one composite block and sweep it left as a
 				// unit. Each step moves the composite one position left via mb consecutive
-				// siftingSwaps. Cost: O(nb * mb) instead of O(C(nb, mb)).
+				// siftingSwaps. Cost: O(nb * mb) instead of O(C(nb, mb)). A dummy of a
+				// chain's row may stop between two of its members, crossing their line.
 				int best_chi = 0;
 				BlockList best_B = B_;
 				int chi = 0;
+				std::vector<int> composite(B_.begin() + nf, B_.end());
+				std::vector<ChainWatch> watch = watchChains(composite, true);
+				int blocked = 0;
 
-				for (int k = nb - mb; k > 0; k--) {
+				for (int k = nf; k > 0; k--) {
 					// Move the composite block one step left: swap each of its mb elements
 					// with the fixed block that just entered on the right.
+					const int fixed = B_[k - 1];
 					for (int j = k; j < mb + k; j++) {
 						chi += siftingSwap(B_[j - 1], B_[j]);
 						std::swap(B_[j - 1], B_[j]);
+						if (blocked == 0 && j + 1 < nb && chi + 1 < best_chi && dummyFitsBetween(B_[j - 1], B_[j + 1], fixed)) {
+							best_chi = chi + 1;
+							best_B = B_;
+						}
 					}
+					chi += passMember(watch, fixed, -1, blocked);
 
-					if (chi < best_chi) {
+					if (blocked == 0 && chi < best_chi) {
 						best_chi = chi;
 						best_B = B_;
 					}
 				}
 
 				B_ = std::move(best_B);
-				sortAdjacencies();
-				return;
+				break;
 			}
 		}
+		if (combinations <= 1e6) {
+			int best_chi = 0;
+			BlockList best_B = B_;
 
-		int best_chi = 0;
-		BlockList best_B = B_;
+			siftNodesSearch(units, starts, 0, movable_set, 0, 0, best_chi, best_B);
 
-		siftNodesSearch(nb - mb, nb, B_.back(), movable_set, 0, best_chi, best_B);
+			// Apply the best ordering found.
+			B_ = std::move(best_B);
+		}
 
-		// Apply the best ordering found.
-		B_ = std::move(best_B);
+		// Chains are moved with at most one dummy between their members: never worse than
+		// the order we were given.
+		if (!chains_.empty() && countCrossings() > original_crossings) B_ = original_B;
 		sortAdjacencies();
 	}
 
@@ -941,7 +1367,7 @@ namespace sifting_internal {
 		auto prev = it++;
 		for (; it != S_.g1_layers.end(); ++prev, ++it)
 			total += countBilayerCrossings(prev->second, it->second, S_.g1_out);
-		return total;
+		return total + equivalenceCrossings();
 	}
 
 } // namespace sifting_internal
@@ -1045,7 +1471,6 @@ namespace hypergraph_logic {
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 		if (end_layer < 0 || end_layer > last_layer) end_layer = last_layer;
 		if (start_layer > end_layer) return 0;
-		const KeepEquivalencesTogether keep_together{ *this };
 		placeUnpositionedNodes(start_layer, end_layer);
 
 		std::vector<Node*> seeds = affected;
@@ -1055,7 +1480,7 @@ namespace hypergraph_logic {
 
 		// No barycenter seeding here: it would reorder every layer, and inner calls are
 		// meant to keep the current orders as much as possible.
-		GlobalSifter sifter(start_layer, end_layer, layers_, false, moved, std::move(group));
+		GlobalSifter sifter(start_layer, end_layer, layers_, false, moved, std::move(group), equivalencesToSift());
 		// No need to sift if we are already optimal, but the seed order may differ from
 		// the layers (the moved node's descendants), so it is still written back.
 		if (sifter.countCrossings() == 0) { sifter.writeBack(); return 0; }
@@ -1079,11 +1504,10 @@ namespace hypergraph_logic {
 	{
 		if (getLayers().empty() || nodes.empty()) return 0;
 
-		const KeepEquivalencesTogether keep_together{ *this };
 		placeUnpositionedNodes(start_layer, end_layer);
 		std::unordered_set<Node*> group = crossingGroup(nodes, std::max(0, start_layer - 1), end_layer + 1);
 		if (group.empty()) return 0;
-		GlobalSifter sifter(start_layer, end_layer, layers_, false, {}, std::move(group));
+		GlobalSifter sifter(start_layer, end_layer, layers_, false, {}, std::move(group), equivalencesToSift());
 		if (sifter.countCrossings() == 0) return 0; // No need to sift if we are already optimal.
 		sifter.siftNodes(nodes);
 		sifter.writeBack();

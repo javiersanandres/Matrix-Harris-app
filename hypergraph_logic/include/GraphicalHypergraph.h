@@ -497,7 +497,8 @@ namespace hypergraph_logic {
 		//      leftmost parent is further right. A root with no guess stays right after
 		//      its left-hand neighbour.
 		// Guesses made on a layer feed the ones below, so a chain of new dummies is
-		// laid along one straight line.
+		// laid along one straight line. A real node placed inside an equivalence chain
+		// goes to its nearer end (keepEquivalencesTogether).
 		//
 		void placeUnpositionedNodes(int first_layer, int last_layer) override;
 

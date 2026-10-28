@@ -604,6 +604,7 @@ namespace hypergraph_logic {
 			}
 
 			nodes = std::move(order);
+			keepEquivalencesTogether(layer); // a node placed inside a chain goes to its nearer end
 		}
 	}
 

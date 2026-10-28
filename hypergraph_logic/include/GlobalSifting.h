@@ -106,8 +106,11 @@ namespace sifting_internal {
 		// connected components, see Hypergraph::crossingGroup): G1 holds only these nodes
 		// and their connections, and writeBack puts them back into the places they had in
 		// each layer, so every other node stays exactly where it was.
+		// equivalences: the chains whose rule every order keeps (see "Equivalence chains"
+		// below). Those not wholly in one row of G1 are left out.
 		GlobalSifter(int start_layer, int end_layer, std::map<int, LayerData>& layers, bool order = true,
-			const std::vector<Node*>& moved = {}, std::unordered_set<Node*> group = {});
+			const std::vector<Node*>& moved = {}, std::unordered_set<Node*> group = {},
+			const std::vector<EquivalenceChain>& equivalences = {});
 #ifdef GS_TEST
 		// No-op constructor for unit tests. Skips the full pipeline so tests can
 		// set S_ and B_ directly. layers_ is bound to a local dummy that is never
@@ -152,6 +155,8 @@ namespace sifting_internal {
 		// minimizeCrossings does not take the subgraph back to where it was, nor reshuffles
 		// parts of the drawing the move has nothing to do with.
 		// Hub rows are always sorted with sortHubs from the rows around them.
+		// A chain stays together through all of it (followMovedNode moves it as one, and
+		// gatherChains repairs what contradicting rows may break).
 		void buildBlockOrder(const std::vector<Node*>& moved = {});
 
 		// ── buildBlockListFromRows ───────────────────────────────────────────────────────────────────
@@ -170,12 +175,18 @@ namespace sifting_internal {
 		// passing through included) is sorted by the average position of its
 		// neighbours, positions being normalized by row size so rows of different
 		// sizes are comparable. Nodes of blocks that are not movable keep their
-		// place. B is then rebuilt from the rows (buildBlockListFromRows), and the
-		// result is only kept if it has fewer crossings than the order it started from.
+		// place. An equivalence chain is sorted as one unit, by the average position of
+		// all its members' neighbours, and its members then by their own barycenters
+		// within the places it takes. B is then rebuilt from the rows
+		// (buildBlockListFromRows, gatherChains), and the result is only kept if it has
+		// fewer crossings than the order it started from.
 		void runEfficientBarycenter(int max_iterations = 100);
 
 		// Run up to sifting_rounds rounds of the global sifting sweep (movable blocks only).
-		void runSifting(int sifting_rounds, bool stability = true);
+		// A chain is sifted as one unit (chainStep), its members reordered among
+		// themselves only with reorder_chains: their order is something the user sets by
+		// hand, so only the global minimization asks for it.
+		void runSifting(int sifting_rounds, bool stability = true, bool reorder_chains = false);
 
 		// Solve an ILP to minimize crossings.
 		int runCrossingILP(double time_budget_seconds);
@@ -189,7 +200,8 @@ namespace sifting_internal {
 		// for every real (even-keyed) row.
 		void writeBackFromG1Order();
 
-		// Count and return the total number of crossings in the current ordering.
+		// Count and return the total number of crossings in the current ordering, the
+		// crossings of the equivalence lines with the dummies between their boxes included.
 		int countCrossings();
 
 		// Sift only the blocks associated with the given set of nodes to find the
@@ -198,6 +210,7 @@ namespace sifting_internal {
 		// non-targeted blocks to find its global optimum within the current ordering.
 		// This is useful for edge splitting operations, where we want to find the best position
 		// for dummy nodes while preserving the user's mental map as much as possible.
+		// A node in a chain brings the whole chain, which moves as one unit in its own order.
 		void siftNodes(const std::vector<Node*>& nodes);
 
 	protected:
@@ -208,6 +221,78 @@ namespace sifting_internal {
 		std::vector<int> initial_pi_;       // each block's position when sifting started
 
 		bool inGroup(Node* n) const { return group_.empty() || group_.count(n) > 0; }
+
+		// ── Equivalence chains ────────────────────────────────────────────────────
+		//
+		// The members of a chain are real nodes, so each is a block of its own, and all lie
+		// in one row. The rule (only dummies between them) only concerns the blocks with a
+		// node in that row: a block with a real node there is never left inside a chain
+		// (between its first and last member), and one with a dummy there may be, at one
+		// crossing (with the chain's line) for every chain it is inside.
+		//
+		// Since a real block only shows in its own row, moving it in B changes nothing but
+		// that row's order: chains are kept together, and repaired, at no other cost.
+		struct Chain {
+			int row = -1;
+			std::vector<int> blocks; // its members' blocks
+		};
+		std::vector<Chain> chains_;
+		std::vector<int> chain_of_;                        // block -> chain, -1 for none
+		std::unordered_map<Node*, int> chain_of_node_;     // member -> chain
+		std::map<int, std::vector<int>> chains_at_row_;    // row -> chains
+
+		int chainOf(int bid) const { return bid < static_cast<int>(chain_of_.size()) ? chain_of_[bid] : -1; }
+		void buildChains(const std::vector<EquivalenceChain>& equivalences);
+
+		// A chain's members, left to right in B.
+		std::vector<int> orderedMembers(int c) const;
+
+		// The crossings of every chain's line with the dummies between its members.
+		// The rows must be in B's order (orderLayersByBlockOrder).
+		int equivalenceCrossings() const;
+
+		// Puts back together the chains that are not (only after B is rebuilt from rows
+		// that contradict each other): a real node inside a chain goes to its nearer end,
+		// as Hypergraph::keepEquivalencesTogether does in a layer.
+		void gatherChains();
+
+		// The chains that some blocks may end up inside while they move past their members
+		// (the chains of the rows those blocks have nodes in, not their own), with how many
+		// of those blocks have a dummy or a real node in its row and how many of its members
+		// are to their left. passMember updates a chain when a member passes the moving
+		// blocks (direction +1: to their left, -1: to their right), returning the change in
+		// crossings and adding the real nodes it leaves inside, or takes out, to blocked.
+		struct ChainWatch {
+			int chain;
+			int dummies = 0;
+			int reals = 0;
+			int left = 0;
+		};
+		std::vector<ChainWatch> watchChains(const std::vector<int>& moving, bool members_to_the_left) const;
+		int passMember(std::vector<ChainWatch>& watch, int member, int direction, int& blocked) const;
+
+		// Whether x, passing a chain's members, may stop between left and right: they are
+		// members of one chain and x has a dummy in its row (which then crosses its line).
+		bool dummyFitsBetween(int left, int right, int x);
+
+		// ── chainStep ─────────────────────────────────────────────────────────────
+		//
+		// The sifting step of a chain as a whole: its members, side by side and in their
+		// order, go to the front of B and sweep right as one block, never stopping inside
+		// another chain of their row. A dummy of their row may also stop between two of
+		// them as it passes, at one crossing with their line. The best position is kept as
+		// in siftingStep. With reorder, reorderMembers follows. The members leave behind
+		// the dummies between them, and take at most one back, so the order sifting started
+		// from may not be reachable: if the result is worse (or, with stability, no
+		// better), B goes back to what it was.
+		void chainStep(int c, bool stability, bool reorder);
+
+		// Each member in turn takes the place among the chain's places (the same set of
+		// positions in B, so the dummies between them stay) with the fewest crossings.
+		void reorderMembers(int c);
+
+		// The crossings between row and the rows right above and below it, in B's order.
+		int crossingsAround(int row);
 
 		// The nodes of the group in data, in their order, and the places they occupy there.
 		std::vector<NodePtr> groupRow(const LayerData& data, std::vector<int>* slots = nullptr) const;
@@ -324,6 +409,8 @@ namespace sifting_internal {
 		// (initial_pi_), counting only blocks that share a row with A (the others' order
 		// relative to A never shows). So a block stays where it is, or goes back to where
 		// it was, unless moving it actually removes crossings: the user's mental map.
+		// A never stops inside a chain of a row where it has a real node; inside one where it
+		// has a dummy, it crosses the chain's line (see ChainWatch).
 		int siftingStep(int a_id, bool stability = true);
 
 		// ── Crossing count ────────────────────────────────────────────────────────
@@ -340,9 +427,9 @@ namespace sifting_internal {
 
 		// Recursive helper for siftNodes — see minimizeCrossings.cpp for details.
 		void siftNodesSearch(
-			int movable_start, int nb, int last_block,
+			const std::vector<std::vector<int>>& units, const std::vector<int>& starts, size_t u,
 			const std::unordered_set<int>& movable_set,
-			int chi, int& best_chi, BlockList& best_B);
+			int chi, int blocked, int& best_chi, BlockList& best_B);
 	};
 
 } // namespace sifting_internal
