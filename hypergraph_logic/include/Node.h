@@ -10,6 +10,7 @@
 
 namespace hypergraph_logic {
 	class Node;
+	struct BoxSizes; // LayoutTypes.h
 
 	using NodePtr = std::shared_ptr<Node>;
 	using WeakNodePtr = std::weak_ptr<Node>;
@@ -81,14 +82,15 @@ namespace hypergraph_logic {
 		bool isFire() const noexcept { return fire != FireState::None; }
 		bool hasAshes() const noexcept { return fire == FireState::FireWithAshes; }
 
-		// Default size of a box of the given shape. Circles and rhombi report the side of the
-		// square they are inscribed in.
-		static double defaultWidth(NodeShape shape) noexcept;
-		static double defaultHeight(NodeShape shape) noexcept;
+		// Default size of a box of the given shape, as in `sizes` (its graph's, see BoxSizes in
+		// LayoutTypes.h), or the built-in one without them. Circles and rhombi report the side of
+		// the square they are inscribed in.
+		static double defaultWidth(NodeShape shape, const BoxSizes* sizes = nullptr) noexcept;
+		static double defaultHeight(NodeShape shape, const BoxSizes* sizes = nullptr) noexcept;
 
 		// The size the box is drawn with: its own size if it has one, else its shape's default.
-		double boxWidth() const noexcept;
-		double boxHeight() const noexcept;
+		double boxWidth(const BoxSizes* sizes = nullptr) const noexcept;
+		double boxHeight(const BoxSizes* sizes = nullptr) const noexcept;
 
 		// Gives the box the colours its fire state imposes: black with white text for Fire,
 		// white with black text for FireWithAshes. Without a fire, nothing changes.
@@ -214,11 +216,20 @@ namespace hypergraph_logic {
 		// ── getWidth / getHeight ──────────────────────────────────────────────────────────────────────
 		//
 		// Returns the width/height of the box this node occupies in the drawing: its own size if
-		// the user gave it one, else the default of its shape (NodeAttributes::boxWidth /
-		// boxHeight). Dummy nodes report DUMMY_NODE_WIDTH / DUMMY_NODE_HEIGHT.
+		// the user gave it one, else the default of its shape in its box sizes (NodeAttributes::
+		// boxWidth / boxHeight). Dummy nodes report DUMMY_NODE_WIDTH / DUMMY_NODE_HEIGHT.
 		//
 		double getWidth() const noexcept;
 		double getHeight() const noexcept;
+
+		// ── Box sizes ─────────────────────────────────────────────────────────────────────────────────
+		//
+		// The default size of each shape this node follows when it has no size of its own. Its graph
+		// hands it its own (see GraphicalHypergraph::setLayoutSettings); without any, the built-in
+		// ones of LayoutTypes.h apply. Shared, so a whole graph's boxes follow one table.
+		//
+		void setBoxSizes(std::shared_ptr<const BoxSizes> sizes) noexcept { box_sizes_ = std::move(sizes); }
+		const BoxSizes* getBoxSizes() const noexcept { return box_sizes_.get(); }
 
 		// ── getBoundaryHalfHeight ─────────────────────────────────────────────────────────────────────
 		//
@@ -368,6 +379,7 @@ namespace hypergraph_logic {
 		void setDesiredLayer(int desired_layer) noexcept;
 
 		std::optional<NodeAttributes> attributes_; // std::nullopt for dummy nodes
+		std::shared_ptr<const BoxSizes> box_sizes_; // see setBoxSizes
 		int layer_;  // Layer assignment by hypergraph
 		int desired_layer_;  // User-requested layer override, or -1. Managed by Hypergraph only.
 		std::vector<WeakNodePtr> parents_;

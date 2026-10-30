@@ -13,6 +13,7 @@ target_sources(editors
         HypergraphEditor.cpp
         JointHypergraphEditor.cpp
         Project.cpp
+        ProjectSettings.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
@@ -21,6 +22,7 @@ target_sources(editors
             ../include/HypergraphEditor.h
             ../include/JointHypergraphEditor.h
             ../include/Project.h
+            ../include/ProjectSettings.h
 )
 
 target_include_directories(editors

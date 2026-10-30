@@ -478,6 +478,170 @@ namespace app_logic {
                 fs::remove(tmp);
             }
 
+            // ── Settings: defaults for new boxes, and every diagram's layout ──
+
+            static NodePtr boxNamed(const GraphicalHypergraph& g, const std::string& name) {
+                for (const auto& n : g.getAllNodes())
+                    if (!n->isDummy() && n->getName() == name) return n;
+                ADD_FAILURE() << "no box named " << name;
+                return nullptr;
+            }
+
+            // A on the default size; B with a width of its own; R a rhombus on its default size.
+            static void threeBoxes(Project& p) {
+                auto& ed = p.getEditor(0);
+                ed.createNode(p.newNodeAttributes("A"), 0, -1, nullptr);
+                NodeAttributes b = p.newNodeAttributes("B");
+                b.width = 120.0;
+                ed.createNode(b, 0, -1, nullptr);
+                NodeAttributes r = p.newNodeAttributes("R");
+                r.shape = NodeShape::Rhombus;
+                ed.createNode(r, 0, -1, nullptr);
+            }
+
+            TEST(ProjectSettings, DefaultsForNewBoxesLeaveExistingOnesAlone) {
+                Project p("P");
+                threeBoxes(p);
+                const bool could_undo = p.getEditor(0).canUndo();
+
+                ProjectSettings s = p.getSettings();
+                s.colour = Color{ 0, 32, 96, 255 };
+                s.font_colour = Color{ 255, 255, 255, 255 };
+                s.font_size = 14;
+                s.shape = NodeShape::Circle;
+                p.setSettings(s);
+
+                const NodePtr A = boxNamed(p.getEditor(0).getGraph(), "A");
+                EXPECT_EQ(A->getColour(), NodeAttributes().colour);
+                EXPECT_EQ(A->getFontColour(), NodeAttributes().font_colour);
+                EXPECT_EQ(A->getFontSize(), NodeAttributes::DEFAULT_FONT_SIZE);
+                EXPECT_EQ(A->getShape(), NodeShape::Rectangle);
+                const NodeAttributes c = p.newNodeAttributes("C");
+                EXPECT_EQ(c.colour, s.colour);
+                EXPECT_EQ(c.font_colour, s.font_colour);
+                EXPECT_EQ(c.font_size, 14);
+                EXPECT_EQ(c.shape, NodeShape::Circle);
+                // Not a step of the diagram's history, but an unsaved change.
+                EXPECT_EQ(p.getEditor(0).canUndo(), could_undo);
+                EXPECT_TRUE(p.hasUnsavedChanges());
+            }
+
+            TEST(ProjectSettings, NewDefaultSizesCanReachTheBoxesUsingTheOldOnes) {
+                Project p("P");
+                threeBoxes(p);
+                p.getJointEditor().addHypergraph(const_cast<GraphicalHypergraph&>(p.getEditor(0).getGraph()), false);
+
+                ProjectSettings s = p.getSettings();
+                s.layout.block_sep = 150.0;
+                s.layout.box_sizes.rectangle = BoxSize{ 160.0, 70.0 };
+                p.setSettings(s, Project::ExistingBoxes::TakeNewSize);
+
+                for (const GraphicalHypergraph* g : { &p.getEditor(0).getGraph(),
+                                                      static_cast<const GraphicalHypergraph*>(&p.getJointEditor().getGraph()) }) {
+                    EXPECT_EQ(g->getLayoutSettings(), s.layout);
+                    EXPECT_DOUBLE_EQ(boxNamed(*g, "A")->getWidth(), 160.0);
+                    EXPECT_DOUBLE_EQ(boxNamed(*g, "A")->getHeight(), 70.0);
+                    EXPECT_DOUBLE_EQ(boxNamed(*g, "B")->getWidth(), 120.0); // its own width
+                    EXPECT_DOUBLE_EQ(boxNamed(*g, "B")->getHeight(), 70.0);  // the default height
+                    EXPECT_DOUBLE_EQ(boxNamed(*g, "R")->getWidth(), RHOMBUS_NODE_WIDTH);
+                }
+                const auto& g = p.getEditor(0).getGraph();
+                EXPECT_NEAR(g.getX(boxNamed(g, "B")) - g.getX(boxNamed(g, "A")), (160.0 + 120.0) / 2.0 + 150.0, 1e-9);
+
+                // Boxes created afterwards take them too, in new diagrams as well.
+                p.addDiagram();
+                p.getEditor(1).createNode(p.newNodeAttributes("D"), 0, -1, nullptr);
+                EXPECT_EQ(p.getEditor(1).getGraph().getLayoutSettings(), s.layout);
+                EXPECT_DOUBLE_EQ(boxNamed(p.getEditor(1).getGraph(), "D")->getWidth(), 160.0);
+            }
+
+            TEST(ProjectSettings, NewDefaultSizesCanBeOnlyForNewBoxes) {
+                Project p("P");
+                threeBoxes(p);
+                ProjectSettings s = p.getSettings();
+                s.layout.box_sizes.rectangle = BoxSize{ 160.0, NODE_HEIGHT }; // only the width changes
+                p.setSettings(s, Project::ExistingBoxes::KeepTheirSize);
+
+                const auto& g = p.getEditor(0).getGraph();
+                EXPECT_DOUBLE_EQ(boxNamed(g, "A")->getWidth(), NODE_WIDTH);
+                EXPECT_EQ(boxNamed(g, "A")->getAttributes().width, NODE_WIDTH);       // now its own
+                EXPECT_FALSE(boxNamed(g, "A")->getAttributes().height.has_value());   // that default did not change
+                EXPECT_FALSE(boxNamed(g, "R")->getAttributes().width.has_value());    // nor did the rhombus's
+                p.getEditor(0).createNode(p.newNodeAttributes("C"), 0, -1, nullptr);
+                EXPECT_DOUBLE_EQ(boxNamed(g, "C")->getWidth(), 160.0);
+            }
+
+            // An undone step brings back the graph as it was before the settings
+            // changed: it is made to match them again, and the boxes that kept
+            // their size keep it there too.
+            TEST(ProjectSettings, UndoAndRedoKeepMatchingTheSettings) {
+                Project p("P");
+                threeBoxes(p);
+                auto& ed = p.getEditor(0);
+                ed.createNode(p.newNodeAttributes("C"), 0, -1, nullptr); // a structural step
+
+                ProjectSettings s = p.getSettings();
+                s.layout.block_sep = 150.0;
+                s.layout.box_sizes.rectangle = BoxSize{ 160.0, 70.0 };
+                p.setSettings(s, Project::ExistingBoxes::KeepTheirSize);
+
+                ed.undo(); // C goes away; the copy restored was laid out with the old settings
+                EXPECT_EQ(ed.getGraph().getLayoutSettings(), s.layout);
+                EXPECT_DOUBLE_EQ(boxNamed(ed.getGraph(), "A")->getWidth(), NODE_WIDTH);
+                EXPECT_DOUBLE_EQ(boxNamed(ed.getGraph(), "A")->getHeight(), NODE_HEIGHT);
+                EXPECT_NEAR(ed.getX(boxNamed(ed.getGraph(), "B")) - ed.getX(boxNamed(ed.getGraph(), "A")),
+                    (NODE_WIDTH + 120.0) / 2.0 + 150.0, 1e-9);
+
+                ed.redo();
+                EXPECT_EQ(ed.getGraph().getLayoutSettings(), s.layout);
+                EXPECT_DOUBLE_EQ(boxNamed(ed.getGraph(), "C")->getWidth(), NODE_WIDTH);
+            }
+
+            TEST(ProjectSettings, SurviveSaveAndLoad) {
+                namespace fs = std::filesystem;
+                const fs::path tmp = fs::temp_directory_path() / "test_project_settings.json";
+                ProjectSettings s;
+                {
+                    Project p("P");
+                    threeBoxes(p);
+                    s = p.getSettings();
+                    s.colour = Color{ 10, 20, 30, 255 };
+                    s.shape = NodeShape::Rhombus;
+                    s.equivalence_continuous = false;
+                    s.layout.layer_gap = 90.0;
+                    s.layout.horizontal_sep = 45.0;
+                    s.layout.box_sizes.circle = BoxSize{ 100.0, 60.0 };
+                    p.setSettings(s, Project::ExistingBoxes::TakeNewSize);
+                    p.save(tmp);
+                }
+                auto loaded = Project::load(tmp);
+                EXPECT_EQ(loaded->getSettings(), s);
+                EXPECT_EQ(loaded->getEditor(0).getGraph().getLayoutSettings(), s.layout);
+                EXPECT_FALSE(loaded->hasUnsavedChanges());
+                fs::remove(tmp);
+            }
+
+            TEST(ProjectSettings, ClampedAndJSONRoundTrip) {
+                ProjectSettings s;
+                s.font_size = 0;
+                s.layout.block_sep = 1.0;
+                s.layout.box_sizes.rhombus = BoxSize{ 5.0, 5000.0 };
+                const ProjectSettings c = s.clamped();
+                EXPECT_EQ(c.font_size, ProjectSettings::MIN_FONT_SIZE);
+                EXPECT_DOUBLE_EQ(c.layout.block_sep, LayoutSettings::MIN_BLOCK_SEP_SETTING);
+                EXPECT_EQ(c.layout.box_sizes.rhombus, (BoxSize{ MIN_NODE_WIDTH, MAX_NODE_HEIGHT }));
+
+                ProjectSettings t;
+                t.colour = Color{ 1, 2, 3, 255 };
+                t.shape = NodeShape::RoundedRectangle;
+                t.equivalence_continuous = false;
+                t.layout.horizontal_sep = 50.0;
+                nlohmann::json j;
+                t.toJSON(j);
+                EXPECT_EQ(ProjectSettings::fromJSON(j), t);
+                EXPECT_EQ(ProjectSettings::fromJSON(nlohmann::json::object()), ProjectSettings());
+            }
+
             // ── The joint's names follow the diagrams' ───────────────────────
 
             // Diagram 0 ("A", in the joint) and diagram 1 ("B", not in it).

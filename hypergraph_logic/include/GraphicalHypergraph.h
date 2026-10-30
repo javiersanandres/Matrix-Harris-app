@@ -127,6 +127,10 @@ namespace hypergraph_logic {
 		// They are kept by clone(), copyOf() and duplicate(), but not saved by
 		// toJSON(): they belong to the project, which hands them to its graphs.
 		//
+		// Their box sizes are shared by every box of the graph (Node::setBoxSizes):
+		// the graph gives them to its boxes whenever it lays itself out, and to the
+		// ones it takes from another graph (mergeFrom) or copies (clone).
+		//
 		const LayoutSettings& getLayoutSettings() const { return layout_settings_; }
 		void setLayoutSettings(const LayoutSettings& settings);
 
@@ -392,6 +396,10 @@ namespace hypergraph_logic {
 		std::unordered_map<int, double>        layer_layout_;
 
 		LayoutSettings layout_settings_;
+		std::shared_ptr<const BoxSizes> box_sizes_ = std::make_shared<const BoxSizes>(); // layout_settings_.box_sizes
+
+		// Gives every box the graph's box sizes (see setLayoutSettings).
+		void shareBoxSizes();
 
 		// ── mergeFrom ─────────────────────────────────────────────────────────────
 		//

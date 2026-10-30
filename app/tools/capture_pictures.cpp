@@ -22,6 +22,8 @@
 #include "HypergraphEditor.h"
 #include "NodeDialogs.h"
 #include "NodeEditorWidgets.h"
+#include "ProjectSettingsDialog.h"
+#include "AppDialogs.h"
 #include "HyperedgeItem.h"
 #include "MainWindow.h"
 #include "DiagramTabBar.h"
@@ -717,6 +719,32 @@ int main(int argc, char* argv[]) {
         dialog.close();
     });
 
+    // ── The project's settings ────────────────────────────────────────────────
+    run("project settings", [] {
+        // The window, all of it even if this screen would make it scroll.
+        const ProjectSettings built_in;
+        ProjectSettingsDialog dialog(built_in, built_in, {});
+        dialog.show();
+        settle(400);
+        dialog.setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+        if (auto* scroll = dialog.findChild<QScrollArea*>(QStringLiteral("dialogScroll"))) {
+            for (int i = 0; i < 5 && scroll->verticalScrollBar()->maximum() > 0; ++i) {
+                dialog.resize(dialog.width(), dialog.height() + scroll->verticalScrollBar()->maximum());
+                settle();
+            }
+        }
+        save(dialog.grab().toImage(), "information/projectSettings/01.png");
+        dialog.close();
+
+        // The question when a new default size reaches existing boxes.
+        StyledDialog* ask = existingBoxesQuestion(nullptr);
+        ask->show();
+        settle(300);
+        save(ask->grab().toImage(), "information/projectSettings/02.png");
+        ask->close();
+        delete ask;
+    });
+
     // ── The joint diagram's box menu ──────────────────────────────────────────
     run("joint", [] {
         Project project("Proyecto");
@@ -1030,7 +1058,8 @@ int main(int argc, char* argv[]) {
         }
 
         // The box dialog, as a double click on the 3 opens it.
-        NodeDialog dialog(NodeDialog::Mode::Edit, named(example->getEditor(0).getGraph(), "3")->getAttributes(), {});
+        NodeDialog dialog(NodeDialog::Mode::Edit, named(example->getEditor(0).getGraph(), "3")->getAttributes(), {},
+            nullptr, &example->getSettings());
         dialog.show();
         settle(300);
         // All of it, even if this screen would make it scroll.

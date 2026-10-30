@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Node.h"
+#include "ProjectSettings.h"
 
 #include <QAbstractButton>
 #include <QColor>
@@ -17,6 +18,8 @@
 #include <optional>
 
 class QComboBox;
+class QDialog;
+class QScrollArea;
 class QGridLayout;
 class QLabel;
 class QLineEdit;
@@ -38,6 +41,13 @@ namespace ui {
         // Re-applies the style sheet after a dynamic property used in a selector
         // (e.g. [active="true"]) changed on w.
         void repolish(QWidget* w);
+
+        // Sizes a dialog laid out as banner / scrolling body / footer to fit its
+        // content, but never beyond the main window (or the screen, without a
+        // parent), and centres it there. What does not fit is reached by
+        // scrolling the body. (Defined in NodeDialogs.cpp.)
+        void fitToWindow(QDialog* dialog, QWidget* banner, QScrollArea* scroll,
+            QWidget* footer, int preferred_width);
     }
 
     // Renders a node with the given attributes into a pixmap of the given
@@ -58,7 +68,7 @@ namespace ui {
     class DialogBanner : public QWidget {
         Q_OBJECT
     public:
-        enum class Glyph { Create, Edit, Fuse };
+        enum class Glyph { Create, Edit, Fuse, Settings };
 
         DialogBanner(Glyph glyph, const QString& title, const QString& subtitle,
             QWidget* parent = nullptr);
@@ -198,6 +208,8 @@ namespace ui {
 
         void setAttributes(const hypergraph_logic::NodeAttributes& attributes);
         void setResizable(bool resizable);
+        // The default size of each shape (the project's); the built-in ones until given.
+        void setBoxSizes(const hypergraph_logic::BoxSizes& sizes);
         QSize sizeHint() const override { return resizable_ ? QSize(320, 240) : QSize(320, 150); }
 
     signals:
@@ -220,6 +232,7 @@ namespace ui {
         void syncFields();
 
         hypergraph_logic::NodeAttributes attributes_;
+        hypergraph_logic::BoxSizes box_sizes_;
         bool resizable_ = false;
         double scale_ = 0.0;       // 0 until the first layout
         QPointer<QVariantAnimation> zoom_;
@@ -286,6 +299,10 @@ namespace ui {
         // Gives the box this size; an empty side follows its shape's default.
         void setBoxSize(std::optional<double> width, std::optional<double> height);
 
+        // The project the box belongs to, whose default sizes the sizes shown
+        // are measured with (nullptr: the built-in ones).
+        void setProject(const app_logic::ProjectSettings* project);
+
         // Colours the user explicitly picked while the form was open, so the
         // project can offer them again next time.
         const QList<QColor>& pickedColours() const { return picked_colours_; }
@@ -348,6 +365,7 @@ namespace ui {
 
         bool syncing_ = false;
         QList<QColor> picked_colours_;
+        std::optional<app_logic::ProjectSettings> project_;
 
         // Editors.
         QLineEdit* name_ = nullptr;

@@ -746,6 +746,38 @@ namespace app_logic {
 			if (on_mutated_) on_mutated_();
 		}
 
+		// ── Conformer ─────────────────────────────────────────────────────────────
+		//
+		// What the graph must keep matching that lives outside it: the project's
+		// settings (see Project::setSettings). It runs on the
+		// live graph after every committed change, undo and redo -- an undone step
+		// brings back a copy of the graph from before the settings last changed --
+		// and whenever conform() is called. What it changes is not a step of the
+		// history: it never touches the stacks.
+		void setConformer(std::function<void(GraphicalHypergraph&)> conformer) {
+			conformer_ = std::move(conformer);
+		}
+
+		void conform() {
+			if (conformer_) conformer_(derived().graph());
+		}
+
+		// ── applyEverywhere ───────────────────────────────────────────────────────
+		//
+		// Applies change to the live graph and to every copy of it the history
+		// keeps, so a change made outside the history (see Project::setSettings)
+		// also holds in whatever undo and redo bring back. Steps recorded as local
+		// changes replay only what they changed, so they need nothing.
+		void applyEverywhere(const std::function<void(GraphicalHypergraph&)>& change) {
+			change(derived().graph());
+			auto inHistory = [&](auto& stack) {
+				for (auto& entry : stack)
+					if (auto* snapshot = std::get_if<0>(&entry.change)) change(graphOf(*snapshot));
+			};
+			inHistory(derived().past_);
+			inHistory(derived().future_);
+		}
+
 	protected:
 		// ── commitSnapshot ────────────────────────────────────────────────────────
 		//
@@ -867,6 +899,7 @@ namespace app_logic {
 			if (static_cast<int>(past.size()) > MAX_HISTORY)
 				past.pop_front();
 			derived().future_.clear();
+			conform();
 			notifyMutated();
 		}
 
@@ -895,8 +928,14 @@ namespace app_logic {
 			from.pop_back();
 			if (static_cast<int>(to.size()) > MAX_HISTORY)
 				to.pop_front();
+			conform();
 			notifyMutated();
 		}
+		// The graph a history snapshot holds (the joint keeps its copies by pointer).
+		static GraphicalHypergraph& graphOf(GraphicalHypergraph& graph) { return graph; }
+		template <typename Graph>
+		static GraphicalHypergraph& graphOf(std::unique_ptr<Graph>& graph) { return *graph; }
+
 		// Safely downcast to the derived class. This is a common CRTP pattern that
 		// allows the base class to call methods implemented in the derived class
 		// without virtual dispatch.
@@ -907,6 +946,7 @@ namespace app_logic {
 
 		// The callback function for notifying the project of unsaved mutations.
 		std::function<void()> on_mutated_;
+		std::function<void(GraphicalHypergraph&)> conformer_; // see setConformer
 
 		// State ids (see isAtSavedState). 0 is the state the editor starts in.
 		std::uint64_t state_ = 0;

@@ -27,6 +27,7 @@ target_sources(ui_lib
         NodeVisuals.cpp
         NodeEditorWidgets.cpp
         NodeDialogs.cpp
+        ProjectSettingsDialog.cpp
         BusySpinner.cpp
         MinimizingProgressDialog.cpp
         HelpButton.cpp
@@ -56,6 +57,7 @@ target_sources(ui_lib
             ../include/DiagramTabWidget.h
             ../include/DiagramTabBar.h
             ../include/NodeDialogs.h
+            ../include/ProjectSettingsDialog.h
             ../include/NodeVisuals.h
             ../include/NodeEditorWidgets.h
             ../include/AddHypergraphDialog.h

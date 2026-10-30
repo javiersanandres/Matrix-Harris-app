@@ -19,17 +19,15 @@ using namespace hypergraph_logic;
 namespace ui {
 
     namespace {
-
         // Room left around the dialog inside the main window. The dialogs are
         // frameless (the banner acts as their title bar), so nothing is added
         // around the client area.
         constexpr int WINDOW_MARGIN = 24;
         constexpr int FRAME_ALLOWANCE = 0;
+    }
 
-        // Sizes the dialog to fit its content, but never beyond the main window
-        // (or the screen, when there is no parent), and centres it there. Whatever
-        // does not fit is reached by scrolling the body.
-        void fitToWindow(QDialog* dialog, DialogBanner* banner, QScrollArea* scroll,
+    namespace dialog_theme {
+        void fitToWindow(QDialog* dialog, QWidget* banner, QScrollArea* scroll,
             QWidget* footer, int preferred_width)
         {
             QWidget* host = dialog->parentWidget() ? dialog->parentWidget()->window() : nullptr;
@@ -56,6 +54,9 @@ namespace ui {
             dialog->resize(w, h);
             dialog->move(limit.center().x() - w / 2, limit.center().y() - (h + FRAME_ALLOWANCE) / 2);
         }
+    } // namespace dialog_theme
+
+    namespace {
 
         // Lays out: banner (fixed) / scrollable body with the form and the centred
         // preview / footer (fixed) with the buttons at the bottom left. Wires the
@@ -156,7 +157,7 @@ namespace ui {
             };
             QObject::connect(scroll->verticalScrollBar(), &QScrollBar::rangeChanged, dialog, divider);
 
-            fitToWindow(dialog, banner, scroll, footer, preferred_width);
+            dialog_theme::fitToWindow(dialog, banner, scroll, footer, preferred_width);
             divider();
             return accept;
         }
@@ -168,7 +169,7 @@ namespace ui {
     // ============================================================================
 
     NodeDialog::NodeDialog(Mode mode, const NodeAttributes& initial,
-        const QList<QColor>& recent_colours, QWidget* parent)
+        const QList<QColor>& recent_colours, QWidget* parent, const app_logic::ProjectSettings* project)
         : QDialog(parent)
     {
         const bool create = mode == Mode::Create;
@@ -184,8 +185,10 @@ namespace ui {
         form_ = new NodeAttributesForm(initial, recent_colours, this);
         form_->setFontSizeForAllAvailable(!create);
         form_->setProjectDefaultsAvailable(true);
+        form_->setProject(project);
         preview_ = new NodePreview(this);
         preview_->setFixedWidth(340);
+        if (project) preview_->setBoxSizes(project->layout.box_sizes);
 
         accept_ = buildNodeDialog(this, banner, form_, preview_, QStringLiteral("Vista previa"),
             create ? QStringLiteral("Crear") : QStringLiteral("Actualizar"), 700);
@@ -205,7 +208,7 @@ namespace ui {
     // ============================================================================
 
     FuseNodesDialog::FuseNodesDialog(const NodeAttributes& first, const NodeAttributes& second,
-        const QList<QColor>& recent_colours, QWidget* parent)
+        const QList<QColor>& recent_colours, QWidget* parent, const app_logic::ProjectSettings* project)
         : QDialog(parent)
     {
         setWindowTitle(QStringLiteral("Fusionar cajas"));
@@ -221,8 +224,10 @@ namespace ui {
         // The fused node starts as a copy of the first node chosen.
         form_ = new NodeAttributesForm(first, recent_colours,
             first, first_title, second, second_title, this);
+        form_->setProject(project);
         preview_ = new NodePreview(this);
         preview_->setFixedWidth(360);
+        if (project) preview_->setBoxSizes(project->layout.box_sizes);
 
         accept_ = buildNodeDialog(this, banner, form_, preview_,
             QStringLiteral("Vista previa de la caja fusionada"), QStringLiteral("Fusionar"), 1000);

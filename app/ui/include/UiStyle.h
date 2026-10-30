@@ -70,6 +70,7 @@ namespace ui::style {
         EquivalenceDashed, // the same with a discontinuous line
         RemoveEquivalence, // two boxes side by side whose line is cut
         Resize,            // a box grown out of its old size, with a corner knob
+        Settings,          // a gear: the project's settings
     };
 
     QIcon icon(Icon which);

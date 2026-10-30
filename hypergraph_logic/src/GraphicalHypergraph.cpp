@@ -210,6 +210,7 @@ namespace hypergraph_logic {
 		edge_layout_.clear();
 		layer_layout_.clear();
 
+		shareBoxSizes(); // boxes created since the last layout too
 		assignXCoordinates();
 		for (const auto& layer : mip_layers) {
 			orderHyperedges(layer, static_cast<int>(mip_layers.size()));
@@ -224,6 +225,7 @@ namespace hypergraph_logic {
 		edge_layout_.clear();
 		layer_layout_.clear();
 
+		shareBoxSizes();
 		assignXCoordinates();
 		for (const auto& [layer_idx, _] : layers_) {
 			orderHyperedges(layer_idx, static_cast<int>(layers_.size()));
@@ -236,9 +238,19 @@ namespace hypergraph_logic {
 	void GraphicalHypergraph::setLayoutSettings(const LayoutSettings& settings) {
 		const LayoutSettings clamped = settings.clamped();
 		if (clamped == layout_settings_) return;
+		// A new table, not a change to the shared one: copies of this graph (the
+		// editors' history) keep the sizes they were laid out with.
+		if (clamped.box_sizes != layout_settings_.box_sizes)
+			box_sizes_ = std::make_shared<const BoxSizes>(clamped.box_sizes);
 		layout_settings_ = clamped;
-		// Only distances change: the boxes and bars keep their order.
+		shareBoxSizes();
+		// Only distances and default sizes change: the boxes and bars keep their order.
 		if (!all_nodes_.empty()) computeLayout({});
+	}
+
+	void GraphicalHypergraph::shareBoxSizes() {
+		for (const auto& node : all_nodes_)
+			if (!node->isDummy() && node->getBoxSizes() != box_sizes_.get()) node->setBoxSizes(box_sizes_);
 	}
 
 	void GraphicalHypergraph::refreshUncertainPorts() {

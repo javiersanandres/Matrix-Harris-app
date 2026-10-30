@@ -109,6 +109,7 @@ namespace hypergraph_logic {
 		GraphicalHypergraph copy(name_);
 		copy.id_ = id_;  // preserve identity across copies
 		copy.layout_settings_ = layout_settings_;
+		copy.box_sizes_ = box_sizes_;
 
 		// 1. Build a mapping from old Node* -> new NodePtr (fresh allocation).
 		std::unordered_map<Node*, NodePtr> node_map;
@@ -207,6 +208,7 @@ namespace hypergraph_logic {
 			copy.equivalences_.push_back(std::move(new_chain));
 		}
 
+		copy.shareBoxSizes();
 		return copy;
 	}
 
@@ -241,6 +243,7 @@ namespace hypergraph_logic {
 			edge_layout_[raw] = y;
 		for (const auto& [idx, y] : other.layer_layout_)
 			layer_layout_.emplace(idx, y);
+		shareBoxSizes(); // the boxes taken in follow this graph's sizes from now on
 	}
 
 	void GraphicalHypergraph::mergeFrom(GraphicalHypergraph&& other,
@@ -269,6 +272,7 @@ namespace hypergraph_logic {
 			edge_layout_[raw] = y;
 		for (const auto& [idx, y] : other.layer_layout_)
 			layer_layout_.emplace(idx, y);
+		shareBoxSizes(); // the boxes taken in follow this graph's sizes from now on
 	}
 
 	// ============================================================================

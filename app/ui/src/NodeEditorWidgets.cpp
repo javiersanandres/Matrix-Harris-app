@@ -62,8 +62,8 @@ namespace ui {
         }
 
         // "120 × 50 px", marked when it is just the shape's default.
-        QString sizeText(const NodeAttributes& a) {
-            return QStringLiteral("%1 × %2 px%3").arg(qRound(a.boxWidth())).arg(qRound(a.boxHeight()))
+        QString sizeText(const NodeAttributes& a, const BoxSizes* sizes) {
+            return QStringLiteral("%1 × %2 px%3").arg(qRound(a.boxWidth(sizes))).arg(qRound(a.boxHeight(sizes)))
                 .arg(a.width || a.height ? QString() : QStringLiteral(" (de la forma)"));
         }
 
@@ -138,6 +138,12 @@ QLineEdit:focus, QComboBox:focus { border: 1px solid #6366F1; }
 QFrame#previewFields {
     background: rgba(255, 255, 255, 235); border: 1px solid #E3E6EF; border-radius: 10px;
 }
+QSpinBox#settingSpin {
+    border: 1px solid #D6DAE4; border-radius: 8px; padding: 5px 8px;
+    background: white; color: #1F2330; selection-background-color: #6366F1;
+}
+QSpinBox#settingSpin:focus { border: 1px solid #6366F1; }
+QLabel#unit { color: #8A90A2; }
 QSpinBox#previewSpin {
     border: 1px solid transparent; border-radius: 6px; padding: 2px 4px; background: transparent;
     color: #1F2330; font-weight: 600; selection-background-color: #6366F1;
@@ -353,6 +359,19 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             p.drawEllipse(c + QPointF(-5, 0), 8, 8);
             p.drawEllipse(c + QPointF(5, 0), 8, 8);
             break;
+        case Glyph::Settings: {
+            // Three sliders, each with its knob somewhere along it.
+            const double knobs[] = { -4.0, 5.0, -1.0 };
+            for (int i = 0; i < 3; ++i) {
+                const double y = (i - 1) * 7.0;
+                p.drawLine(c + QPointF(-10, y), c + QPointF(10, y));
+                p.save();
+                p.setBrush(Qt::white);
+                p.drawEllipse(c + QPointF(knobs[i], y), 2.8, 2.8);
+                p.restore();
+            }
+            break;
+        }
         }
 
         // Title + subtitle.
@@ -813,6 +832,13 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         update();
     }
 
+    void NodePreview::setBoxSizes(const BoxSizes& sizes) {
+        box_sizes_ = sizes;
+        syncFields();
+        zoomToFit();
+        update();
+    }
+
     void NodePreview::setResizable(bool resizable) {
         resizable_ = resizable;
         fields_->setVisible(resizable);
@@ -871,9 +897,10 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
         // The node, scaled to fit (up to 1.6x so small nodes read well).
         const double scale = scale_ > 0.0 ? scale_ : fitScale();
-        const QSizeF box = nv::boxSize(attributes_);
+        const QSizeF box = nv::boxSize(attributes_, &box_sizes_);
         const QRectF node_box(-box.width() / 2.0, -box.height() / 2.0, box.width(), box.height());
-        const QPointF ghost_size(NodeAttributes::defaultWidth(attributes_.shape), NodeAttributes::defaultHeight(attributes_.shape));
+        const QPointF ghost_size(NodeAttributes::defaultWidth(attributes_.shape, &box_sizes_),
+            NodeAttributes::defaultHeight(attributes_.shape, &box_sizes_));
         const QPainterPath ghost = nv::shapePath(attributes_.shape, QRectF(-ghost_size / 2.0, QSizeF(ghost_size.x(), ghost_size.y())));
         const bool show_ghost = resizable_ && own_size;
 
@@ -933,16 +960,16 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
     double NodePreview::fitScale() const {
         const QRectF s = stage();
-        QSizeF box = nv::boxSize(attributes_);
+        QSizeF box = nv::boxSize(attributes_, &box_sizes_);
         if (resizable_) // its shadow must fit too
-            box = box.expandedTo(QSizeF(NodeAttributes::defaultWidth(attributes_.shape),
-                NodeAttributes::defaultHeight(attributes_.shape)));
+            box = box.expandedTo(QSizeF(NodeAttributes::defaultWidth(attributes_.shape, &box_sizes_),
+                NodeAttributes::defaultHeight(attributes_.shape, &box_sizes_)));
         const double room_y = resizable_ ? 26.0 : 36.0; // the stage already leaves room above and below
         return std::max(0.05, std::min({ 1.6, (s.width() - 40.0) / box.width(), (s.height() - room_y) / box.height() }));
     }
 
     QRectF NodePreview::boxRect() const {
-        const QSizeF box = nv::boxSize(attributes_) * (scale_ > 0.0 ? scale_ : fitScale());
+        const QSizeF box = nv::boxSize(attributes_, &box_sizes_) * (scale_ > 0.0 ? scale_ : fitScale());
         return QRectF(stage().center() - QPointF(box.width(), box.height()) / 2.0, box);
     }
 
@@ -969,8 +996,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
     void NodePreview::syncFields() {
         syncing_ = true;
-        width_->setValue(qRound(attributes_.boxWidth()));
-        height_->setValue(qRound(attributes_.boxHeight()));
+        width_->setValue(qRound(attributes_.boxWidth(&box_sizes_)));
+        height_->setValue(qRound(attributes_.boxHeight(&box_sizes_)));
         // A side the box does not have shows, greyed, the shape's default it follows.
         for (auto [spin, inherited] : { std::pair{ width_, !attributes_.width }, std::pair{ height_, !attributes_.height } }) {
             if (spin->property("inherited").toBool() != inherited) {
@@ -995,7 +1022,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 if (zoom_) zoom_->stop(); // the box stays under the mouse while it is dragged
                 drag_edges_ = edges;
                 press_pos_ = event->position();
-                press_size_ = nv::boxSize(attributes_);
+                press_size_ = nv::boxSize(attributes_, &box_sizes_);
                 update();
                 return;
             }
@@ -1099,6 +1126,19 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         if (current_.width == width && current_.height == height) return;
         current_.width = width;
         current_.height = height;
+        sync();
+        emit attributesChanged();
+    }
+
+    void NodeAttributesForm::setProject(const app_logic::ProjectSettings* project) {
+        if (project) project_ = *project;
+        else         project_.reset();
+        // The sizes shown on each side when merging are the project's.
+        if (left_ && right_ && merge_rows_[Size].left_chip) {
+            const BoxSizes* sizes = project_ ? &project_->layout.box_sizes : nullptr;
+            if (auto* l = merge_rows_[Size].left_chip->findChild<QLabel*>()) l->setText(sizeText(*left_, sizes));
+            if (auto* r = merge_rows_[Size].right_chip->findChild<QLabel*>()) r->setText(sizeText(*right_, sizes));
+        }
         sync();
         emit attributesChanged();
     }
@@ -1232,6 +1272,21 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
     QWidget* NodeAttributesForm::createEditor(Field field, const QList<QColor>& recent_colours) {
         const qreal dpr = devicePixelRatioF();
+        // The editor with its tick boxes stacked on its right, in one column across the rows.
+        auto withTicks = [](QWidget* editor, std::initializer_list<TickBox*> ticks) {
+            auto* wrap = new QWidget;
+            auto* h = new QHBoxLayout(wrap);
+            h->setContentsMargins(0, 0, 0, 0);
+            h->setSpacing(14);
+            editor->setFixedWidth(EDITOR_WIDTH);
+            h->addWidget(editor, 0, Qt::AlignVCenter); // level with its label, in the middle of its ticks
+            auto* column = new QVBoxLayout;
+            column->setSpacing(6);
+            for (TickBox* tick : ticks) column->addWidget(tick, 0, Qt::AlignLeft);
+            h->addLayout(column);
+            h->addStretch();
+            return wrap;
+        };
         switch (field) {
         case Name: {
             name_ = new QLineEdit;
@@ -1296,15 +1351,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             colour_default_->setToolTip(QStringLiteral(
                 "Las cajas nuevas de este proyecto tendrán este color de fondo"));
             colour_default_->setVisible(false);
-            auto* wrap = new QWidget;
-            auto* h = new QHBoxLayout(wrap);
-            h->setContentsMargins(0, 0, 0, 0);
-            h->setSpacing(14);
-            colour_->setFixedWidth(EDITOR_WIDTH);
-            h->addWidget(colour_);
-            h->addWidget(colour_default_);
-            h->addStretch();
-            return wrap;
+            return withTicks(colour_, { colour_default_ });
         }
         case FontColour: {
             font_colour_ = new ColorPickerButton;
@@ -1319,15 +1366,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             font_colour_default_->setToolTip(QStringLiteral(
                 "Las cajas nuevas de este proyecto tendrán este color de texto"));
             font_colour_default_->setVisible(false);
-            auto* wrap = new QWidget;
-            auto* h = new QHBoxLayout(wrap);
-            h->setContentsMargins(0, 0, 0, 0);
-            h->setSpacing(14);
-            font_colour_->setFixedWidth(EDITOR_WIDTH);
-            h->addWidget(font_colour_);
-            h->addWidget(font_colour_default_);
-            h->addStretch();
-            return wrap;
+            return withTicks(font_colour_, { font_colour_default_ });
         }
         case FontSize: {
             font_size_ = new FontSizeSelector;
@@ -1345,20 +1384,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             font_size_default_->setToolTip(QStringLiteral(
                 "Las cajas nuevas de este proyecto tendrán este tamaño de fuente"));
             font_size_default_->setVisible(false);
-            // The size on the left, level with the middle of its two tick boxes,
-            // stacked on its right (in the same column as the colours' ones).
-            auto* wrap = new QWidget;
-            auto* h = new QHBoxLayout(wrap);
-            h->setContentsMargins(0, 0, 0, 0);
-            h->setSpacing(14);
-            font_size_->setFixedWidth(EDITOR_WIDTH);
-            h->addWidget(font_size_, 0, Qt::AlignVCenter);
-            auto* ticks = new QVBoxLayout;
-            ticks->setSpacing(6);
-            ticks->addWidget(font_size_all_, 0, Qt::AlignLeft);
-            ticks->addWidget(font_size_default_, 0, Qt::AlignLeft);
-            h->addLayout(ticks);
-            h->addStretch();
+            // Stacked as before: giving the size to every box, then making it the default.
+            QWidget* wrap = withTicks(font_size_, { font_size_all_, font_size_default_ });
             return wrap;
         }
         case Fire: {
@@ -1428,7 +1455,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             addText(shapeName(side.shape));
             break;
         case Size:
-            addText(sizeText(side));
+            addText(sizeText(side, project_ ? &project_->layout.box_sizes : nullptr));
             break;
         case Colour:
             addIcon(swatchPixmap(nv::toQColor(side.colour), QSize(22, 16), dpr));
@@ -1596,7 +1623,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             }
         }
 
-        if (size_) size_->setText(sizeText(current_));
+        if (size_) size_->setText(sizeText(current_, project_ ? &project_->layout.box_sizes : nullptr));
 
         const bool fire = current_.isFire();
         colour_->setColour(nv::toQColor(current_.colour), false);

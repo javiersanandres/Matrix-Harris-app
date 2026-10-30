@@ -15,14 +15,16 @@ namespace app_logic {
 	// Construction
 	// ============================================================================
 
-	Project::Project(const std::string& name)
+	Project::Project(const std::string& name, const ProjectSettings& settings)
 		: name_(name)
 		, active_index_(0)
 		, unsaved_changes_(false)
+		, settings_(std::make_shared<ProjectSettings>(settings.clamped()))
 	{
 		// Create the joint editor first (it owns the singleton).
 		joint_editor_ = std::make_unique<JointHypergraphEditor>(
 			JointGraphicalHypergraph::create(name + "_joint"));
+		follow(*joint_editor_);
 
 		// Create one initial empty diagram.
 		addDiagram();
@@ -43,6 +45,7 @@ namespace app_logic {
 		// hold across a push_back.
 		editors_.push_back(
 			std::make_unique<HypergraphEditor>(GraphicalHypergraph(diagram_name)));
+		follow(*editors_.back());
 		active_index_ = static_cast<int>(editors_.size()) - 1;
 		markUnsaved();
 		return active_index_;
@@ -63,6 +66,7 @@ namespace app_logic {
 		GraphicalHypergraph copy = editors_[index]->getGraph().duplicate();
 		copy.setName(name);
 		editors_.push_back(std::make_unique<HypergraphEditor>(std::move(copy), InitialLayout::Keep));
+		follow(*editors_.back());
 		active_index_ = static_cast<int>(editors_.size()) - 1;
 		markUnsaved();
 		return active_index_;
@@ -198,30 +202,97 @@ namespace app_logic {
 			recent_colours_.resize(MAX_RECENT_COLOURS);
 	}
 
-	void Project::setDefaultColour(const Color& colour) {
-		if (colour == default_colour_) return;
-		default_colour_ = colour;
+	// ============================================================================
+	// Settings
+	// ============================================================================
+
+	void Project::setSettings(const ProjectSettings& settings, ExistingBoxes existing) {
+		const ProjectSettings clamped = settings.clamped();
+		if (clamped == *settings_) return;
+
+		const BoxSizes before = settings_->layout.box_sizes;
+		const BoxSizes after = clamped.layout.box_sizes;
+		if (existing == ExistingBoxes::KeepTheirSize && before != after) {
+			// The boxes using a default that changes keep its old value, as their own.
+			auto keep = [before, after](GraphicalHypergraph& g) {
+				for (const auto& node : g.getAllNodes()) {
+					if (node->isDummy()) continue;
+					NodeAttributes a = node->getAttributes();
+					const double old_w = NodeAttributes::defaultWidth(a.shape, &before);
+					const double old_h = NodeAttributes::defaultHeight(a.shape, &before);
+					if (!a.width && old_w != NodeAttributes::defaultWidth(a.shape, &after))   a.width = old_w;
+					if (!a.height && old_h != NodeAttributes::defaultHeight(a.shape, &after)) a.height = old_h;
+					if (a != node->getAttributes()) node->setAttributes(a);
+				}
+			};
+			for (const auto& editor : editors_) editor->applyEverywhere(keep);
+			joint_editor_->applyEverywhere(keep);
+		}
+
+		*settings_ = clamped;
+		conformAll();
 		markUnsaved();
+	}
+
+	bool Project::usesDefaultSizesChangedBy(const BoxSizes& sizes) const {
+		const BoxSizes& now = settings_->layout.box_sizes;
+		auto uses = [&](const GraphicalHypergraph& g) {
+			for (const auto& node : g.getAllNodes()) {
+				if (node->isDummy()) continue;
+				const NodeAttributes& a = node->getAttributes();
+				if (!a.width && NodeAttributes::defaultWidth(a.shape, &now) != NodeAttributes::defaultWidth(a.shape, &sizes))
+					return true;
+				if (!a.height && NodeAttributes::defaultHeight(a.shape, &now) != NodeAttributes::defaultHeight(a.shape, &sizes))
+					return true;
+			}
+			return false;
+		};
+		for (const auto& editor : editors_)
+			if (uses(editor->getGraph())) return true;
+		return uses(joint_editor_->getGraph());
+	}
+
+	void Project::setDefaultColour(const Color& colour) {
+		ProjectSettings s = *settings_;
+		s.colour = colour;
+		setSettings(s);
 	}
 
 	void Project::setDefaultFontColour(const Color& colour) {
-		if (colour == default_font_colour_) return;
-		default_font_colour_ = colour;
-		markUnsaved();
+		ProjectSettings s = *settings_;
+		s.font_colour = colour;
+		setSettings(s);
 	}
 
 	void Project::setDefaultFontSize(int size) {
-		if (size == default_font_size_) return;
-		default_font_size_ = size;
-		markUnsaved();
+		ProjectSettings s = *settings_;
+		s.font_size = size;
+		setSettings(s);
 	}
 
 	NodeAttributes Project::newNodeAttributes(const std::string& name) const {
 		NodeAttributes a(name);
-		a.colour = default_colour_;
-		a.font_colour = default_font_colour_;
-		a.font_size = default_font_size_;
+		a.colour = settings_->colour;
+		a.font_colour = settings_->font_colour;
+		a.font_size = settings_->font_size;
+		a.shape = settings_->shape;
 		return a;
+	}
+
+	void Project::conform(GraphicalHypergraph& graph, const ProjectSettings& settings) {
+		// Redraws only if they differ (and keeps the order of boxes and bars).
+		graph.setLayoutSettings(settings.layout);
+	}
+
+	template <typename Editor>
+	void Project::follow(Editor& editor) {
+		editor.setConformer([settings = settings_](GraphicalHypergraph& g) { conform(g, *settings); });
+		editor.conform();
+	}
+
+	void Project::conformAll() {
+		for (const auto& editor : editors_) editor->conform();
+		joint_editor_->conform();
 	}
 
 	// ============================================================================
@@ -251,10 +322,7 @@ namespace app_logic {
 		for (const auto& c : recent_colours_)
 			colours.push_back(colorToHex(c));
 		j["recent_colours"] = std::move(colours);
-		j["defaults"] = {
-			{ "colour", colorToHex(default_colour_) },
-			{ "font_colour", colorToHex(default_font_colour_) },
-			{ "font_size", default_font_size_ } };
+		settings_->toJSON(j);
 
 		std::ofstream out(path);
 		if (!out.is_open())
@@ -293,17 +361,23 @@ namespace app_logic {
 		auto p = std::make_unique<Project>(j.at("name").get<std::string>());
 		p->editors_.clear();
 
+		// First the settings: the diagrams are made to match them as they are read.
+		// Projects saved before a setting existed keep its usual value.
+		*p->settings_ = ProjectSettings::fromJSON(j);
+
 		// The file carries the full layout of every diagram: open them as they
 		// were saved, without laying them out again.
 		for (const auto& dj : j.at("diagrams")) {
 			auto gh = GraphicalHypergraph::fromJSON(dj);
 			p->editors_.emplace_back(std::make_unique<HypergraphEditor>(
 				std::move(gh), InitialLayout::Keep));
+			p->follow(*p->editors_.back());
 		}
 
 		p->joint_editor_.reset();
 		p->joint_editor_ = std::make_unique<JointHypergraphEditor>(
 			JointGraphicalHypergraph::fromJSON(j.at("joint")), InitialLayout::Keep);
+		p->follow(*p->joint_editor_);
 		p->syncJointNames(); // files saved before the joint followed renames
 
 		// Projects saved before recent colours existed simply start with none.
@@ -315,22 +389,6 @@ namespace app_logic {
 				catch (const std::invalid_argument& e) {
 					throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
 				}
-			}
-		}
-
-		// Projects saved before the defaults existed keep the usual ones.
-		if (j.contains("defaults")) {
-			const json& d = j.at("defaults");
-			try {
-				if (d.contains("colour"))
-					p->default_colour_ = colorFromHex(d.at("colour").get<std::string>());
-				if (d.contains("font_colour"))
-					p->default_font_colour_ = colorFromHex(d.at("font_colour").get<std::string>());
-				if (d.contains("font_size"))
-					p->default_font_size_ = d.at("font_size").get<int>();
-			}
-			catch (const std::exception& e) {
-				throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
 			}
 		}
 

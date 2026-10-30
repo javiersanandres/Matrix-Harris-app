@@ -74,6 +74,7 @@ namespace hypergraph_logic {
 
 		// Deep-copy the structural and layout data via the base class helper.
 		snap->layout_settings_ = layout_settings_;
+		snap->box_sizes_ = box_sizes_;
 		snap->mergeFrom(GraphicalHypergraph::clone(), false);
 
 		// Restore the original id_ (clone() already carries it, but be explicit).

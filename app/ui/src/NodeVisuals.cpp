@@ -77,9 +77,8 @@ namespace ui::node_visuals {
     // Geometry
     // ============================================================================
 
-    QSizeF boxSize(const NodeAttributes& attributes) {
-        const Node probe(attributes);
-        return QSizeF(probe.getWidth(), probe.getHeight());
+    QSizeF boxSize(const NodeAttributes& attributes, const BoxSizes* sizes) {
+        return QSizeF(attributes.boxWidth(sizes), attributes.boxHeight(sizes));
     }
 
     QPainterPath shapePath(NodeShape shape, const QRectF& box) {

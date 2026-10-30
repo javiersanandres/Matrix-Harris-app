@@ -180,6 +180,18 @@ namespace ui {
         // recently used colours (always the current project_).
         void attachColourStore(DiagramScene* scene);
 
+        // ── Proyecto ──────────────────────────────────────────────────────────────
+        // "Ajustes del proyecto…" and "Aplicar los ajustes predeterminados de la
+        // aplicación" (the ones new projects start with).
+        void onAjustesProyecto();
+        void onAplicarPredeterminados();
+
+        // Gives the project these settings, which reach every diagram: if a new
+        // default size would change boxes that use it, first asks whether they
+        // should take it. Then every scene is redrawn (the active one gliding).
+        // False if the user cancelled.
+        bool applyProjectSettings(const app_logic::ProjectSettings& settings);
+
         // Forwards the scene's selection hints to the banner while it is shown.
         void connectHint(DiagramScene* scene);
 

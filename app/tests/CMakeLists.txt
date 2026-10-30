@@ -13,6 +13,7 @@ add_executable(app_logic_tests
     test_options_help.cpp
     test_copy_paste.cpp
     test_app_icon.cpp
+    test_app_defaults.cpp
 )
 
 target_include_directories(app_logic_tests

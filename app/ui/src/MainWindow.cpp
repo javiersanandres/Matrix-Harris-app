@@ -13,6 +13,7 @@
 #include "OptionsHelp.h"
 #include "Tutorial.h"
 #include "PieceClipboard.h"
+#include "ProjectSettingsDialog.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -64,7 +65,7 @@ namespace ui {
     // ============================================================================
 
     MainWindow::MainWindow(QWidget* parent)
-        : MainWindow(Project("Nuevo proyecto"), parent)
+        : MainWindow(Project("Nuevo proyecto", app_defaults::load()), parent)
     {
     }
 
@@ -206,6 +207,17 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         connect(action_menu_fast_, &QAction::triggered, this, [this] { mode_fast_btn_->setChecked(true); });
         connect(action_menu_slow_, &QAction::triggered, this, [this] { mode_slow_btn_->setChecked(true); });
 
+        // ── Proyecto ──────────────────────────────────────────────────────────────
+        QMenu* proyecto = addMenu(QStringLiteral("Proyecto"));
+        QAction* ajustes = add(proyecto, QStringLiteral("Ajustes del proyecto…"), QKeySequence(QStringLiteral("Ctrl+,")),
+            this, &MainWindow::onAjustesProyecto);
+        ajustes->setIcon(style::icon(style::Icon::Settings));
+        ajustes->setToolTip(QStringLiteral("Lo que este proyecto decide para todos sus esquemas: cajas nuevas, "
+                                           "equivalencias nuevas, distancias y tamaños por defecto"));
+        QAction* predeterminados = add(proyecto, QStringLiteral("Aplicar los ajustes predeterminados de la aplicación"),
+            QKeySequence(), this, &MainWindow::onAplicarPredeterminados);
+        predeterminados->setToolTip(QStringLiteral("El proyecto toma los ajustes con los que empiezan los proyectos nuevos"));
+
         // ── Ayuda ─────────────────────────────────────────────────────────────────
         QMenu* ayuda = addMenu(QStringLiteral("Ayuda"));
         QAction* tutorial = add(ayuda, QStringLiteral("Tutorial de introducción"), QKeySequence(), this,
@@ -267,7 +279,7 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         }
         catch (const std::exception&) {
             // Without the example the tour still explains everything.
-            adoptProject(std::make_unique<Project>("Nuevo proyecto"));
+            adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
         }
         tutorial_running_ = true;
 
@@ -301,7 +313,7 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
                 // Moved or broken meanwhile: a new project instead.
             }
         }
-        adoptProject(std::make_unique<Project>("Nuevo proyecto"));
+        adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
     }
 
     bool MainWindow::refuseDuringTutorial() {
@@ -624,6 +636,63 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             [this](const QColor& colour) { project_->setDefaultColour(node_visuals::fromQColor(colour)); },
             [this](const QColor& colour) { project_->setDefaultFontColour(node_visuals::fromQColor(colour)); },
             [this](int size) { project_->setDefaultFontSize(size); });
+        scene->setProjectSettingsSource([this] { return &project_->getSettings(); });
+    }
+
+    // ============================================================================
+    // Project settings
+    // ============================================================================
+
+    void MainWindow::onAjustesProyecto() {
+        QList<QColor> recent;
+        for (const auto& c : project_->getRecentColours()) recent << node_visuals::toQColor(c);
+        ProjectSettingsDialog dlg(project_->getSettings(), app_defaults::load(), recent, this);
+        if (dlg.exec() != QDialog::Accepted) return;
+
+        const ProjectSettings settings = dlg.settings();
+        if (!applyProjectSettings(settings)) return;
+        if (dlg.saveAsAppDefaults()) app_defaults::save(settings);
+        statusBar()->showMessage(dlg.saveAsAppDefaults()
+            ? QStringLiteral("Ajustes guardados en el proyecto y para los proyectos nuevos")
+            : QStringLiteral("Ajustes del proyecto actualizados"), 4000);
+    }
+
+    void MainWindow::onAplicarPredeterminados() {
+        const ProjectSettings defaults = app_defaults::load();
+        if (defaults == project_->getSettings()) {
+            dialogs::showInfo(this, QStringLiteral("Nada que cambiar"),
+                QStringLiteral("Este proyecto ya usa los ajustes predeterminados de la aplicación."));
+            return;
+        }
+        if (applyProjectSettings(defaults))
+            statusBar()->showMessage(QStringLiteral("El proyecto usa ahora los ajustes predeterminados de la aplicación"), 4000);
+    }
+
+    bool MainWindow::applyProjectSettings(const ProjectSettings& settings) {
+        const ProjectSettings next = settings.clamped();
+        if (next == project_->getSettings()) return true;
+
+        auto existing = Project::ExistingBoxes::KeepTheirSize;
+        if (next.layout.box_sizes != project_->getSettings().layout.box_sizes
+            && project_->usesDefaultSizesChangedBy(next.layout.box_sizes)) {
+            const auto answer = askAboutExistingBoxes(this);
+            if (!answer) return false;
+            existing = *answer;
+        }
+
+        DiagramScene* active = activeScene();
+        if (active) active->cancelInteraction();
+        const auto from = active ? active->nodeCenters() : std::unordered_map<hypergraph_logic::Node*, QPointF>();
+        project_->setSettings(next, existing);
+
+        // Every diagram and the joint changed; the one on show glides into its new shape.
+        for (DiagramScene* scene : scenes_)
+            if (scene != active) scene->rebuild();
+        if (joint_scene_ && joint_scene_ != active) joint_scene_->rebuild();
+        if (active) active->rebuildAnimated(from);
+        updateWindowTitle();
+        updateStatusBar();
+        return true;
     }
 
     // ============================================================================
@@ -788,7 +857,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         if (!mayContinue()) return;
         teardownProject();
         project_.reset(); // only one project (and joint graph) may exist at a time
-        adoptProject(std::make_unique<Project>("Nuevo proyecto"));
+        adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
         statusBar()->showMessage(QStringLiteral("Nuevo proyecto creado"), 3000);
     }
 
@@ -833,7 +902,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             statusBar()->showMessage(QStringLiteral("Proyecto abierto: %1").arg(QFileInfo(path).fileName()), 3000);
         }
         catch (const std::exception& e) {
-            adoptProject(std::make_unique<Project>("Nuevo proyecto"));
+            adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
             dialogs::showError(this, QStringLiteral("No se ha podido abrir el proyecto"),
                 QStringLiteral("«%1» no es un proyecto válido del Taller Matrix Harris.\n\n%2")
                     .arg(QFileInfo(path).fileName(), QString::fromStdString(e.what())));

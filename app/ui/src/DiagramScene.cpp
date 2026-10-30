@@ -984,8 +984,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
         try {
             if (st == InteractionState::WaitingForSecondNode_AddEquivalence) {
-                if (is_joint_) joint_editor_->addEquivalence(first_ptr, second_ptr);
-                else           regular_editor_->addEquivalence(first_ptr, second_ptr);
+                // Drawn as the project's new equivalences are.
+                const bool continuous = projectSettings() ? projectSettings()->equivalence_continuous : true;
+                if (is_joint_) joint_editor_->addEquivalence(first_ptr, second_ptr, continuous);
+                else           regular_editor_->addEquivalence(first_ptr, second_ptr, continuous);
             }
             if (st == InteractionState::WaitingForSecondNode_AddConnectionParent) {
                 // first is child, second is parent
@@ -1013,7 +1015,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             }
             else if (st == InteractionState::WaitingForSecondNode_FuseNodes) {
                 FuseNodesDialog dlg(first_ptr->getAttributes(), second_ptr->getAttributes(),
-                    recentColours(), dialogParent());
+                    recentColours(), dialogParent(), projectSettings());
                 if (dlg.exec() != QDialog::Accepted) return;
                 const NodeAttributes fused = dlg.attributes();
                 if (is_joint_) joint_editor_->fuseNodes(first_ptr, second_ptr, fused);
@@ -1212,7 +1214,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         cancelInteraction();
         const std::string name = default_name.toStdString();
         NodeDialog dlg(NodeDialog::Mode::Create, new_attributes_ ? new_attributes_(name) : NodeAttributes(name),
-            recentColours(), dialogParent());
+            recentColours(), dialogParent(), projectSettings());
         if (dlg.exec() != QDialog::Accepted) return;
 
         try {
@@ -1232,7 +1234,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             return;
         }
         NodePtr node_ptr = item->node()->shared_from_this();
-        NodeDialog dlg(NodeDialog::Mode::Edit, node_ptr->getAttributes(), recentColours(), dialogParent());
+        NodeDialog dlg(NodeDialog::Mode::Edit, node_ptr->getAttributes(), recentColours(), dialogParent(),
+            projectSettings());
         if (dlg.exec() != QDialog::Accepted) return;
 
         const NodeAttributes updated = dlg.attributes();
@@ -1287,6 +1290,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         }
         rebuildAnimated(from);
         emit graphChanged();
+    }
+
+    void DiagramScene::setProjectSettingsSource(std::function<const app_logic::ProjectSettings*()> settings) {
+        project_settings_ = std::move(settings);
     }
 
     void DiagramScene::setProjectDefaultsStore(

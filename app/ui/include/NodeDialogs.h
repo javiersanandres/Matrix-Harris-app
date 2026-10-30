@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Node.h"
+#include "ProjectSettings.h"
 
 #include <QColor>
 #include <QDialog>
@@ -21,6 +22,9 @@ class NodePreview;
 //   - Create : after choosing any node-creation action ("Crear" / "Cancelar").
 //   - Edit   : "Propiedades" of an existing node, pre-filled with its current
 //              attributes ("Actualizar" / "Cancelar").
+//
+// With the project's settings (`project`), the box is shown with the project's
+// default sizes.
 // ============================================================================
 class NodeDialog : public QDialog {
     Q_OBJECT
@@ -31,7 +35,8 @@ public:
     NodeDialog(Mode mode,
                const hypergraph_logic::NodeAttributes& initial,
                const QList<QColor>& recent_colours,
-               QWidget* parent = nullptr);
+               QWidget* parent = nullptr,
+               const app_logic::ProjectSettings* project = nullptr);
 
     // The attributes as they are in the form (name trimmed).
     hypergraph_logic::NodeAttributes attributes() const;
@@ -71,7 +76,8 @@ public:
     FuseNodesDialog(const hypergraph_logic::NodeAttributes& first,
                     const hypergraph_logic::NodeAttributes& second,
                     const QList<QColor>& recent_colours,
-                    QWidget* parent = nullptr);
+                    QWidget* parent = nullptr,
+                    const app_logic::ProjectSettings* project = nullptr);
 
     hypergraph_logic::NodeAttributes attributes() const;
     QList<QColor> pickedColours() const;

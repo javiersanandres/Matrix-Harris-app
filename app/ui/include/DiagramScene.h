@@ -2,6 +2,7 @@
 
 #include "HypergraphEditor.h"
 #include "JointHypergraphEditor.h"
+#include "ProjectSettings.h"
 #include "HypergraphRenderer.h"
 #include "NodeItem.h"
 #include "HyperedgeItem.h"
@@ -126,6 +127,11 @@ namespace ui {
             std::function<void(const QColor&)> set_font_colour,
             std::function<void(int)> set_font_size);
 
+        // The project's settings: the node dialogs' "Sigue al proyecto" and default
+        // sizes, and whether new equivalences are continuous. Set by MainWindow;
+        // without it the usual ones apply.
+        void setProjectSettingsSource(std::function<const app_logic::ProjectSettings*()> settings);
+
         // The project's diagrams, for the joint diagram's "Administrar esquemas"
         // menu. Set by MainWindow.
         struct DiagramInfo {
@@ -237,6 +243,10 @@ namespace ui {
         std::function<void(const QColor&)> set_default_colour_;
         std::function<void(const QColor&)> set_default_font_colour_;
         std::function<void(int)> set_default_font_size_;
+        std::function<const app_logic::ProjectSettings*()> project_settings_;
+        const app_logic::ProjectSettings* projectSettings() const {
+            return project_settings_ ? project_settings_() : nullptr;
+        }
 
         // ── Project diagrams (see setDiagramCatalog) ──────────────────────────────
         std::function<std::vector<DiagramInfo>()> diagram_catalog_;

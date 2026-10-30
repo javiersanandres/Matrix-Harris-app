@@ -40,8 +40,10 @@ namespace ui::node_visuals {
     // ── Geometry ─────────────────────────────────────────────────────────────────
 
     // Size of the box a node with these attributes occupies on the canvas
-    // (Node::getWidth() x Node::getHeight() for its shape).
-    QSizeF boxSize(const hypergraph_logic::NodeAttributes& attributes);
+    // (Node::getWidth() x Node::getHeight()), with `sizes` as its shapes'
+    // default sizes (the built-in ones without them).
+    QSizeF boxSize(const hypergraph_logic::NodeAttributes& attributes,
+        const hypergraph_logic::BoxSizes* sizes = nullptr);
 
     // Outline of the shape inscribed in box.
     QPainterPath shapePath(hypergraph_logic::NodeShape shape, const QRectF& box);

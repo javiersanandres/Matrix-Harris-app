@@ -42,28 +42,32 @@ namespace hypergraph_logic {
 	// ============================================================================
 	// Box size
 	// ============================================================================
-	double NodeAttributes::defaultWidth(NodeShape shape) noexcept {
-		switch (shape) {
-		case NodeShape::Circle:  return CIRCLE_NODE_WIDTH;
-		case NodeShape::Rhombus: return RHOMBUS_NODE_WIDTH;
-		default:                 return NODE_WIDTH;
+	namespace {
+		const BoxSize& defaultBox(NodeShape shape, const BoxSizes* sizes) noexcept {
+			static const BoxSizes BUILT_IN;
+			const BoxSizes& s = sizes ? *sizes : BUILT_IN;
+			switch (shape) {
+			case NodeShape::Circle:  return s.circle;
+			case NodeShape::Rhombus: return s.rhombus;
+			default:                 return s.rectangle; // rounded rectangles too
+			}
 		}
 	}
 
-	double NodeAttributes::defaultHeight(NodeShape shape) noexcept {
-		switch (shape) {
-		case NodeShape::Circle:  return CIRCLE_NODE_HEIGHT;
-		case NodeShape::Rhombus: return RHOMBUS_NODE_HEIGHT;
-		default:                 return NODE_HEIGHT;
-		}
+	double NodeAttributes::defaultWidth(NodeShape shape, const BoxSizes* sizes) noexcept {
+		return defaultBox(shape, sizes).width;
 	}
 
-	double NodeAttributes::boxWidth() const noexcept {
-		return width ? std::clamp(*width, MIN_NODE_WIDTH, MAX_NODE_WIDTH) : defaultWidth(shape);
+	double NodeAttributes::defaultHeight(NodeShape shape, const BoxSizes* sizes) noexcept {
+		return defaultBox(shape, sizes).height;
 	}
 
-	double NodeAttributes::boxHeight() const noexcept {
-		return height ? std::clamp(*height, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT) : defaultHeight(shape);
+	double NodeAttributes::boxWidth(const BoxSizes* sizes) const noexcept {
+		return std::clamp(width.value_or(defaultWidth(shape, sizes)), MIN_NODE_WIDTH, MAX_NODE_WIDTH);
+	}
+
+	double NodeAttributes::boxHeight(const BoxSizes* sizes) const noexcept {
+		return std::clamp(height.value_or(defaultHeight(shape, sizes)), MIN_NODE_HEIGHT, MAX_NODE_HEIGHT);
 	}
 
 	// ============================================================================
@@ -152,12 +156,12 @@ namespace hypergraph_logic {
 	// ============================================================================
 	double Node::getWidth() const noexcept {
 		if (isDummy()) return DUMMY_NODE_WIDTH;
-		return attributes_->boxWidth();
+		return attributes_->boxWidth(box_sizes_.get());
 	}
 
 	double Node::getHeight() const noexcept {
 		if (isDummy()) return DUMMY_NODE_HEIGHT;
-		return attributes_->boxHeight();
+		return attributes_->boxHeight(box_sizes_.get());
 	}
 
 	double Node::getBoundaryHalfHeight(double dx) const noexcept {

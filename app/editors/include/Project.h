@@ -2,6 +2,7 @@
 
 #include "HypergraphEditor.h"
 #include "JointHypergraphEditor.h"
+#include "ProjectSettings.h"
 
 #include <filesystem>
 #include <string>
@@ -41,9 +42,11 @@ namespace app_logic {
 		// ── Project ───────────────────────────────────────────────────────────────
 		//
 		// Creates a new empty project with the given name, one empty diagram, and
-		// an empty joint diagram. The file path is not set until save() is called.
+		// an empty joint diagram, with the given settings (e.g. the application's
+		// defaults for new projects). The file path is not set until save() is
+		// called.
 		//
-		explicit Project(const std::string& name);
+		explicit Project(const std::string& name, const ProjectSettings& settings = {});
 
 		// Non-copyable — a Project owns the JointGraphicalHypergraph singleton and
 		// cannot be duplicated.
@@ -197,8 +200,9 @@ namespace app_logic {
 		//     "diagrams": [ <GraphicalHypergraph JSON>, ... ],
 		//     "joint": <JointGraphicalHypergraph JSON>,
 		//     "recent_colours": [ "#RRGGBBAA", ... ],  (optional when loading)
-		//     "defaults": { "colour": "#RRGGBBAA", "font_colour": "#RRGGBBAA",
-		//                   "font_size": <int> }      (optional when loading, as
+		//     "defaults": { ... }, "layout": { ... }   (the settings, see
+		//                                              ProjectSettings::toJSON;
+		//                                              optional when loading, as
 		//                                              is each field)
 		//   }
 		// Updates file_path_ and resets the unsaved-changes flag.
@@ -253,16 +257,35 @@ namespace app_logic {
 		//
 		void addRecentColour(const Color& colour);
 
-		// ── Defaults for new boxes ────────────────────────────────────────────────
+		// ── Settings ──────────────────────────────────────────────────────────────
 		//
-		// The background colour, text colour and font size every new box of this
-		// project starts with. They begin as NodeAttributes' own defaults and are
-		// saved with the project. Setting a different one counts as an unsaved
-		// change (no diagram history holds it).
+		// The project's settings (see ProjectSettings). setSettings brings them
+		// inside their ranges and, if they change, applies them to every diagram
+		// and the joint at once: everything is drawn again with the new distances
+		// and default sizes. The defaults for new boxes and equivalences only
+		// apply to those created afterwards. That is not a step of any diagram's
+		// history (it cannot be undone), but it counts as an unsaved change.
 		//
-		const Color& getDefaultColour() const { return default_colour_; }
-		const Color& getDefaultFontColour() const { return default_font_colour_; }
-		int getDefaultFontSize() const { return default_font_size_; }
+		// A new default size of a shape reaches the boxes that use its default
+		// (no size of their own) only with ExistingBoxes::TakeNewSize; with
+		// KeepTheirSize they keep the one they have, which becomes their own,
+		// also in what undo and redo bring back.
+		//
+		// Every diagram keeps matching the settings, also after an undo or redo
+		// (see HypergraphEditorBase::setConformer).
+		//
+		enum class ExistingBoxes { KeepTheirSize, TakeNewSize };
+		const ProjectSettings& getSettings() const { return *settings_; }
+		void setSettings(const ProjectSettings& settings, ExistingBoxes existing = ExistingBoxes::KeepTheirSize);
+
+		// Whether some box of a diagram or the joint uses a default size that
+		// `sizes` would change, i.e. whether ExistingBoxes makes any difference.
+		bool usesDefaultSizesChangedBy(const BoxSizes& sizes) const;
+
+		// Shortcuts to single defaults for new boxes (setting one is setSettings with it changed).
+		const Color& getDefaultColour() const { return settings_->colour; }
+		const Color& getDefaultFontColour() const { return settings_->font_colour; }
+		int getDefaultFontSize() const { return settings_->font_size; }
 		void setDefaultColour(const Color& colour);
 		void setDefaultFontColour(const Color& colour);
 		void setDefaultFontSize(int size);
@@ -270,7 +293,15 @@ namespace app_logic {
 		// A new box named `name` with the project's defaults.
 		NodeAttributes newNodeAttributes(const std::string& name) const;
 
+		// Makes graph match the settings: its distances and default sizes.
+		static void conform(GraphicalHypergraph& graph, const ProjectSettings& settings);
+
 	private:
+		// Has editor keep matching the settings, and makes it match them now.
+		template <typename Editor>
+		void follow(Editor& editor);
+		void conformAll();
+
 		std::string name_;
 		std::filesystem::path file_path_;
 		int active_index_ = 0;
@@ -279,9 +310,8 @@ namespace app_logic {
 		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;
 		std::vector<Color> recent_colours_;
-		Color default_colour_ = NodeAttributes().colour;
-		Color default_font_colour_ = NodeAttributes().font_colour;
-		int default_font_size_ = NodeAttributes::DEFAULT_FONT_SIZE;
+		// Shared with the editors' conformers, so it outlives a move of the project.
+		std::shared_ptr<ProjectSettings> settings_ = std::make_shared<ProjectSettings>();
 	};
 
 } // namespace app_logic

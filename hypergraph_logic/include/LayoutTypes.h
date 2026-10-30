@@ -95,6 +95,32 @@ namespace hypergraph_logic {
     // MIN_VERTICAL_SEP, HOP_RADIUS, ARCH_HEIGHT and the dummy sizes are not
     // settings: the layout's guarantees rest on them.
     // -------------------------------------------------------------------------
+    // -------------------------------------------------------------------------
+    // BoxSizes
+    //
+    // The default size of a box of each shape: a box without a size of its own
+    // (NodeAttributes::width / height) follows the one of its shape. Rounded
+    // rectangles use the rectangle's. Each graph hands its own to its boxes
+    // (Node::setBoxSizes), as part of its LayoutSettings.
+    // -------------------------------------------------------------------------
+    struct BoxSize {
+        double width = 0.0;
+        double height = 0.0;
+        bool operator==(const BoxSize& other) const noexcept { return width == other.width && height == other.height; }
+        bool operator!=(const BoxSize& other) const noexcept { return !(*this == other); }
+    };
+
+    struct BoxSizes {
+        BoxSize rectangle{ NODE_WIDTH, NODE_HEIGHT };
+        BoxSize circle{ CIRCLE_NODE_WIDTH, CIRCLE_NODE_HEIGHT };
+        BoxSize rhombus{ RHOMBUS_NODE_WIDTH, RHOMBUS_NODE_HEIGHT };
+
+        bool operator==(const BoxSizes& other) const noexcept {
+            return rectangle == other.rectangle && circle == other.circle && rhombus == other.rhombus;
+        }
+        bool operator!=(const BoxSizes& other) const noexcept { return !(*this == other); }
+    };
+
     struct LayoutSettings {
         // Gap between the boxes of two neighbours in a layer (see MIN_BLOCK_SEP).
         double block_sep = MIN_BLOCK_SEP;
@@ -104,6 +130,9 @@ namespace hypergraph_logic {
         // Gap between two horizontal segments stacked in the same layer gap
         // (see HORIZONTAL_SEP).
         double horizontal_sep = HORIZONTAL_SEP;
+        // Default size of each shape's boxes, within [MIN_NODE_WIDTH, MAX_NODE_WIDTH]
+        // x [MIN_NODE_HEIGHT, MAX_NODE_HEIGHT], like a box's own size.
+        BoxSizes box_sizes;
 
         // ── Ranges ───────────────────────────────────────────────────────────
         // The gap between boxes must leave room for a vertical segment's
@@ -126,12 +155,18 @@ namespace hypergraph_logic {
             s.block_sep = clamp(block_sep, MIN_BLOCK_SEP_SETTING, MAX_BLOCK_SEP_SETTING);
             s.layer_gap = clamp(layer_gap, MIN_LAYER_GAP_SETTING, MAX_LAYER_GAP_SETTING);
             s.horizontal_sep = clamp(horizontal_sep, MIN_HORIZONTAL_SEP_SETTING, MAX_HORIZONTAL_SEP_SETTING);
+            auto clampBox = [&](const BoxSize& b) {
+                return BoxSize{ clamp(b.width, MIN_NODE_WIDTH, MAX_NODE_WIDTH), clamp(b.height, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT) };
+            };
+            s.box_sizes.rectangle = clampBox(box_sizes.rectangle);
+            s.box_sizes.circle = clampBox(box_sizes.circle);
+            s.box_sizes.rhombus = clampBox(box_sizes.rhombus);
             return s;
         }
 
         bool operator==(const LayoutSettings& other) const noexcept {
             return block_sep == other.block_sep && layer_gap == other.layer_gap
-                && horizontal_sep == other.horizontal_sep;
+                && horizontal_sep == other.horizontal_sep && box_sizes == other.box_sizes;
         }
         bool operator!=(const LayoutSettings& other) const noexcept { return !(*this == other); }
     };

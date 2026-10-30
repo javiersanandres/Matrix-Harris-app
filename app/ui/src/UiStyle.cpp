@@ -386,6 +386,25 @@ namespace ui::style {
                 p.drawEllipse(QPointF(16.5, 15.0), 2.3, 2.3);
                 break;
             }
+            case Icon::Settings: {
+                // A gear: eight teeth around a ring, with its hole.
+                const QPointF centre(10.0, 10.0);
+                QPainterPath gear;
+                for (int i = 0; i < 8; ++i) {
+                    QPainterPath tooth;
+                    tooth.addRoundedRect(QRectF(-1.7, -8.6, 3.4, 4.2), 0.8, 0.8);
+                    gear.addPath(QTransform().translate(centre.x(), centre.y()).rotate(i * 45.0).map(tooth));
+                }
+                QPainterPath ring;
+                ring.addEllipse(centre, 6.0, 6.0);
+                gear = gear.united(ring);
+                QPainterPath hole;
+                hole.addEllipse(centre, 2.4, 2.4);
+                p.setPen(c.pen(palette::accent, 1.2));
+                p.setBrush(palette::accent_soft);
+                p.drawPath(gear.subtracted(hole));
+                break;
+            }
             case Icon::TakeOut: {
                 // The joint's dashed frame, and a piece leaving it up and to the right.
                 p.setPen(c.pen(palette::faint, 1.2, Qt::DashLine));

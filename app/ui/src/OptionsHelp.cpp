@@ -79,6 +79,7 @@ namespace ui::help {
         const QString EQUIVALENCES = QStringLiteral("Equivalencias");
         const QString JOINT = QStringLiteral("Esquema conjunto");
         const QString TABS = QStringLiteral("Pestañas");
+        const QString PROJECT = QStringLiteral("Proyecto");
 
         const QString HOW = QStringLiteral("Cómo se usa");
         const QString EXAMPLE = QStringLiteral("Ejemplo");
@@ -705,6 +706,45 @@ namespace ui::help {
                                         "esquema, usa <b>Copiar bloque o esquema</b> y <b>Pegar</b>.")),
                 },
                 QStringLiteral("duplicar copiar clonar pestaña ctrl+d") });
+
+            // ── Project ─────────────────────────────────────────────────────
+            t.push_back({ "projectSettings", PROJECT, QStringLiteral("Ajustes del proyecto"), I::Settings,
+                QStringLiteral("Decide cómo son las cajas y equivalencias nuevas, las distancias del dibujo y el "
+                               "tamaño por defecto de cada forma."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Abre el menú <b>Proyecto</b> y elige <b>Ajustes del proyecto…</b> (o pulsa "
+                                        "<b>Ctrl+,</b>). Cambia lo que quieras y pulsa <b>Aceptar</b>: se aplica a todos "
+                                        "los esquemas del proyecto, también al esquema conjunto.")),
+                    picture(pic("projectSettings", 1), QStringLiteral("Los ajustes de un proyecto.")),
+                    heading(QStringLiteral("Qué se puede ajustar")),
+                    text(QStringLiteral("<ul style=\"margin-left:-18px\">"
+                                        "<li><b>Cajas nuevas</b>: su forma, sus colores y su tamaño de fuente. Solo para "
+                                        "las que se creen a partir de ahora; las que ya existen no cambian. La vista "
+                                        "previa muestra cómo serán.</li>"
+                                        "<li><b>Equivalencias nuevas</b>: si se dibujan con línea continua o discontinua.</li>"
+                                        "<li><b>Distancias</b>: entre cajas vecinas de un mismo nivel, entre las cajas y "
+                                        "sus conexiones, y entre las líneas horizontales que se apilan entre dos niveles. "
+                                        "Todos los esquemas se redibujan con ellas.</li>"
+                                        "<li><b>Tamaño por defecto</b> de cada forma: el de las cajas que no tienen un "
+                                        "tamaño propio (ver <b>Cambiar el tamaño de una caja</b>).</li></ul>")),
+                    heading(QStringLiteral("Las cajas que ya existen")),
+                    text(QStringLiteral("Si cambias el tamaño por defecto de una forma y hay cajas que lo usan, al aceptar "
+                                        "se te pregunta qué hacer con ellas: con <b>Solo las cajas nuevas</b> se quedan "
+                                        "con el tamaño que tenían; con <b>También las existentes</b> toman el nuevo.")),
+                    picture(pic("projectSettings", 2), QStringLiteral("La pregunta, al cambiar un tamaño por defecto.")),
+                    heading(QStringLiteral("Predeterminados de la aplicación")),
+                    text(QStringLiteral("Marca <b>Usar estos ajustes en los proyectos nuevos</b> para que todo proyecto "
+                                        "nuevo empiece con ellos. <b>Cargar los de la aplicación</b> rellena el formulario "
+                                        "con esos ajustes, y <b>Valores de fábrica</b>, con los que trae la aplicación.")),
+                    text(QStringLiteral("Para que un proyecto que ya tienes adopte los predeterminados de la aplicación de "
+                                        "una vez, elige <b>Proyecto › Aplicar los ajustes predeterminados de la "
+                                        "aplicación</b>.")),
+                    note(QStringLiteral("Los ajustes se guardan con el proyecto. Cambiarlos no se deshace con <b>Ctrl+Z</b>: "
+                                        "para volver atrás, abre de nuevo los ajustes y deja los valores como estaban.")),
+                },
+                QStringLiteral("ajustes configuración preferencias predeterminados defecto distancias separación "
+                               "tamaño forma color fuente equivalencias nuevo proyecto ctrl+,") });
 
             return t;
         }

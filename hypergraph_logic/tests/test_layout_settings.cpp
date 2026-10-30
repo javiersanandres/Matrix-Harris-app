@@ -115,6 +115,44 @@ namespace hypergraph_logic::layout_settings_tests {
         EXPECT_EQ(g.duplicate().getLayoutSettings(), g.getLayoutSettings());
     }
 
+    // Boxes without a size of their own follow their graph's default sizes,
+    // also those created later or copied with the graph.
+    TEST(LayoutSettings, BoxesWithoutOwnSizeFollowTheGraphsDefaultSizes) {
+        GraphicalHypergraph g("g");
+        NodePtr A = g.createNode("A", 0, -1, nullptr);
+        NodeAttributes own("B");
+        own.height = 40.0;
+        NodePtr B = g.createNode(own, 0, -1, nullptr);
+        NodeAttributes circle("C");
+        circle.shape = NodeShape::Circle;
+        NodePtr C = g.createNode(circle, 0, -1, nullptr);
+        g.computeLayout();
+
+        LayoutSettings s;
+        s.box_sizes.rectangle = BoxSize{ 150.0, 70.0 };
+        s.box_sizes.circle = BoxSize{ 60.0, 60.0 };
+        g.setLayoutSettings(s);
+        EXPECT_DOUBLE_EQ(A->getWidth(), 150.0);
+        EXPECT_DOUBLE_EQ(A->getHeight(), 70.0);
+        EXPECT_DOUBLE_EQ(B->getWidth(), 150.0);
+        EXPECT_DOUBLE_EQ(B->getHeight(), 40.0); // its own height
+        EXPECT_DOUBLE_EQ(C->getWidth(), 60.0);
+        EXPECT_NEAR(g.getX(B) - g.getX(A), 150.0 + MIN_BLOCK_SEP, 1e-9);
+
+        NodePtr D = g.createNode("D", 0, -1, nullptr);
+        g.computeLayout();
+        EXPECT_DOUBLE_EQ(D->getWidth(), 150.0);
+
+        const GraphicalHypergraph copy = g.clone();
+        for (const auto& n : copy.getAllNodes())
+            if (n->getName() == "A") EXPECT_DOUBLE_EQ(n->getWidth(), 150.0);
+
+        // Out of range, they are brought inside it.
+        s.box_sizes.rhombus = BoxSize{ 1.0, 1e6 };
+        g.setLayoutSettings(s);
+        EXPECT_EQ(g.getLayoutSettings().box_sizes.rhombus, (BoxSize{ MIN_NODE_WIDTH, MAX_NODE_HEIGHT }));
+    }
+
     // The tightest gap still leaves every port on its box and the boxes apart,
     // which the vertical overlap detection relies on.
     TEST(LayoutSettings, TightestGapKeepsTheBoxesApartAndThePortsOnThem) {
