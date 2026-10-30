@@ -52,6 +52,7 @@ namespace ui {
         constexpr int LIFT_MS = 170;
         constexpr int PICK_UP_MS = 260;  // a piece hopping under the cursor
         constexpr int TAKE_OUT_MS = 220;
+        constexpr int FOLLOW_MS = 180;   // a dragged box's chain switching between reorder and follow
 
         // A small label in the brand gradient; its position is the middle of its
         // bottom edge. The scene scales it to look the same size at any zoom of
@@ -286,6 +287,8 @@ namespace ui {
                 ok = g.canAddTargetToEdge(e, n); break;
             case InteractionState::WaitingForSecondNode_SimplifyConnection:
                 ok = e && (e->containsSource(n) || e->containsTarget(n)); break;
+            case InteractionState::WaitingForSecondNode_AddEquivalence:
+                ok = g.canAddEquivalence(f, n); break;
             case InteractionState::Idle:
                 break;
             }
@@ -362,6 +365,8 @@ namespace ui {
             return QStringLiteral("Elige la caja que se unirá a la conexión por abajo");
         case InteractionState::WaitingForSecondNode_SimplifyConnection:
             return QStringLiteral("Elige la caja que quieres quitar de la conexión");
+        case InteractionState::WaitingForSecondNode_AddEquivalence:
+            return QStringLiteral("Elige la caja que será equivalente a «%1»").arg(name);
         case InteractionState::Idle:
             break;
         }
@@ -520,6 +525,8 @@ namespace ui {
             InteractionState::WaitingForSecondNode_FuseNodes,
             QStringLiteral("Ninguna caja puede fusionarse con esta"));
 
+        addEquivalenceEntries(menu, node);
+
         const PieceChoice piece = pieceChoiceFor(node);
         addMoveEntries(menu, piece, node);
         addCopyEntries(menu, node);
@@ -558,9 +565,31 @@ namespace ui {
                 connect(a, &QAction::triggered, this, [this, raw, node] { onToggleUncertain(raw, node); });
                 ++entries;
             }
+            // And its equivalence lines, at most one on each side: the same as
+            // choosing the line's style from the line itself.
+            if (const EquivalenceChain* chain = currentGraph().getEquivalenceChain(node)) {
+                const auto& members = chain->members;
+                const auto at = std::find(members.begin(), members.end(), node_ptr) - members.begin();
+                for (const auto k : { at - 1, at + 1 }) {
+                    if (k < 0 || k >= static_cast<std::ptrdiff_t>(members.size())) continue;
+                    Node* other = members[static_cast<size_t>(k)].get();
+                    QAction* a = doubtful->addAction(QStringLiteral("Con «%1» (equivalencia)")
+                        .arg(QFontMetrics(doubtful->font()).elidedText(QString::fromStdString(other->getName()),
+                             Qt::ElideRight, 220)));
+                    a->setCheckable(true);
+                    const bool dashed = !currentGraph().isEquivalenceContinuous(node_ptr, other->shared_from_this());
+                    a->setChecked(dashed);
+                    a->setToolTip(QStringLiteral("Marca esta equivalencia si no estás seguro de ella: "
+                                                 "la línea que las une se dibujará discontinua."));
+                    connect(a, &QAction::triggered, this, [this, node, other, dashed] {
+                        onSetEquivalenceStyle(node, other, dashed);
+                    });
+                    ++entries;
+                }
+            }
             if (entries == 0) {
                 doubtful->menuAction()->setEnabled(false);
-                doubtful->menuAction()->setToolTip(QStringLiteral("Esta caja no tiene conexiones"));
+                doubtful->menuAction()->setToolTip(QStringLiteral("Esta caja no tiene conexiones ni equivalencias"));
             }
         }
 
@@ -658,6 +687,87 @@ namespace ui {
         menu->popup(QCursor::pos());
     }
 
+    void DiagramScene::addEquivalenceEntries(QMenu* menu, Node* node) {
+        const GraphicalHypergraph& graph = currentGraph();
+        const NodePtr node_ptr = node->shared_from_this();
+        const EquivalenceChain* chain = graph.getEquivalenceChain(node);
+
+        style::addMenuSection(menu, QStringLiteral("Equivalencias"));
+        QAction* make = menu->addAction(style::icon(style::Icon::Equivalent), QStringLiteral("Hacer equivalente a…"),
+            [this, node] { beginSelection(InteractionState::WaitingForSecondNode_AddEquivalence, node, nullptr); });
+        make->setToolTip(QStringLiteral("Elige otra caja: quedarán una junto a la otra, en el mismo nivel, "
+                                        "unidas por una línea horizontal"));
+        if (candidatesFor(InteractionState::WaitingForSecondNode_AddEquivalence, node, nullptr).empty()) {
+            make->setEnabled(false);
+            const bool middle = chain && chain->members.front() != node_ptr && chain->members.back() != node_ptr;
+            make->setToolTip(middle
+                ? QStringLiteral("Esta caja ya tiene una caja equivalente a cada lado: solo las de los extremos "
+                                 "de la cadena pueden hacerse equivalentes a otra")
+                : QStringLiteral("Ninguna caja puede ser equivalente a esta: las conexiones que hay entre ellas "
+                                 "lo impiden"));
+        }
+
+        // One entry per line it has: with the box on its left, then on its right.
+        if (!chain) return;
+        const auto& members = chain->members;
+        const auto at = std::find(members.begin(), members.end(), node_ptr) - members.begin();
+        for (const auto k : { at - 1, at + 1 }) {
+            if (k < 0 || k >= static_cast<std::ptrdiff_t>(members.size())) continue;
+            Node* other = members[static_cast<size_t>(k)].get();
+            const QString name = QFontMetrics(menu->font()).elidedText(QString::fromStdString(other->getName()),
+                Qt::ElideRight, 200);
+            QAction* a = menu->addAction(style::icon(style::Icon::RemoveEquivalence),
+                QStringLiteral("Quitar equivalencia con «%1»").arg(name),
+                [this, node, other] { onRemoveEquivalence(node, other); });
+            a->setToolTip(QStringLiteral("Borra la línea que las une: la cadena se parte en dos por ahí"));
+        }
+    }
+
+    void DiagramScene::showEquivalenceContextMenu(EquivalenceItem* item, const QPointF&) {
+        if (state_ != InteractionState::Idle) {
+            cancelInteraction();
+            return;
+        }
+        Node* left = item->left();
+        Node* right = item->right();
+        const bool continuous = item->isContinuous();
+
+        QMenu* menu = style::createMenu();
+        menu->setAttribute(Qt::WA_DeleteOnClose);
+        menu->setToolTipsVisible(true);
+
+        const QString span = QStringLiteral("%1  ≡  %2")
+            .arg(QString::fromStdString(left->getName()), QString::fromStdString(right->getName()));
+        const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
+        style::addMenuHeader(menu,
+            style::icon(continuous ? style::Icon::EquivalenceSolid : style::Icon::EquivalenceDashed).pixmap(QSize(28, 28), dpr),
+            continuous ? QStringLiteral("Equivalencia") : QStringLiteral("Equivalencia hipotética"),
+            QFontMetrics(menu->font()).elidedText(span, Qt::ElideRight, 260));
+
+        style::addMenuSection(menu, QStringLiteral("Estilo"));
+        if (continuous) {
+            QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceDashed), QStringLiteral("Usar línea discontinua"),
+                [this, left, right] { onSetEquivalenceStyle(left, right, false); });
+            a->setToolTip(QStringLiteral("Marca esta equivalencia como hipotética: las cajas de un lado de la "
+                                         "línea dejan de ser seguras con las del otro"));
+        }
+        else {
+            QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceSolid), QStringLiteral("Usar línea continua"),
+                [this, left, right] { onSetEquivalenceStyle(left, right, true); });
+            a->setToolTip(QStringLiteral("Da esta equivalencia por segura: las cajas seguras con una lo pasan a ser "
+                                         "con la otra, y alguna otra línea de la cadena puede volverse continua"));
+        }
+
+        style::addMenuSection(menu, QStringLiteral("Eliminar"));
+        QAction* remove = menu->addAction(style::icon(style::Icon::RemoveEquivalence), QStringLiteral("Quitar equivalencia"),
+            [this, left, right] { onRemoveEquivalence(left, right); });
+        remove->setToolTip(QStringLiteral("Borra esta línea: la cadena se parte en dos por ahí, y cada parte vuelve "
+                                          "al nivel que le corresponde"));
+
+        help::addHelpButtons(menu, dialogParent());
+        menu->popup(QCursor::pos());
+    }
+
     void DiagramScene::showBackgroundContextMenu(const QPointF& scene_pos) {
         QMenu* menu = style::createMenu();
         menu->setAttribute(Qt::WA_DeleteOnClose);
@@ -750,10 +860,15 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
         for (const auto& d : diagrams) {
             const bool is_added = added.count(d.id) > 0;
-            // Why it cannot be taken out, when it is here but mixed with others.
+            // Why it cannot be taken out, when it is here but bound to others; and
+            // whether equivalences join it to others (it can still be taken out).
             QString blocked;
+            bool equivalent_to_others = false;
             if (is_added) {
-                try { joint.getHypergraphNodes(d.id); }
+                try {
+                    joint.getRemovableNodes(d.id);
+                    equivalent_to_others = !joint.isSeparable(d.id);
+                }
                 catch (const std::exception& e) { blocked = QString::fromStdString(e.what()); }
             }
 
@@ -778,8 +893,9 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             status->setObjectName("diagramStatus");
             status->setProperty("added", is_added);
             status->setText(!is_added ? QStringLiteral("Fuera del conjunto")
-                          : blocked.isEmpty() ? QStringLiteral("En el conjunto")
-                          : QStringLiteral("En el conjunto · unido a otros"));
+                          : !blocked.isEmpty() ? QStringLiteral("En el conjunto · unido a otros")
+                          : equivalent_to_others ? QStringLiteral("En el conjunto · con equivalencias a otros")
+                          : QStringLiteral("En el conjunto"));
             texts->addWidget(status);
             layout->addLayout(texts, 1);
             layout->addSpacing(14);
@@ -803,8 +919,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
                          : QStringLiteral("Añadirlo aquí, donde has hecho clic"));
             QToolButton* remove = makeButton(style::Icon::Trash, is_added && blocked.isEmpty(),
                 !is_added ? QStringLiteral("No está en el esquema conjunto")
-                : blocked.isEmpty() ? QStringLiteral("Quitarlo del esquema conjunto (el esquema original no cambia)")
-                : blocked + QStringLiteral("\nTambién puedes usar «Quitar bloque» en una de sus cajas."));
+                : !blocked.isEmpty() ? blocked + QStringLiteral("\nTambién puedes usar «Quitar bloque» en una de sus cajas.")
+                : equivalent_to_others ? QStringLiteral("Quitarlo del esquema conjunto, con sus equivalencias con "
+                                                        "otros esquemas (el esquema original no cambia)")
+                : QStringLiteral("Quitarlo del esquema conjunto (el esquema original no cambia)"));
 
             const QString id = QString::fromStdString(d.id);
             const double click_x = scene_pos.x();
@@ -857,8 +975,15 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         NodePtr first_ptr = first ? first->shared_from_this() : nullptr;
         NodePtr second_ptr = second ? second->shared_from_this() : nullptr;
         HyperedgePtr edge_ptr = edge ? edge->shared_from_this() : nullptr;
+        // Every box glides from where it is now: what an operation moves (a chain
+        // coming down to its equivalent's layer, boxes making room) is seen moving.
+        const auto from = nodeCenters();
 
         try {
+            if (st == InteractionState::WaitingForSecondNode_AddEquivalence) {
+                if (is_joint_) joint_editor_->addEquivalence(first_ptr, second_ptr);
+                else           regular_editor_->addEquivalence(first_ptr, second_ptr);
+            }
             if (st == InteractionState::WaitingForSecondNode_AddConnectionParent) {
                 // first is child, second is parent
                 if (is_joint_) joint_editor_->addConnection(second_ptr, first_ptr);
@@ -917,7 +1042,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             return;
         }
 
-        rebuild();
+        rebuildAnimated(from);
         emit graphChanged();
     }
 
@@ -976,10 +1101,12 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
     void DiagramScene::onRemoveNode(Node* node) {
         try {
+            // The rest glides together: in a chain, its equivalents close the gap.
+            const auto from = nodeCenters();
             NodePtr ptr = node->shared_from_this();
             if (is_joint_) joint_editor_->removeNode(ptr);
             else           regular_editor_->removeNode(ptr);
-            rebuild();
+            rebuildAnimated(from);
             emit graphChanged();
         }
         catch (const std::exception& e) { showError(e); }
@@ -1015,6 +1142,30 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             if (is_joint_) joint_editor_->setConnectionEndUncertain(edge_ptr, node_ptr, uncertain);
             else           regular_editor_->setConnectionEndUncertain(edge_ptr, node_ptr, uncertain);
             rebuild();
+            emit graphChanged();
+        }
+        catch (const std::exception& e) { showError(e); }
+    }
+
+    void DiagramScene::onSetEquivalenceStyle(Node* a, Node* b, bool continuous) {
+        try {
+            const NodePtr pa = a->shared_from_this(), pb = b->shared_from_this();
+            if (is_joint_) joint_editor_->setEquivalenceContinuous(pa, pb, continuous);
+            else           regular_editor_->setEquivalenceContinuous(pa, pb, continuous);
+            rebuild();
+            emit graphChanged();
+        }
+        catch (const std::exception& e) { showError(e); }
+    }
+
+    void DiagramScene::onRemoveEquivalence(Node* a, Node* b) {
+        try {
+            // Each part of the chain may go back up to its own layer: seen gliding.
+            const auto from = nodeCenters();
+            const NodePtr pa = a->shared_from_this(), pb = b->shared_from_this();
+            if (is_joint_) joint_editor_->removeEquivalence(pa, pb);
+            else           regular_editor_->removeEquivalence(pa, pb);
+            rebuildAnimated(from);
             emit graphChanged();
         }
         catch (const std::exception& e) { showError(e); }
@@ -1194,7 +1345,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
     void DiagramScene::stopAnimations() {
         // Stopping never emits finished(), so nothing runs on deleted items.
-        for (QPointer<QVariantAnimation>* a : { &transition_, &lift_, &fade_ })
+        for (QPointer<QVariantAnimation>* a : { &transition_, &lift_, &fade_, &follow_ })
             if (*a) (*a)->stop();
     }
 
@@ -1337,15 +1488,30 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         stopAnimations();
         BoxDrag drag;
         drag.item = item;
+
+        // Its chain, if it has one: the members may move along (see BoxDrag).
+        std::unordered_set<Node*> moving{ item->node() };
+        if (const EquivalenceChain* chain = currentGraph().getEquivalenceChain(item->node())) {
+            for (const auto& m : chain->members) {
+                drag.chain.push_back(m.get());
+                moving.insert(m.get());
+                if (m.get() != item->node()) drag.shown[m.get()] = QPointF();
+            }
+            for (EquivalenceItem* line : equivalence_items_)
+                if (moving.count(line->left())) drag.chain_lines.push_back(line);
+            if (const auto span = currentGraph().chainReorderSpan(item->node())) drag.reorder_span = *span;
+        }
         for (const auto& [edge, edge_item] : edge_items_) {
             bool touches = false;
-            for (const auto& s : edge->getSources()) touches = touches || s.get() == item->node();
-            for (const auto& t : edge->getTargets()) touches = touches || t.get() == item->node();
+            for (const auto& s : edge->getSources()) touches = touches || moving.count(s.get());
+            for (const auto& t : edge->getTargets()) touches = touches || moving.count(t.get());
             if (touches) drag.edges.push_back(edge_item);
         }
-        for (EquivalenceItem* line : equivalence_items_)
-            if (line->touches(item->node())) drag.edges.push_back(line);
         box_drag_ = drag;
+        // The other members ride just under the lifted box, their lines under them.
+        for (Node* m : box_drag_->chain)
+            if (m != item->node()) node_items_.at(m)->setZValue(19);
+        for (EquivalenceItem* line : box_drag_->chain_lines) line->setZValue(18);
         createGuides();
 
         // Lift: the box rises above everything, grows a little and casts a
@@ -1381,6 +1547,9 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const int layer = graph.layerForY(-c.y());
         const bool new_layer = graph.getLayers().find(layer) == graph.getLayers().end();
         const QRectF bounds = sceneRect();
+        updateChainPreview(c, layer);
+        const bool whole_chain = box_drag_ && box_drag_->mode == ChainMode::Whole;
+        const bool in_chain = box_drag_ && box_drag_->mode == ChainMode::Reorder;
 
         if (new_layer) {
             // A new layer opens right where the box crossed the edge of the
@@ -1394,7 +1563,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
                 for (QGraphicsItem* g : { static_cast<QGraphicsItem*>(guides_->halo), static_cast<QGraphicsItem*>(guides_->bar),
                                           static_cast<QGraphicsItem*>(guides_->dot_top), static_cast<QGraphicsItem*>(guides_->dot_bottom) })
                     g->setVisible(false);
-            placeChip(layer < 0 ? QStringLiteral("Nuevo nivel arriba") : QStringLiteral("Nuevo nivel abajo"),
+            placeChip(QString(layer < 0 ? QStringLiteral("Nuevo nivel arriba") : QStringLiteral("Nuevo nivel abajo"))
+                    + (whole_chain ? QStringLiteral(" · con su cadena") : QString()),
                 QPointF(c.x(), item->mapRectToScene(item->rect()).top() - 10.0));
             return;
         }
@@ -1403,11 +1573,25 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         // The target layer as a soft band across the diagram...
         placeBand(QRectF(bounds.left(), y - 40.0, bounds.width(), 80.0), false);
 
-        // ...and, inside it, where the box would land among its neighbours.
+        // ...and, inside it, where the box would land: next to the nearer end of a chain
+        // it would fall inside (not its own)...
+        if (!whole_chain && !in_chain) {
+            if (const auto end = chainEndLanding(item->node(), layer, c.x())) {
+                placeLandingMarker(end->first, y - 34.0, y + 34.0);
+                placeChip(end->second ? QStringLiteral("A la izquierda de la cadena")
+                                      : QStringLiteral("A la derecha de la cadena"),
+                    QPointF(end->first, y - 40.0));
+                return;
+            }
+        }
+        // ...or among its neighbours, boxes and lines alike (all of its chain moving with
+        // it, when it does).
+        std::unordered_set<Node*> moving{ item->node() };
+        if (whole_chain) moving.insert(box_drag_->chain.begin(), box_drag_->chain.end());
         double left = -std::numeric_limits<double>::infinity();
         double right = std::numeric_limits<double>::infinity();
         for (const auto& n : graph.getLayers().at(layer).nodes) {
-            if (n.get() == item->node()) continue;
+            if (moving.count(n.get())) continue;
             const double x = graph.getNodeLayout().at(n.get()).x;
             const double half = n->getWidth() / 2.0;
             if (x < c.x()) left = std::max(left, x + half);
@@ -1418,13 +1602,101 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         else if (std::isfinite(left))                    x = left + 36.0;
         else if (std::isfinite(right))                   x = right - 36.0;
         placeLandingMarker(x, y - 34.0, y + 34.0);
-        placeChip(QString(), QPointF(x, y - 40.0));
+        placeChip(whole_chain ? QStringLiteral("Toda la cadena se mueve") : QString(), QPointF(x, y - 40.0));
+    }
+
+    void DiagramScene::updateChainPreview(const QPointF& c, int target_layer) {
+        if (!box_drag_ || box_drag_->chain.empty()) return;
+        BoxDrag& drag = *box_drag_;
+        Node* dragged = drag.item->node();
+
+        // Reorder when dropped in its own layer before reaching a box of no part of
+        // the chain; past one, the whole chain goes along (as relocateNodeInLayer).
+        const bool reorder = target_layer == dragged->getLayer()
+            && drag.reorder_span.first < c.x() && c.x() < drag.reorder_span.second;
+        const ChainMode mode = reorder ? ChainMode::Reorder : ChainMode::Whole;
+
+        // Reordering, the other members stay where they are; otherwise every one
+        // follows the box, by as much as it has been moved.
+        for (Node* m : drag.chain)
+            if (m != dragged) drag.target[m] = reorder ? QPointF() : drag.item->pos();
+
+        if (mode != drag.mode) {
+            // From wherever they are shown, they glide into the new mode.
+            drag.mode = mode;
+            drag.from = drag.shown;
+            drag.blend = 0.0;
+            if (follow_) follow_->stop();
+            follow_ = new QVariantAnimation(this);
+            follow_->setDuration(FOLLOW_MS);
+            follow_->setStartValue(0.0);
+            follow_->setEndValue(1.0);
+            follow_->setEasingCurve(QEasingCurve::OutCubic);
+            connect(follow_, &QVariantAnimation::valueChanged, this, [this](const QVariant& v) {
+                if (!box_drag_) return;
+                box_drag_->blend = v.toDouble();
+                showChainPreview();
+            });
+            follow_->start(QAbstractAnimation::DeleteWhenStopped);
+        }
+        showChainPreview();
+    }
+
+    void DiagramScene::showChainPreview() {
+        if (!box_drag_) return;
+        BoxDrag& drag = *box_drag_;
+        for (auto& [m, offset] : drag.shown) {
+            const QPointF from = drag.from.count(m) ? drag.from.at(m) : QPointF();
+            const QPointF to = drag.target.count(m) ? drag.target.at(m) : QPointF();
+            offset = from + (to - from) * drag.blend;
+            node_items_.at(m)->setPos(offset);
+        }
+        // Following, the lines go with the members; reordering, they would join the
+        // wrong boxes, so they step back until the drop redraws them.
+        const bool whole = drag.mode == ChainMode::Whole;
+        for (EquivalenceItem* line : drag.chain_lines) {
+            Node* end = line->left() == drag.item->node() ? line->right() : line->left();
+            line->setPos(whole ? drag.shown.at(end) : QPointF());
+            line->setOpacity(whole ? 1.0 : 1.0 - 0.85 * drag.blend);
+        }
+    }
+
+    std::optional<std::pair<double, bool>> DiagramScene::chainEndLanding(Node* box, int layer, double x) const {
+        const GraphicalHypergraph& graph = currentGraph();
+        const auto& layout = graph.getNodeLayout();
+        for (const auto& chain : graph.getEquivalences()) {
+            if (chain.members.front()->getLayer() != layer) continue;
+            if (std::any_of(chain.members.begin(), chain.members.end(), [&](const NodePtr& m) { return m.get() == box; }))
+                continue;
+            const double lo = layout.at(chain.members.front().get()).x;
+            const double hi = layout.at(chain.members.back().get()).x;
+            if (!(lo < x && x < hi)) continue;
+
+            // The nearer end (the left one on a tie, as keepEquivalencesTogether), and
+            // the gap there between the chain and whatever is beyond it.
+            const bool to_left = x <= (lo + hi) / 2.0;
+            Node* end = to_left ? chain.members.front().get() : chain.members.back().get();
+            const double edge = layout.at(end).x + (to_left ? -1.0 : 1.0) * end->getWidth() / 2.0;
+            double beyond = to_left ? -std::numeric_limits<double>::infinity() : std::numeric_limits<double>::infinity();
+            for (const auto& n : graph.getLayers().at(layer).nodes) {
+                if (n.get() == box) continue;
+                const double nx = layout.at(n.get()).x;
+                const double half = n->getWidth() / 2.0;
+                if (to_left && nx < lo) beyond = std::max(beyond, nx + half);
+                if (!to_left && nx > hi) beyond = std::min(beyond, nx - half);
+            }
+            const double marker = std::isfinite(beyond) ? (edge + beyond) / 2.0 : edge + (to_left ? -36.0 : 36.0);
+            return std::make_pair(marker, to_left);
+        }
+        return std::nullopt;
     }
 
     void DiagramScene::endBoxDrag() {
         // Called while the release is being delivered to the box: the guides
         // are only hidden here; the rebuild that follows the drop removes them.
+        // The chain stays where the preview showed it: the drop glides it from there.
         if (lift_) lift_->stop();
+        if (follow_) follow_->stop();
         if (guides_) {
             for (QGraphicsItem* item : { static_cast<QGraphicsItem*>(guides_->band), static_cast<QGraphicsItem*>(guides_->halo),
                                          static_cast<QGraphicsItem*>(guides_->bar), static_cast<QGraphicsItem*>(guides_->dot_top),
@@ -1509,14 +1781,19 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
         const QString name = QString::fromStdString(joint.getIncorporatedName(diagram_id));
         std::unordered_set<Node*> doomed;
-        try { doomed = joint.getHypergraphNodes(diagram_id); }
+        try { doomed = joint.getRemovableNodes(diagram_id); }
         catch (const std::exception& e) { showError(e); return; }
 
+        // Equivalences with other diagrams go with it: the joint alone had them.
+        const bool equivalent_to_others = !joint.isSeparable(diagram_id);
         if (!dialogs::confirm(dialogParent(),
                 name.isEmpty() ? QStringLiteral("¿Quitar este esquema del esquema conjunto?")
                                : QStringLiteral("¿Quitar «%1» del esquema conjunto?").arg(name),
-                QStringLiteral("Se quitarán del esquema conjunto todas sus cajas y conexiones. "
-                               "El esquema original no cambia y podrás volver a añadirlo."),
+                QStringLiteral("Se quitarán del esquema conjunto todas sus cajas y conexiones%1. "
+                               "El esquema original no cambia y podrás volver a añadirlo.")
+                    .arg(equivalent_to_others
+                        ? QStringLiteral(", y sus equivalencias con cajas de otros esquemas")
+                        : QString()),
                 QStringLiteral("Quitar"), true))
             return;
 

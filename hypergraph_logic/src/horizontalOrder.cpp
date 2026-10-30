@@ -70,6 +70,7 @@ namespace horizontal_overlapping_internal {
         struct MipSolveResult {
             bool success = false;
             std::vector<double> col_value;
+            bool out_of_time = false; // Gurobi only: see GurobiSolution::out_of_time
         };
 
         // ── HiGHS backend ──────────────────────────────────────────────────────
@@ -149,6 +150,7 @@ namespace horizontal_overlapping_internal {
             MipSolveResult result;
             result.success = solution.success;
             result.col_value = std::move(solution.x);
+            result.out_of_time = solution.out_of_time;
             return result;
         }
 
@@ -348,8 +350,10 @@ namespace horizontal_overlapping_internal {
         // ── Solve: Gurobi if usable (or forced), else HiGHS ─────────────────────
         //
         // Normally (kAuto) Gurobi is tried first when this build has it and a
-        // valid license is actually present on this machine right now; any solve
-        // failure falls back to HiGHS rather than giving up. A forced backend
+        // valid license is actually present on this machine right now; a Gurobi
+        // that fails to run falls back to HiGHS rather than giving up, but one that
+        // runs out of time does not (HiGHS would only spend a budget of its own on
+        // it: the layer keeps its order, as when HiGHS runs out). A forced backend
         // (see HorizontalOrderBackendTestHook.h) skips that auto-detect entirely,
         // for benchmarking one solver in isolation; it is read once here and
         // reset immediately so it can never apply to a later call.
@@ -372,7 +376,9 @@ namespace horizontal_overlapping_internal {
             if (gurobiUsable()) {
                 result = solveWithGurobi(model, total_mip_layers_);
             }
-            if (!result.success) {
+            // HiGHS steps in when Gurobi is not there or failed to run; not when it ran
+            // out of time, which HiGHS would only repeat with a budget of its own.
+            if (!result.success && !result.out_of_time) {
                 result = solveWithHighs(model, total_mip_layers_);
             }
             break;

@@ -512,7 +512,9 @@ namespace hypergraph_logic {
 		// shorter one (the right one on a tie). It moves towards the other chain's end only as far
 		// as the rule needs: past the real nodes between them, which keep their order and take
 		// the place it left, but not past the dummies next to that end, which stay in the gap
-		// (with only dummies between the chains, nothing moves sideways). The layers above and
+		// (with only dummies between the chains, nothing moves sideways). A chain that came
+		// down first takes the place its horizontalPosition gives it in the new layer, as if
+		// moved straight down, and then follows the same rule. The layers above and
 		// below are then sifted around it (its subgraph following it), with the merged chain's
 		// layer left as placed.
 		//
@@ -668,6 +670,20 @@ namespace hypergraph_logic {
 		// node's index in its layer; GraphicalHypergraph uses its x coordinate.
 		//
 		virtual double horizontalPosition(const NodePtr& node) const;
+
+		// Whether node's horizontalPosition is one of its own: a GraphicalHypergraph's node
+		// that has no layout yet (one just made, a new dummy) has none. Always true here.
+		virtual bool hasHorizontalPosition(const NodePtr& /*node*/) const { return true; }
+
+		// ── placeByPosition ──────────────────────────────────────────────────────────────────────
+		//
+		// Moves nodes, all in layer, together (in their order) to the place position gives them
+		// there, as if moved straight into it: right after every other node of the layer standing
+		// left of it (see horizontalPosition). Here, nodes with no position of their own do not
+		// count; GraphicalHypergraph first places them where their guessed x puts them
+		// (placeUnpositionedNodes), and then counts them at that x.
+		//
+		virtual void placeByPosition(int layer, const std::vector<NodePtr>& nodes, double position);
 
 		// ── keepEquivalencesTogether ─────────────────────────────────────────────────────────────
 		//

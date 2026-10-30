@@ -62,6 +62,7 @@ namespace hypergraph_logic {
 		constexpr double GRB_INFINITY = 1e100;
 		constexpr int GRB_MINIMIZE = 1;
 		constexpr int GRB_OPTIMAL = 2;
+		constexpr int GRB_TIME_LIMIT = 9;
 		constexpr int GRB_SUBOPTIMAL = 13;
 		constexpr double INPUT_INFINITY = 1e30; // HiGHS' infinity, used by the models handed in
 
@@ -375,6 +376,9 @@ namespace hypergraph_logic {
 				else {
 					result.x.clear();
 				}
+			}
+			else if (status == GRB_TIME_LIMIT) {
+				result.out_of_time = true;
 			}
 		}
 

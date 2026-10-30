@@ -145,15 +145,41 @@ namespace hypergraph_logic {
 		// computeLayout() which is called internally at the end.
 		//
 		// Equivalence chains (see Hypergraph::addEquivalence) stay together:
-		//   - A member dropped strictly between its chain's outer members takes
-		//     its place among them; every line keeps its style where it is.
-		//   - A member dropped anywhere else takes its whole chain along, as it is,
-		//     moved by as much as it was dragged.
+		//   - A member dropped within its chain's reorder span (chainReorderSpan:
+		//     up to the nearest real box of no part of it, on either side) goes
+		//     where its x puts it, as any node would: only members and dummies are
+		//     there, so it may change places with other members and pass dummies,
+		//     between them or around the chain. The chain takes the order the layer
+		//     gives its members; certainty groups go with the boxes.
+		//   - A member dropped past such a box takes its whole chain along, as it
+		//     is, moved by as much as it was dragged: the chain has to pass the box.
 		//   - Any other node dropped inside a chain goes to its nearer end.
 		// Throws std::invalid_argument if the order of the layer does not change.
 		//
 		void relocateNodeInLayer(const NodePtr& node, double new_x_coordinate,
 								std::set<int>* out_altered_layers = nullptr);
+
+		// ── placeAtX ──────────────────────────────────────────────────────────────
+		//
+		// Right after relocateNodeToLayer: puts node (with its chain, as it is) where
+		// x puts it in its new layer, as if moved straight down or up into it, x
+		// being where the user dropped it in the layout as it was before the move
+		// (which this does not recompute). The nodes the move made there (new
+		// dummies) first take the places their guessed x gives them, and count at
+		// that x (see placeByPosition). Dropped inside another chain, it goes to its
+		// nearer end. If it has children and passed nodes with children too, the
+		// layers below are sifted, its subgraph following it; out_altered_layers
+		// collects the layers whose hyperedges may span differently.
+		void placeAtX(const NodePtr& node, double x, std::set<int>* out_altered_layers = nullptr);
+
+		// ── chainReorderSpan ──────────────────────────────────────────────────────
+		//
+		// Where a member of a chain can be dropped to change its place in the chain
+		// (see relocateNodeInLayer): the open interval of x between the nearest real
+		// boxes of no part of the chain on its left and on its right (infinite where
+		// there is none). Dummies do not bound it: a chain may hold them. nullopt
+		// for a node of no chain, or before any layout.
+		std::optional<std::pair<double, double>> chainReorderSpan(const Node* member) const;
 
 		// ── relocateNodeToLayer ───────────────────────────────────────────────────
 		//
@@ -478,6 +504,8 @@ namespace hypergraph_logic {
 		// if it has none.
 		//
 		double horizontalPosition(const NodePtr& node) const override;
+		bool hasHorizontalPosition(const NodePtr& node) const override { return validLayout(node.get()) != nullptr; }
+		void placeByPosition(int layer, const std::vector<NodePtr>& nodes, double position) override;
 
 		// ── relocateChainInLayer ──────────────────────────────────────────────────
 		//

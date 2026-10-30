@@ -77,10 +77,15 @@ namespace hypergraph_logic {
 		bool success = false;  // a feasible solution was found (optimal or not)
 		std::vector<double> x; // one value per column
 		double objective = 0.0;
+		// No solution, but nothing went wrong: Gurobi ran and its time limit came
+		// first. Another solver given the same budget would not do better, so
+		// callers do not retry with one (any other failure, they may).
+		bool out_of_time = false;
 	};
 
 	// Solves `mip` with Gurobi. Fails (success == false) when Gurobi is not in
-	// use (see gurobiInUse) or anything goes wrong on its side; never throws.
+	// use (see gurobiInUse), runs out of time with no solution (out_of_time) or
+	// anything goes wrong on its side; never throws.
 	GurobiSolution solveMipWithGurobi(const GurobiMip& mip);
 
 } // namespace hypergraph_logic

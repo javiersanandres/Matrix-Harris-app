@@ -704,127 +704,21 @@ namespace app_logic {
 			}
 		}
 
-		// ── computeBracketedX ─────────────────────────────────────────────────────
-		//
-		// Translates the user's raw target x (chosen against the destination layer
-		// as it looked BEFORE the vertical move) into an x that reproduces their
-		// actual intent: "place node between these two neighbors." Brackets against
-		// old_nodes (the pre-move, x-sorted roster of whichever old layer node's
-		// destination corresponds to), using new_layer_nodes/new_layout (the live,
-		// post-move roster and coordinates) to compute the final target.
-		double computeBracketedX(const std::vector<NodePtr>& old_nodes,
-			const std::unordered_map<Node*, NodeLayout>& old_layout,
-			const std::vector<NodePtr>& new_layer_nodes,
-			const std::unordered_map<Node*, NodeLayout>& new_layout,
-			const NodePtr& node,
-			double new_x_coordinate) const {
-			std::unordered_set<Node*> new_layer_members;
-			for (const auto& n : new_layer_nodes) new_layer_members.insert(n.get());
-
-			std::vector<NodePtr> candidates;
-			candidates.reserve(old_nodes.size());
-			for (const auto& n : old_nodes) {
-				if (n.get() == node.get()) continue;
-				if (new_layer_members.count(n.get())) candidates.push_back(n);
-			}
-
-			NodePtr left, right;
-			for (const auto& n : candidates) {
-				if (old_layout.at(n.get()).x <= new_x_coordinate) left = n;
-				else { right = n; break; }
-			}
-
-			auto index_excluding_node = [&](const NodePtr& target) -> int {
-				int idx = 0;
-				for (const auto& n : new_layer_nodes) {
-					if (n.get() == node.get()) continue;
-					if (n.get() == target.get()) return idx;
-					++idx;
-				}
-				return -1;
-				};
-			auto min_max_excluding_node = [&]() {
-				double mn = std::numeric_limits<double>::max();
-				double mx = std::numeric_limits<double>::lowest();
-				for (const auto& n : new_layer_nodes) {
-					if (n.get() == node.get()) continue;
-					double x = new_layout.at(n.get()).x;
-					mn = std::min(mn, x);
-					mx = std::max(mx, x);
-				}
-				return std::make_pair(mn, mx);
-				};
-
-			if (!left && right) {
-				return min_max_excluding_node().first - 1.0;
-			}
-			if (left && !right) {
-				return min_max_excluding_node().second + 1.0;
-			}
-			if (left && right) {
-				int li = index_excluding_node(left);
-				int ri = index_excluding_node(right);
-				if (li >= 0 && ri >= 0) {
-					return (new_layout.at(left.get()).x + new_layout.at(right.get()).x) / 2.0;
-				}
-				double old_min = old_layout.at(old_nodes.front().get()).x;
-				double old_max = old_layout.at(old_nodes.back().get()).x;
-				double old_width = old_max - old_min;
-				if (old_width > 0.0) {
-					auto [new_min, new_max] = min_max_excluding_node();
-					double new_width = new_max - new_min;
-					double relative = (new_x_coordinate - old_min) / old_width;
-					return new_min + relative * new_width;
-				}
-			}
-			return new_x_coordinate;
-		}
-
 		// ── relocateNode ───────────────────────────────────────────────────────────────
 		//
 		// Clones the graph, attempts to relocate both vertically and horizontally at the
-		// same time, and commits the snapshot only on success.
+		// same time, and commits the snapshot only on success. In another layer, the box
+		// goes where new_x_coordinate (the drop, in the layout as it was) puts it there,
+		// the dummies the move makes counting at their guessed x (see placeAtX); in its
+		// own layer, relocateNodeInLayer decides.
 		void relocateNode(const NodePtr& node, double new_x_coordinate, double new_y_coordinate) {
 			auto saved = derived().takeSnapshot();
 			std::set<int> mip_layers;
 			try {
 				auto& graph = derived().graph();
-
-				std::map<int, std::vector<NodePtr>> old_layers_nodes;
-				std::unordered_map<Node*, int> old_layer_of_node;
-				for (const auto& [layer_idx, layer_data] : graph.getLayers()) {
-					old_layers_nodes[layer_idx] = layer_data.nodes;
-					for (const auto& n : layer_data.nodes) old_layer_of_node[n.get()] = layer_idx;
-				}
-				const auto old_layout = graph.getNodeLayout();
-
 				graph.relocateNodeToLayer(node, new_y_coordinate, &mip_layers);
-				graph.assignXCoordinates();
-
-				double transformed_x = new_x_coordinate;
-				const auto& new_layer_nodes = graph.getLayerData(node->getLayer()).nodes;
-
-				auto old_layer_lookup = old_layer_of_node.end();
-				for (const auto& n : new_layer_nodes) {
-					if (n.get() == node.get()) continue;
-					auto it = old_layer_of_node.find(n.get());
-					if (it != old_layer_of_node.end()) { old_layer_lookup = it; break; }
-				}
-
-				if (old_layer_lookup != old_layer_of_node.end()) {
-					transformed_x = computeBracketedX(
-						old_layers_nodes.at(old_layer_lookup->second), old_layout,
-						new_layer_nodes, graph.getNodeLayout(),
-						node, new_x_coordinate);
-				}
-
-				try {
-					graph.relocateNodeInLayer(node, transformed_x, &mip_layers);
-					graph.computeLayout(mip_layers);
-				}
-				catch (...) {
-					graph.computeLayout(mip_layers);
-				}
+				graph.placeAtX(node, new_x_coordinate, &mip_layers);
+				graph.computeLayout(mip_layers);
 			}
 			catch (const std::invalid_argument&) {
 				try {

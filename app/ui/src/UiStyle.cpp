@@ -402,6 +402,31 @@ namespace ui::style {
                 c.existing({ 4.5, 13.0, 6.0, 2.8 });
                 break;
             }
+            case Icon::Equivalent:
+                // The current box on the left, joined at mid-height to one to pick.
+                p.setPen(c.pen(palette::accent, 1.8));
+                p.drawLine(QPointF(8.5, 10.0), QPointF(11.5, 10.0));
+                c.current({ 1.5, 6.5, 7.0, 7.0 });
+                c.pick({ 11.5, 6.5, 7.0, 7.0 });
+                break;
+            case Icon::EquivalenceSolid:
+            case Icon::EquivalenceDashed:
+            case Icon::RemoveEquivalence: {
+                QPen line = c.pen(which == Icon::RemoveEquivalence ? palette::faint : palette::accent, 1.8);
+                if (which == Icon::EquivalenceDashed) {
+                    line.setCapStyle(Qt::FlatCap);
+                    line.setDashPattern({ 1.3, 1.1 });
+                }
+                p.setPen(line);
+                p.drawLine(QPointF(7.5, 10.0), QPointF(12.5, 10.0));
+                c.existing({ 1.5, 6.5, 6.0, 7.0 });
+                c.existing({ 12.5, 6.5, 6.0, 7.0 });
+                if (which == Icon::RemoveEquivalence) {
+                    p.setPen(c.pen(palette::danger, 1.7));
+                    p.drawLine(QPointF(8.6, 13.4), QPointF(11.4, 6.6));
+                }
+                break;
+            }
             case Icon::Paste: {
                 // A clipboard, its clip in the accent colour, and a new box on it.
                 p.setPen(c.pen(palette::ink_soft, 1.2));

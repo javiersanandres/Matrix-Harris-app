@@ -142,6 +142,31 @@ namespace app_logic {
             EXPECT_THROW(ed.setEquivalenceContinuous(named(ed, "a"), named(ed, "b"), true), std::logic_error);
         }
 
+        TEST(EquivalenceEditing, ABoxDroppedInAnotherLayerGoesWhereItsXPutsIt) {
+            // {s, u} -> k, b -> k and l -> k: u dragged straight down into b's layer, where
+            // its move turns the hyperedge's dummy into a new one for s. It lands where its x
+            // puts it, after both dummies left of it (not in the place the move gave it).
+            HypergraphEditor ed(GraphicalHypergraph("g"));
+            for (const char* root : { "l", "s", "u", "t" }) ed.createNode(root, 0, 100, nullptr);
+            ed.createNode("lc", 1, 100, named(ed, "l"));
+            ed.createNode("b", 1, 100, named(ed, "t"));
+            ed.createNode("k", 2, 100, named(ed, "b"));
+            const HyperedgePtr e = ed.addConnection(named(ed, "s"), named(ed, "k"));
+            ed.addSourceToEdge(e, named(ed, "u"));
+            ed.addConnection(named(ed, "l"), named(ed, "k"));
+
+            const auto& g = ed.getGraph();
+            auto fullRow = [&] {
+                std::vector<std::string> names;
+                for (const auto& n : g.getNodesAt(1)) names.push_back(n->isDummy() ? "." : n->getName());
+                return names;
+            };
+            ASSERT_EQ(fullRow(), (std::vector<std::string>{ "lc", ".", ".", "b" }));
+            const double x = g.getNodeLayout().at(named(ed, "u").get()).x;
+            ed.relocateNode(named(ed, "u"), x, g.getLayerLayout().at(1));
+            EXPECT_EQ(fullRow(), (std::vector<std::string>{ "lc", ".", ".", "u", "b" }));
+        }
+
         TEST(EquivalenceEditing, BoxesOfTwoDiagramsCanBeEquivalentInTheJoint) {
             HypergraphEditor one(GraphicalHypergraph("one"));
             one.createNode("x", 0, 0, nullptr);

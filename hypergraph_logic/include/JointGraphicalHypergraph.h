@@ -215,6 +215,11 @@ namespace hypergraph_logic {
 		// Boxes (dummies included) that moveHypergraph would move. Throws as it does.
 		std::unordered_set<Node*> getHypergraphNodes(const std::string& id) const { return separableNodesOf(id); }
 
+		// Boxes (dummies included) that removeHypergraph would remove: the same as
+		// getHypergraphNodes unless equivalences join it to other diagrams, whose
+		// boxes stay. Throws as removeHypergraph does.
+		std::unordered_set<Node*> getRemovableNodes(const std::string& id) const { return ownNodesOf(id, false); }
+
 		// Diagram(s) a box came from (empty for a dummy box).
 		std::set<std::string> graphsOf(const Node* node) const;
 

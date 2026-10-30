@@ -298,6 +298,20 @@ namespace hypergraph_logic {
 		equivalences_.push_back(std::move(merged));
 	}
 
+	void Hypergraph::placeByPosition(int layer, const std::vector<NodePtr>& moved, double position) {
+		auto& nodes = layers_.at(layer).nodes;
+		const std::unordered_set<Node*> members = [&] {
+			std::unordered_set<Node*> s;
+			for (const auto& m : moved) s.insert(m.get());
+			return s;
+		}();
+		std::erase_if(nodes, [&](const NodePtr& n) { return members.count(n.get()) > 0; });
+		size_t at = 0;
+		for (size_t i = 0; i < nodes.size(); ++i)
+			if (hasHorizontalPosition(nodes[i]) && horizontalPosition(nodes[i]) < position) at = i + 1;
+		nodes.insert(nodes.begin() + static_cast<std::ptrdiff_t>(at), moved.begin(), moved.end());
+	}
+
 	bool Hypergraph::canAddEquivalence(const NodePtr& a, const NodePtr& b) const {
 		if (!a || !b || a == b || a->isDummy() || b->isDummy()) return false;
 		const int ca = chainIndexOf(a.get());
@@ -334,6 +348,9 @@ namespace hypergraph_logic {
 			: left_chain.size() < right_chain.size();
 		const std::vector<NodePtr>& mover = left_moves ? left_chain : right_chain;
 		const NodePtr& anchor = left_moves ? right : left;
+		const bool comes_down = left->getLayer() != right->getLayer();
+		// Where the mover stands, read before it comes down: its place in the new layer.
+		const double mover_x = horizontalPosition(mover.front());
 
 		EquivalenceChain merged;
 		merged.members = left_chain;
@@ -364,13 +381,23 @@ namespace hypergraph_logic {
 			keep_equivalences_together_ = keeping;
 		}
 
-		// The mover goes towards the other chain's end only as far as needed: past the real nodes
-		// between them, which take the place it left, but not past the dummies next to that end,
-		// which may stay in the gap. Already with only dummies between them, nothing moves. On
-		// the wrong side of the other chain (where a relocation left it), it goes right next to it.
+		// A mover that came down from another layer first takes the place its x gives it here,
+		// as if moved straight down (the relocation put it wherever a relocated node goes), once
+		// the nodes the relocation made there (new dummies) have their own places.
 		const int layer = anchor->getLayer();
 		auto& nodes = layers_.at(layer).nodes;
 		const std::vector<NodePtr> order_before = nodes;
+		if (comes_down) {
+			const bool keeping = keep_equivalences_together_;
+			keep_equivalences_together_ = false; // the merged chain is not together yet
+			placeByPosition(layer, mover, mover_x);
+			keep_equivalences_together_ = keeping;
+		}
+
+		// Then the mover goes towards the other chain's end only as far as needed: past the real
+		// nodes between them, which take the place it left, but not past the dummies next to that
+		// end, which may stay in the gap. Already with only dummies between them, nothing moves.
+		// On the wrong side of the other chain (where a relocation left it), it goes right next to it.
 		std::unordered_map<Node*, int> index;
 		for (int i = 0; i < static_cast<int>(nodes.size()); ++i) index[nodes[i].get()] = i;
 		const int first = index.at(mover.front().get()), last = index.at(mover.back().get());
@@ -385,15 +412,19 @@ namespace hypergraph_logic {
 		for (const auto& n : segment) moving.insert(n.get());
 		std::erase_if(nodes, [&](const NodePtr& n) { return moving.count(n.get()) > 0; });
 
+		// The dummies kept in the gap are only those between the two: the mover never goes back
+		// past where it stood (first, which is also where it stood once taken out: everything
+		// taken out was at first or later).
 		auto at = std::find(nodes.begin(), nodes.end(), anchor);
+		const bool keep_dummies_between = !wrong_side;
 		if (left_moves) {
-			if (!wrong_side)
-				while (at != nodes.begin() && (*std::prev(at))->isDummy()) --at;
+			if (keep_dummies_between)
+				while (at != nodes.begin() && (*std::prev(at))->isDummy() && at - nodes.begin() > first) --at;
 		}
 		else {
 			++at;
-			if (!wrong_side)
-				while (at != nodes.end() && (*at)->isDummy()) ++at;
+			if (keep_dummies_between)
+				while (at != nodes.end() && (*at)->isDummy() && at - nodes.begin() < first) ++at;
 		}
 		nodes.insert(at, segment.begin(), segment.end());
 		const bool moved_sideways = nodes != order_before;

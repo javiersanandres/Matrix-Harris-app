@@ -65,6 +65,10 @@ namespace ui::style {
         Copy,              // two sheets, the front one holding a piece of diagram
         Paste,             // a clipboard with a new box on it
         Duplicate,         // a diagram and its copy, one behind the other
+        Equivalent,        // "Hacer equivalente a": the current box joined sideways to one to pick
+        EquivalenceSolid,  // two boxes side by side joined by a continuous line
+        EquivalenceDashed, // the same with a discontinuous line
+        RemoveEquivalence, // two boxes side by side whose line is cut
     };
 
     QIcon icon(Icon which);

@@ -13,7 +13,8 @@ namespace ui {
 // chain (see HypergraphRenderer's "Equivalence lines"): continuous when they
 // are certainly equivalent, dashed otherwise. Like a connection, it is drawn
 // in the accent colour while hovered, so it reads as clickable, and its hit
-// area is wider than the line itself.
+// area is wider than the line itself. A click opens its menu (style and
+// removal, see DiagramScene::showEquivalenceContextMenu).
 //
 // While a two-click operation is pending, it steps back (Dimmed) unless it
 // touches the box the operation started from (see SelectionRole).
@@ -39,8 +40,11 @@ public:
     void setSelectionRole(SelectionRole role);
 
 protected:
+    // A click (left or right) opens the line's menu (see DiagramScene).
     void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
+    void mousePressEvent(QGraphicsSceneMouseEvent* event) override;
+    void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
 
 private:
     void refreshPen();

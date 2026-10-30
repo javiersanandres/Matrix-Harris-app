@@ -354,31 +354,114 @@ namespace hypergraph_logic {
 		}
 	}
 
+	void GraphicalHypergraph::placeAtX(const NodePtr& node, double x, std::set<int>* out_altered_layers) {
+		const int layer = node->getLayer();
+		const std::vector<NodePtr> members = equivalentNodes(node);
+		auto oldX = [&](const NodePtr& n) {
+			const NodeLayout* layout = validLayout(n.get());
+			return layout ? layout->x : x;
+		};
+		// The chain lands as it was: its first member as far left of x as it was of node.
+		const double position = x - (oldX(node) - oldX(members.front()));
+
+		const std::vector<NodePtr> before = layers_.at(layer).nodes;
+		placeByPosition(layer, members, position);
+		keepEquivalencesTogether(layer); // dropped inside another chain: its nearer end
+		const auto& after = layers_.at(layer).nodes;
+		if (after == before) return;
+
+		// The subgraph follows when it passed nodes with children (as in relocateNodeInLayer).
+		auto hasChildren = [](const NodePtr& n) { return !n->getChildren().empty(); };
+		const std::unordered_set<Node*> moving = [&] {
+			std::unordered_set<Node*> s;
+			for (const auto& m : members) s.insert(m.get());
+			return s;
+		}();
+		bool passed_children = false;
+		for (size_t i = 0; i < after.size(); ++i) {
+			if (moving.count(after[i].get()) || !hasChildren(after[i])) continue;
+			// Another node with children now on the other side of the moved ones than before.
+			const auto was = std::find(before.begin(), before.end(), after[i]);
+			if (was == before.end()) continue;
+			const auto first_before = std::find_if(before.begin(), before.end(), [&](const NodePtr& n) { return moving.count(n.get()) > 0; });
+			const auto first_after = std::find_if(after.begin(), after.end(), [&](const NodePtr& n) { return moving.count(n.get()) > 0; });
+			const bool left_before = was < first_before;
+			const bool left_after = static_cast<std::ptrdiff_t>(i) < first_after - after.begin();
+			passed_children = passed_children || left_before != left_after;
+		}
+		if (passed_children && std::any_of(members.begin(), members.end(), hasChildren)) {
+			std::vector<Node*> moved;
+			for (const auto& m : members) moved.push_back(m.get());
+			Hypergraph::minimizeCrossings(3, layer + 1, -1, {}, moved);
+		}
+		if (out_altered_layers)
+			for (const auto& [l, _] : layers_)
+				if (l >= layer - 1) out_altered_layers->insert(l);
+	}
+
+	std::optional<std::pair<double, double>> GraphicalHypergraph::chainReorderSpan(const Node* member) const {
+		const EquivalenceChain* chain = getEquivalenceChain(member);
+		if (!chain) return std::nullopt;
+		auto xOf = [&](const Node* n) -> std::optional<double> {
+			auto it = node_layout_.find(const_cast<Node*>(n));
+			if (it == node_layout_.end()) return std::nullopt;
+			return it->second.x;
+		};
+		double lo = std::numeric_limits<double>::infinity(), hi = -lo;
+		for (const auto& m : chain->members) {
+			const auto x = xOf(m.get());
+			if (!x) return std::nullopt;
+			lo = std::min(lo, *x);
+			hi = std::max(hi, *x);
+		}
+		double left = -std::numeric_limits<double>::infinity(), right = std::numeric_limits<double>::infinity();
+		auto layer = layers_.find(member->getLayer());
+		if (layer == layers_.end()) return std::nullopt;
+		for (const auto& n : layer->second.nodes) {
+			if (n->isDummy() || getEquivalenceChain(n.get()) == chain) continue;
+			const auto x = xOf(n.get());
+			if (!x) continue;
+			if (*x < lo) left = std::max(left, *x);
+			else if (*x > hi) right = std::min(right, *x);
+		}
+		return std::make_pair(left, right);
+	}
+
 	bool GraphicalHypergraph::relocateChainInLayer(const EquivalenceChain& chain, const NodePtr& node, double new_x) {
 		auto& nodes = layers_[node->getLayer()].nodes;
 		auto xOf = [&](const NodePtr& n) { return node_layout_[n.get()].x; };
 		double lo = std::numeric_limits<double>::infinity(), hi = -lo;
 		for (const auto& m : chain.members) { lo = std::min(lo, xOf(m)); hi = std::max(hi, xOf(m)); }
 		auto hasChildren = [](const NodePtr& n) { return !n->getChildren().empty(); };
+		const auto span = chainReorderSpan(node.get());
 
-		if (lo < new_x && new_x < hi) {
-			// Within the chain: the node takes its place among the other members, taking its
-			// certainty group along.
-			std::vector<NodePtr> order = chain.members;
-			std::stable_sort(order.begin(), order.end(), [&](const NodePtr& a, const NodePtr& b) {
-				return (a == node ? new_x : xOf(a)) < (b == node ? new_x : xOf(b));
-			});
-			if (order == chain.members) return false;
-			const std::unordered_set<Node*> members = [&] {
-				std::unordered_set<Node*> s;
-				for (const auto& m : order) s.insert(m.get());
-				return s;
-			}();
-			size_t k = 0;
-			for (auto& n : nodes)
-				if (members.count(n.get())) n = order[k++];
-			equivalences_[chainIndexOf(node.get())].members = order;
-			return hasChildren(node) && std::count_if(order.begin(), order.end(), hasChildren) > 1;
+		if (span && span->first < new_x && new_x < span->second) {
+			// Up to the nearest box of no part of it: only members and dummies stand there, so
+			// the node simply goes where its x puts it among them, as any node would, and the
+			// chain takes the order the layer gives its members (the node's certainty group goes
+			// with it). It may pass dummies, those between members and those around the chain.
+			std::vector<NodePtr> order;
+			order.reserve(nodes.size());
+			size_t at = 0;
+			for (const auto& n : nodes) {
+				if (n == node) continue;
+				order.push_back(n);
+				if (xOf(n) < new_x) at = order.size();
+			}
+			order.insert(order.begin() + static_cast<std::ptrdiff_t>(at), node);
+			if (order == nodes) return false;
+
+			// Crossing minimization below is needed when it passed nodes with children too.
+			const auto old_at = std::find(nodes.begin(), nodes.end(), node) - nodes.begin();
+			const auto lo_at = std::min<std::ptrdiff_t>(old_at, static_cast<std::ptrdiff_t>(at));
+			const auto hi_at = std::max<std::ptrdiff_t>(old_at, static_cast<std::ptrdiff_t>(at));
+			bool passed_children = false;
+			for (auto i = lo_at; i <= hi_at; ++i)
+				passed_children = passed_children || (order[i] != node && hasChildren(order[i]));
+
+			nodes = std::move(order);
+			syncEquivalenceOrder();
+			return hasChildren(node) && passed_children;
 		}
 
 		// Elsewhere: the whole chain moves as it is, by as much as the node was dragged, past
@@ -606,6 +689,35 @@ namespace hypergraph_logic {
 			nodes = std::move(order);
 			keepEquivalencesTogether(layer); // a node placed inside a chain goes to its nearer end
 		}
+	}
+
+	void GraphicalHypergraph::placeByPosition(int layer, const std::vector<NodePtr>& moved, double position) {
+		// The nodes with no layout yet go first where their guessed x puts them (the moved
+		// ones count at their own x: they keep their layout until the next one is computed).
+		placeUnpositionedNodes(layer, layer);
+
+		auto& nodes = layers_.at(layer).nodes;
+		const std::unordered_set<Node*> members = [&] {
+			std::unordered_set<Node*> s;
+			for (const auto& m : moved) s.insert(m.get());
+			return s;
+		}();
+		std::erase_if(nodes, [&](const NodePtr& n) { return members.count(n.get()) > 0; });
+
+		// Every other node at its x: laid out, or guessed (as placeUnpositionedNodes did); one
+		// that cannot be guessed stands where its left-hand neighbour does.
+		std::unordered_map<const Node*, double> guessed;
+		size_t at = 0;
+		std::optional<double> previous;
+		for (size_t i = 0; i < nodes.size(); ++i) {
+			std::optional<double> x;
+			if (const NodeLayout* layout = validLayout(nodes[i].get())) x = layout->x;
+			else if ((x = guessX(nodes[i].get(), guessed))) guessed[nodes[i].get()] = *x;
+			else x = previous;
+			if (x && *x < position) at = i + 1;
+			previous = x;
+		}
+		nodes.insert(nodes.begin() + static_cast<std::ptrdiff_t>(at), moved.begin(), moved.end());
 	}
 
 	double GraphicalHypergraph::horizontalPosition(const NodePtr& node) const {

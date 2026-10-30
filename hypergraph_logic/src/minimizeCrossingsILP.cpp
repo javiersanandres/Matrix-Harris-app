@@ -177,6 +177,7 @@ namespace sifting_internal {
 			bool success = false;
 			std::vector<double> col_value;
 			double objective = 0.0;
+			bool out_of_time = false; // Gurobi only: see GurobiSolution::out_of_time
 		};
 
 		// ── HiGHS backend ──────────────────────────────────────────────────────
@@ -268,7 +269,8 @@ namespace sifting_internal {
 		// known by asking it. So this backend fails safely: any problem, license
 		// or otherwise, comes back as an unsuccessful ILPSolveResult rather than
 		// propagating, so the caller (runCrossingILP) falls back to HiGHS
-		// transparently.
+		// transparently. Running out of time with no solution is no problem of
+		// that kind (out_of_time): the caller then keeps the heuristic's order.
 
 		// Whether Gurobi is installed and licensed here (checked once and cached
 		// for the life of the process: verifying a license can mean a round
@@ -298,6 +300,7 @@ namespace sifting_internal {
 
 			GurobiSolution solution = solveMipWithGurobi(mip);
 			ILPSolveResult result;
+			result.out_of_time = solution.out_of_time;
 			if (!solution.success) return result;
 			result.success = true;
 			result.col_value = std::move(solution.x);
@@ -688,9 +691,11 @@ namespace sifting_internal {
 
 		// Assemble the backend-neutral model, then solve it. Normally (kAuto)
 		// Gurobi is tried first when this build has it and a valid license is
-		// actually present on this machine right now; any solve failure --
-		// including a Gurobi run that throws partway through -- falls back to
-		// HiGHS rather than giving up. A forced backend (see
+		// actually present on this machine right now; a Gurobi that fails to run
+		// -- including one that throws partway through -- falls back to HiGHS
+		// rather than giving up, but one that runs out of time with no solution
+		// does not: HiGHS would only spend a budget of its own on the same model,
+		// and the heuristic's order stands either way. A forced backend (see
 		// ILPBackendTestHook.h) skips that auto-detect entirely, for
 		// benchmarking one solver in isolation; it was read, and reset, at the
 		// start of this call, so it can never apply to a later one.
@@ -718,7 +723,9 @@ namespace sifting_internal {
 			if (gurobiUsable()) {
 				result = solveWithGurobi(ilp_model, time_budget_seconds, cancel_token);
 			}
-			if (!result.success) {
+			// HiGHS steps in when Gurobi is not there or failed to run; not when it ran
+			// out of time, which HiGHS would only repeat with a budget of its own.
+			if (!result.success && !result.out_of_time) {
 				result = solveWithHighs(ilp_model, time_budget_seconds, cancel_token);
 			}
 			break;

@@ -48,6 +48,7 @@ namespace ui {
         WaitingForSecondNode_AddSource,             // "Bifurcar arriba con caja existente"
         WaitingForSecondNode_AddTarget,             // "Bifurcar abajo con caja existente"
         WaitingForSecondNode_SimplifyConnection,    // "Simplificar conexión"
+        WaitingForSecondNode_AddEquivalence,        // "Hacer equivalente a"
     };
 
     // ============================================================================
@@ -71,6 +72,13 @@ namespace ui {
     // are dimmed. Clicks on anything that is not a candidate are ignored. A menu
     // entry whose operation has no candidate at all is disabled.
     //
+    // Equivalences: "Hacer equivalente a…" in a box's menu is one more two-step
+    // operation (its candidates are the boxes canAddEquivalence accepts); the
+    // line between two equivalent boxes has a menu of its own (its style and
+    // removing it), and the box menu offers the same for its own lines. While a
+    // box of a chain is dragged, the chain shows what the drop will do to it
+    // (see BoxDrag).
+    //
     // Background click: if state == Idle, shows "Nueva caja" (regular) or
     // "Administrar esquemas" (joint: every diagram of the project, to add it
     // where the user clicked or take it out). If state != Idle, cancels the
@@ -80,6 +88,7 @@ namespace ui {
         Q_OBJECT
 		friend class NodeItem;  // Allow NodeItem to open the context menu and the properties dialog.
 		friend class HyperedgeItem;  // Allow HyperedgeItem to call showEdgeContextMenu.
+		friend class EquivalenceItem;  // Allow EquivalenceItem to call showEquivalenceContextMenu.
     public:
         // Construct for a regular diagram editor.
         explicit DiagramScene(app_logic::HypergraphEditor* editor,
@@ -218,15 +227,46 @@ namespace ui {
         std::function<std::vector<DiagramInfo>()> diagram_catalog_;
 
         // ── Dragging one box (see NodeItem) ───────────────────────────────────────
+        //
+        // A box in an equivalence chain shows what its drop will do to the chain
+        // (see GraphicalHypergraph::relocateNodeInLayer):
+        //   - Reorder: dropped in its own layer within the chain's reorder span (up
+        //     to the nearest box of no part of it on each side), it goes where its x
+        //     puts it, between other members or past lines (dummies) too. The other
+        //     members stay; the landing marker shows its place among boxes and lines.
+        //   - Whole: anywhere else (past such a box, or in another layer), the whole
+        //     chain moves along: the other members and their lines follow the box.
+        // Switching between the two glides (FOLLOW_MS). A box of no chain dropped
+        // inside a chain goes to its nearer end, which the landing marker shows.
+        enum class ChainMode { None, Reorder, Whole };
         struct BoxDrag {
             NodeItem* item = nullptr;
-            std::vector<QGraphicsItem*> edges; // its connections and equivalence lines, faded while it moves
+            std::vector<QGraphicsItem*> edges; // its connections (and its chain's), faded while it moves
+
+            // Its chain, if any: the members in order, where it can be reordered, and its lines.
+            std::vector<hypergraph_logic::Node*> chain;
+            std::pair<double, double> reorder_span{ 0.0, 0.0 }; // see chainReorderSpan
+            std::vector<EquivalenceItem*> chain_lines;
+            ChainMode mode = ChainMode::None;
+            // Offsets of the other members: shown now, at the last mode switch, wanted.
+            std::unordered_map<hypergraph_logic::Node*, QPointF> shown, from, target;
+            double blend = 1.0; // 0 -> 1 after a mode switch
         };
         std::optional<BoxDrag> box_drag_;
 
         void beginBoxDrag(NodeItem* item);   // lifts the box
         void updateBoxDrag(NodeItem* item);  // landing guide in the target layer
         void endBoxDrag();
+
+        // The chain preview of the drag (see BoxDrag): updates the mode and the
+        // other members' wanted offsets for the box's centre c, then shows them.
+        void updateChainPreview(const QPointF& c, int target_layer);
+        void showChainPreview();
+
+        // Where a box dropped at x in layer lands when x falls inside a chain of that
+        // layer (other than its own): next to the chain's nearer end. Returns the
+        // landing marker's x and whether it is the left end; nullopt otherwise.
+        std::optional<std::pair<double, bool>> chainEndLanding(hypergraph_logic::Node* box, int layer, double x) const;
 
         // ── Moving a piece of the diagram ─────────────────────────────────────────
         struct PieceMove {
@@ -314,6 +354,7 @@ namespace ui {
         QPointer<QVariantAnimation> transition_;
         QPointer<QVariantAnimation> lift_;
         QPointer<QVariantAnimation> fade_;
+        QPointer<QVariantAnimation> follow_; // a dragged box's chain switching mode (BoxDrag)
         void stopAnimations();
 
         // ── Helpers ───────────────────────────────────────────────────────────────
@@ -345,6 +386,10 @@ namespace ui {
         // ── Context menu builders ─────────────────────────────────────────────────
         void showNodeContextMenu(NodeItem* item, const QPointF& scene_pos);
         void showEdgeContextMenu(HyperedgeItem* item, const QPointF& scene_pos);
+        // An equivalence line: its style and removing it.
+        void showEquivalenceContextMenu(EquivalenceItem* item, const QPointF& scene_pos);
+        // The box menu's "Equivalencias" section.
+        void addEquivalenceEntries(QMenu* menu, hypergraph_logic::Node* node);
         void showBackgroundContextMenu(const QPointF& scene_pos);
         void showJointBackgroundMenu(const QPointF& scene_pos); // "Administrar esquemas"
 
@@ -365,6 +410,9 @@ namespace ui {
         void onSetLineStyle(hypergraph_logic::Hyperedge* edge, bool continuous);
         // Marks or unmarks the connection as doubtful ("dudosa") at node.
         void onToggleUncertain(hypergraph_logic::Hyperedge* edge, hypergraph_logic::Node* node);
+        // The line between neighbours a and b of a chain: its style, or removing it.
+        void onSetEquivalenceStyle(hypergraph_logic::Node* a, hypergraph_logic::Node* b, bool continuous);
+        void onRemoveEquivalence(hypergraph_logic::Node* a, hypergraph_logic::Node* b);
 
         // Background / joint operations
         void onCreateRootNode(const QPointF& scene_pos);

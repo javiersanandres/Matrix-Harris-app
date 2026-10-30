@@ -181,6 +181,68 @@ namespace hypergraph_logic {
             expectChainsTogether(g);
         }
 
+        TEST(Equivalences, ABoxComingDownCountsTheDummiesItsMoveMakes) {
+            // {s, u} -> k with b -> k: u coming down to b's layer turns the hyperedge's dummy
+            // there into a new one for s (and, with l -> k, there is one more). u still takes the
+            // place its x gives it, after every dummy left of it, and never goes back past them
+            // towards its partner's other side.
+            const std::vector<std::vector<std::string>> expected = {
+                { "lc", ".", "u", "b" },
+                { "lc", ".", ".", "u", "b" },
+                { "lc", ".", ".", "u", "b", "tc" },
+            };
+            for (const int variant : { 0, 1, 2 }) {
+                Graph g("new dummies");
+                auto l = boxAtEnd(g, "l", 0);
+                auto s = boxAtEnd(g, "s", 0);
+                auto u = boxAtEnd(g, "u", 0);
+                auto t = boxAtEnd(g, "t", 0);
+                auto lc = childAtEnd(g, "lc", l);
+                auto b = childAtEnd(g, "b", t);
+                auto k = childAtEnd(g, "k", b);
+                auto e = g.addConnection(s, k);
+                g.addSourceToEdge(e, u);
+                if (variant >= 1) g.addConnection(l, k);
+                if (variant >= 2) childAtEnd(g, "tc", t);
+                g.computeLayout();
+                g.addEquivalence(u, b);
+                std::vector<std::string> names;
+                for (const auto& n : g.getNodesAt(1)) names.push_back(n->isDummy() ? "." : n->getName());
+                EXPECT_EQ(names, expected[variant]) << "variant " << variant;
+                expectChainsTogether(g);
+            }
+        }
+
+        TEST(Equivalences, ABoxComingDownTakesThePlaceItsXGivesIt) {
+            // Layer 1 holds m, b and a dummy of p -> c (m b . by x); u comes down from layer 0
+            // as if moved straight down, and then only as far as the rule needs.
+            auto run = [](int u_position, const std::vector<std::string>& before, const std::vector<std::string>& after) {
+                Graph g("down");
+                auto q = box(g, "q", 0);
+                auto m = childAtEnd(g, "m", q);
+                auto c = childAtEnd(g, "c", m);
+                auto p = boxAtEnd(g, "p", 0);
+                auto b = childAtEnd(g, "b", p);
+                g.addConnection(p, c); // long: a dummy at layer 1
+                auto u = g.createNode(NodeAttributes("u"), 0, u_position, nullptr);
+                g.computeLayout();
+                auto fullRow = [&] {
+                    std::vector<std::string> names;
+                    for (const auto& n : g.getNodesAt(1)) names.push_back(n->isDummy() ? "." : n->getName());
+                    return names;
+                };
+                ASSERT_EQ(fullRow(), before);
+
+                g.addEquivalence(u, b);
+                EXPECT_EQ(fullRow(), after);
+                expectChainsTogether(g);
+            };
+            // Left of m by its x: it passes m, a real box between it and b.
+            run(0, { "m", "b", "." }, { "m", "u", "b" , "." });
+            // Right of the dummy by its x: only that dummy is between them, so it stays there.
+            run(1000, { "m", "b", "." }, { "m", "b", ".", "u" });
+        }
+
         TEST(Equivalences, TheShallowerBoxComesDownWithWhatHangsFromIt) {
             Graph g("down");
             auto a = box(g, "a", 0);
@@ -661,6 +723,82 @@ namespace hypergraph_logic {
             EXPECT_FALSE(g.isEquivalenceContinuous(b, a));
             EXPECT_FALSE(g.isEquivalenceContinuous(a, c));
             EXPECT_TRUE(g.isEquivalenceCertain(b, c));
+            expectChainsTogether(g);
+        }
+
+        TEST(Equivalences, DraggingAMemberPastItsPartnerSwapsThem) {
+            // Short of the next box of no part of the chain, a member dropped beyond the
+            // other end takes that end's place: the chain does not move.
+            Graph g("swap");
+            auto x = boxAtEnd(g, "x", 0);
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto y = boxAtEnd(g, "y", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b, false);
+            g.computeLayout();
+            ASSERT_EQ(row(g, 0), (std::vector<std::string>{ "x", "a", "b", "y" }));
+
+            g.relocateNodeInLayer(a, (g.getX(b) + g.getX(y)) / 2.0);
+            EXPECT_EQ(row(g, 0), (std::vector<std::string>{ "x", "b", "a", "y" }));
+            EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "b", "a" }));
+            EXPECT_FALSE(g.isEquivalenceContinuous(b, a)); // the groups go with the boxes
+            g.computeLayout();
+            g.relocateNodeInLayer(a, (g.getX(x) + g.getX(b)) / 2.0);
+            EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "a", "b" }));
+            EXPECT_EQ(row(g, 0), (std::vector<std::string>{ "x", "a", "b", "y" }));
+            expectChainsTogether(g);
+
+            // Dropped beyond its own end, short of y: nothing changes.
+            g.computeLayout();
+            EXPECT_THROW(g.relocateNodeInLayer(b, (g.getX(b) + g.getX(y)) / 2.0), std::invalid_argument);
+
+            const auto span = g.chainReorderSpan(a.get());
+            ASSERT_TRUE(span.has_value());
+            EXPECT_DOUBLE_EQ(span->first, g.getX(x));
+            EXPECT_DOUBLE_EQ(span->second, g.getX(y));
+            EXPECT_FALSE(g.chainReorderSpan(x.get()).has_value());
+        }
+
+        TEST(Equivalences, AMemberCanBeMovedPastTheDummiesInAndAroundItsChain) {
+            // m a . b in layer 1 (the dummy of p -> c), a ≡ b: a member goes where its x puts
+            // it among the members and the dummies, as long as it does not pass m.
+            Graph g("past dummies");
+            auto q = box(g, "q", 0);
+            auto m = childAtEnd(g, "m", q);
+            auto c = childAtEnd(g, "c", m);
+            auto p = boxAtEnd(g, "p", 0);
+            auto a = childAtEnd(g, "a", p);
+            g.addConnection(p, c); // long: a dummy at layer 1
+            auto b = childAtEnd(g, "b", p);
+            g.computeLayout();
+            g.addEquivalence(a, b);
+            g.computeLayout();
+            auto fullRow = [&] {
+                std::vector<std::string> names;
+                for (const auto& n : g.getNodesAt(1)) names.push_back(n->isDummy() ? "." : n->getName());
+                return names;
+            };
+            ASSERT_EQ(fullRow(), (std::vector<std::string>{ "m", "a", ".", "b" }));
+            const NodePtr dummy = g.getNodesAt(1)[2];
+
+            // a past the dummy between them: nothing between the two any more.
+            g.relocateNodeInLayer(a, (g.getX(dummy) + g.getX(b)) / 2.0);
+            EXPECT_EQ(fullRow(), (std::vector<std::string>{ "m", ".", "a", "b" }));
+            EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "a", "b" }));
+            expectChainsTogether(g);
+
+            // b between the dummy and a: the two swap, the dummy stays outside.
+            g.computeLayout();
+            g.relocateNodeInLayer(b, (g.getX(dummy) + g.getX(a)) / 2.0);
+            EXPECT_EQ(fullRow(), (std::vector<std::string>{ "m", ".", "b", "a" }));
+            EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "b", "a" }));
+
+            // a, the right end, back past the dummy outside the chain (short of m).
+            g.computeLayout();
+            g.relocateNodeInLayer(a, (g.getX(m) + g.getX(dummy)) / 2.0);
+            EXPECT_EQ(fullRow(), (std::vector<std::string>{ "m", "a", ".", "b" }));
+            EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "a", "b" }));
             expectChainsTogether(g);
         }
 

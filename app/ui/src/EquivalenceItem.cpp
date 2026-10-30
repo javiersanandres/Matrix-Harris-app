@@ -1,7 +1,10 @@
 #include "EquivalenceItem.h"
+#include "DiagramScene.h"
 #include "HypergraphRenderer.h"
 #include "UiStyle.h"
 
+#include <QGraphicsSceneContextMenuEvent>
+#include <QGraphicsSceneMouseEvent>
 #include <QPainterPathStroker>
 
 namespace ui {
@@ -48,6 +51,18 @@ void EquivalenceItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
     hovered_ = false;
     refreshPen();
     QGraphicsPathItem::hoverLeaveEvent(event);
+}
+
+void EquivalenceItem::mousePressEvent(QGraphicsSceneMouseEvent* event) {
+    if (event->button() == Qt::LeftButton) {
+        DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
+        if (ds) ds->showEquivalenceContextMenu(this, event->scenePos());
+    }
+}
+
+void EquivalenceItem::contextMenuEvent(QGraphicsSceneContextMenuEvent* event) {
+    DiagramScene* ds = qobject_cast<DiagramScene*>(scene());
+    if (ds) ds->showEquivalenceContextMenu(this, event->scenePos());
 }
 
 } // namespace ui
