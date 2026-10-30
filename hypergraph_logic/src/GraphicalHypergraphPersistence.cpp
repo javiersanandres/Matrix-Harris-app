@@ -65,6 +65,9 @@ namespace hypergraph_logic {
 			entry["font_colour"] = colorToHex(a.font_colour);
 			entry["font_size"] = a.font_size;
 			entry["fire"] = fireToString(a.fire);
+			// Only a size the user gave the box: without one it follows its shape's default.
+			if (a.width) entry["width"] = *a.width;
+			if (a.height) entry["height"] = *a.height;
 		}
 
 		// Every field but the name is optional, so files saved before node attributes
@@ -81,6 +84,10 @@ namespace hypergraph_logic {
 				a.font_size = entry.at("font_size").get<int>();
 			if (entry.contains("fire"))
 				a.fire = fireFromString(entry.at("fire").get<std::string>());
+			if (entry.contains("width"))
+				a.width = entry.at("width").get<double>();
+			if (entry.contains("height"))
+				a.height = entry.at("height").get<double>();
 			return a;
 		}
 
@@ -101,6 +108,7 @@ namespace hypergraph_logic {
 	GraphicalHypergraph GraphicalHypergraph::clone() const {
 		GraphicalHypergraph copy(name_);
 		copy.id_ = id_;  // preserve identity across copies
+		copy.layout_settings_ = layout_settings_;
 
 		// 1. Build a mapping from old Node* -> new NodePtr (fresh allocation).
 		std::unordered_map<Node*, NodePtr> node_map;

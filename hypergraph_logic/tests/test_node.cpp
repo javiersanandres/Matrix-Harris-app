@@ -97,6 +97,32 @@ namespace hypergraph_logic::node_tests {
         EXPECT_DOUBLE_EQ(plain.getBoundaryHalfHeight(half_w), half_h);
     }
 
+    TEST(RealNode, OwnSizeOverridesTheShapeDefaultWithinLimits) {
+        NodeAttributes a("S");
+        a.shape = NodeShape::Circle;
+        EXPECT_DOUBLE_EQ(Node(a).getWidth(), CIRCLE_NODE_WIDTH);
+        EXPECT_DOUBLE_EQ(Node(a).getHeight(), CIRCLE_NODE_HEIGHT);
+
+        a.width = 150.0;
+        a.height = 60.0;
+        EXPECT_DOUBLE_EQ(Node(a).getWidth(), 150.0);
+        EXPECT_DOUBLE_EQ(Node(a).getHeight(), 60.0);
+        // A circle of another width and height is an ellipse: the boundary still meets the box.
+        EXPECT_DOUBLE_EQ(Node(a).getBoundaryHalfHeight(0.0), 30.0);
+        EXPECT_NEAR(Node(a).getBoundaryHalfHeight(75.0), 0.0, 1e-9);
+
+        a.width = 5.0;
+        a.height = 5000.0;
+        EXPECT_DOUBLE_EQ(Node(a).getWidth(), MIN_NODE_WIDTH);
+        EXPECT_DOUBLE_EQ(Node(a).getHeight(), MAX_NODE_HEIGHT);
+
+        // Only the given side is the box's own: the other one follows the shape.
+        a.width.reset();
+        a.shape = NodeShape::Rhombus;
+        EXPECT_DOUBLE_EQ(Node(a).getWidth(), RHOMBUS_NODE_WIDTH);
+        EXPECT_NE(a, NodeAttributes("S"));
+    }
+
     TEST(RealNode, SetNameKeepsOtherAttributes) {
         NodeAttributes a("Old");
         a.shape = NodeShape::Circle;

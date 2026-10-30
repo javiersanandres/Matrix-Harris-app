@@ -569,6 +569,32 @@ namespace app_logic {
                 EXPECT_NEAR(ed.getGraph().getLayerLayout().at(1), layer1_before, 1e-9);
             }
 
+            // A box of its own size pushes its neighbours aside; undo brings them back.
+            TEST(HypergraphEditor, SetNodeAttributesWithNewSizeRecomputesLayout) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodePtr B = ed.createNode("B", 0, 1, nullptr);
+                ed.createNode("C", A->getLayer() + 1, 0, A);
+                const double gap_before = ed.getX(B) - ed.getX(A);
+                const double layer1_before = ed.getGraph().getLayerLayout().at(1);
+
+                NodeAttributes wide("A");
+                wide.width = 300.0;
+                wide.height = 90.0;
+                ed.setNodeAttributes(A, wide);
+
+                EXPECT_DOUBLE_EQ(A->getWidth(), 300.0);
+                EXPECT_GE(ed.getX(B) - ed.getX(A), (300.0 + NODE_WIDTH) / 2.0 + MIN_BLOCK_SEP - 1e-9);
+                EXPECT_NEAR(layer1_before - ed.getGraph().getLayerLayout().at(1), (90.0 - NODE_HEIGHT) / 2.0, 1e-9);
+
+                ed.undo();
+                EXPECT_EQ(A->getAttributes(), NodeAttributes("A"));
+                EXPECT_NEAR(ed.getX(B) - ed.getX(A), gap_before, 1e-9);
+                EXPECT_NEAR(ed.getGraph().getLayerLayout().at(1), layer1_before, 1e-9);
+                ed.redo();
+                EXPECT_DOUBLE_EQ(A->getWidth(), 300.0);
+            }
+
             // ── font size for every box ───────────────────────────────────────
 
             static int fontSizeOf(const HypergraphEditor& ed, const std::string& name) {

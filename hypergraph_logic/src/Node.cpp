@@ -40,6 +40,33 @@ namespace hypergraph_logic {
 	}
 
 	// ============================================================================
+	// Box size
+	// ============================================================================
+	double NodeAttributes::defaultWidth(NodeShape shape) noexcept {
+		switch (shape) {
+		case NodeShape::Circle:  return CIRCLE_NODE_WIDTH;
+		case NodeShape::Rhombus: return RHOMBUS_NODE_WIDTH;
+		default:                 return NODE_WIDTH;
+		}
+	}
+
+	double NodeAttributes::defaultHeight(NodeShape shape) noexcept {
+		switch (shape) {
+		case NodeShape::Circle:  return CIRCLE_NODE_HEIGHT;
+		case NodeShape::Rhombus: return RHOMBUS_NODE_HEIGHT;
+		default:                 return NODE_HEIGHT;
+		}
+	}
+
+	double NodeAttributes::boxWidth() const noexcept {
+		return width ? std::clamp(*width, MIN_NODE_WIDTH, MAX_NODE_WIDTH) : defaultWidth(shape);
+	}
+
+	double NodeAttributes::boxHeight() const noexcept {
+		return height ? std::clamp(*height, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT) : defaultHeight(shape);
+	}
+
+	// ============================================================================
 	// Construction
 	// ============================================================================
 	Node::Node(NodeAttributes attributes)
@@ -125,20 +152,12 @@ namespace hypergraph_logic {
 	// ============================================================================
 	double Node::getWidth() const noexcept {
 		if (isDummy()) return DUMMY_NODE_WIDTH;
-		switch (attributes_->shape) {
-		case NodeShape::Circle:  return CIRCLE_NODE_WIDTH;
-		case NodeShape::Rhombus: return RHOMBUS_NODE_WIDTH;
-		default:                 return NODE_WIDTH;
-		}
+		return attributes_->boxWidth();
 	}
 
 	double Node::getHeight() const noexcept {
 		if (isDummy()) return DUMMY_NODE_HEIGHT;
-		switch (attributes_->shape) {
-		case NodeShape::Circle:  return CIRCLE_NODE_HEIGHT;
-		case NodeShape::Rhombus: return RHOMBUS_NODE_HEIGHT;
-		default:                 return NODE_HEIGHT;
-		}
+		return attributes_->boxHeight();
 	}
 
 	double Node::getBoundaryHalfHeight(double dx) const noexcept {

@@ -23,9 +23,11 @@ namespace port_assignment_internal {
 	// These tables are used by every sub-algorithm, so owning them here avoids
 	// passing them through every function call.
 	struct PortAssigner {
+		// block_sep: the gap kept between neighbouring boxes (LayoutSettings::block_sep).
 		PortAssigner(int layer,
 			const std::map<int, LayerData>& layers,
-			std::unordered_map<Node*, NodeLayout>& node_layout);
+			std::unordered_map<Node*, NodeLayout>& node_layout,
+			double block_sep);
 
 		// ── Public operations ─────────────────────────────────────────────────────
 		//
@@ -36,7 +38,7 @@ namespace port_assignment_internal {
 		// ── Jog reduction ─────────────────────────────────────────────────────────
 		//
 		// Tries to align, on every edge, the source and target ports that are nearly
-		// vertical to each other (closer than MIN_BLOCK_SEP / 2) and those of a source
+		// vertical to each other (closer than the block separation / 2) and those of a source
 		// and a target sharing the edge's leftmost or rightmost x, closest pairs first,
 		// so that the connecting vertical segment has no horizontal jog. A root or a
 		// leaf whose only port is the one being aligned moves its whole box instead,
@@ -56,6 +58,10 @@ namespace port_assignment_internal {
 		// Detect and resolve vertical-segment overlaps between this layer pair.
 		// min_vertical_sep: the minimum required x-gap between any two vertical segments.
 		void solveVerticalOverlaps(double min_vertical_sep);
+
+		// Every upper/lower node pair of this layer pair whose port spans come closer
+		// than min_vertical_sep: the candidates solveVerticalOverlaps checks one by one.
+		std::vector<std::pair<Node*, Node*>> detectConflicts(double min_vertical_sep) const;
 
 		// ── Dummy-chain support ────────────────────────────────────────────────────
 		//
@@ -104,6 +110,7 @@ namespace port_assignment_internal {
 
 	private:
 		int layer_;
+		double block_sep_;
 		const LayerData& upper_;
 		const LayerData& lower_;
 		std::unordered_map<Node*, NodeLayout>& node_layout_;
@@ -126,9 +133,6 @@ namespace port_assignment_internal {
 		// ── Port ordering and spacing ──────────────────────────────────────────────
 		void orderPorts(Node* node, std::vector<Port>& ports, bool source) const;
 		double arrangeSymmetrically(Node* node, std::vector<Port>& ports) const;
-
-		// ── Conflict detection ─────────────────────────────────────────────────────
-		std::vector<std::pair<Node*, Node*>> detectConflicts(double min_vertical_sep) const;
 
 		// ── Conflict resolution ────────────────────────────────────────────────────
 		// Shift a single port left (left=true) or right (left=false) by the

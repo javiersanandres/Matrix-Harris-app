@@ -716,7 +716,7 @@ namespace hypergraph_logic {
                 g.assignXCoordinates();
                 // After coordinates: xA < xB, so A is leftmost (pos=0), B is rightmost (pos=2).
                 // Build the PortAssigner for layer 0 and query directly.
-                PortAssigner pa(0, g.layers(), g.nodeLayout());
+                PortAssigner pa(0, g.layers(), g.nodeLayout(), MIN_BLOCK_SEP);
                 // nodePositionInEdge is private, but its effect is visible through
                 // the port order after buildPorts: the rightmost node (B) should get
                 // the leftmost port and vice-versa (single port each, so they land at centre).
@@ -779,7 +779,7 @@ namespace hypergraph_logic {
                 g.assignXCoordinates();
                 for (const auto& [n, x] : xs) g.nodeLayout()[n.get()].x = x;
                 for (auto& [n, nl] : g.nodeLayout()) { nl.source_ports.clear(); nl.target_ports.clear(); }
-                auto assigner = std::make_unique<PortAssigner>(0, g.layers(), g.nodeLayout());
+                auto assigner = std::make_unique<PortAssigner>(0, g.layers(), g.nodeLayout(), MIN_BLOCK_SEP);
                 assigner->buildPorts();
                 return assigner;
             }
@@ -811,6 +811,34 @@ namespace hypergraph_logic {
                 g.addTargetToEdge(w.e, w.Y);
                 g.addTargetToEdge(w.e, w.Z);
                 return w;
+            }
+
+            // ════════════════════════════════════════════════════════════════════════
+            // detectConflicts — boxes of different widths
+            // ════════════════════════════════════════════════════════════════════════
+
+            // Layer 0:   [X1]        [X3]                 X1 -> Y0, X3 -> Z
+            // Layer 1: [=========Y0=========]      [Z]
+            // Y0 is wide enough to reach under X3, past X1. A sweep by node centre
+            // compares Y0 with X1 only; the sweep by span end must find Y0 with X3.
+            TEST(DetectConflicts, WideBoxReachingPastItsNeighbourIsCompared) {
+                TestGraph g("wide_box");
+                NodeAttributes wide("Y0");
+                wide.width = 400.0;
+                NodePtr X1 = g.createNode("X1", 0, 0, nullptr);
+                NodePtr Y0 = g.createNode(wide, 1, 0, X1);
+                NodePtr X3 = g.createNode("X3", 0, 1, nullptr);
+                NodePtr Z = g.createNode("Z", 1, 1, X3);
+                auto assigner = portsAt(g, { {X1, 10}, {X3, 170}, {Y0, 0}, {Z, 400} });
+
+                // Y0's port, still on its box, right under X3's.
+                g.nodeLayout().at(Y0.get()).target_ports.front().x = 165.0;
+                const auto conflicts = assigner->detectConflicts(MIN_VERTICAL_SEP);
+                EXPECT_NE(std::find(conflicts.begin(), conflicts.end(), std::make_pair(X3.get(), Y0.get())),
+                    conflicts.end());
+                // X1's port is far from Y0's: not a candidate any more.
+                EXPECT_EQ(std::find(conflicts.begin(), conflicts.end(), std::make_pair(X1.get(), Y0.get())),
+                    conflicts.end());
             }
 
             TEST(ReduceJogs, NearlyVerticalPairInTheMiddleOfAHyperedgeIsAligned) {

@@ -7,9 +7,10 @@
 // dialog on it (they flash on screen for a moment), or drags the box with
 // mouse events, and saves what it looks like.
 //
-//   capture_pictures <resources folder>      (app/ui/resources)
+//   capture_pictures <resources folder> [shot]     (app/ui/resources)
 //
 // Only the pictures listed below are written; every other one is left as is.
+// With `shot`, only those of the shots whose name contains it (e.g. "resize").
 // Run it on the screen the pictures are meant for: they are taken at its
 // device pixel ratio. The diagram is drawn `zoom` times larger than the menus,
 // and a picture with a menu is at least as wide as it is tall, so the menu's
@@ -20,6 +21,7 @@
 #include "EquivalenceItem.h"
 #include "HypergraphEditor.h"
 #include "NodeDialogs.h"
+#include "NodeEditorWidgets.h"
 #include "HyperedgeItem.h"
 #include "MainWindow.h"
 #include "DiagramTabBar.h"
@@ -555,7 +557,10 @@ namespace {
         return itemOf(scene, b)->sceneBoundingRect().center().x() - itemOf(scene, a)->sceneBoundingRect().center().x();
     }
 
+    QString only; // when given, only the shots whose name contains it are taken
+
     void run(const char* what, const std::function<void()>& shot) {
+        if (!only.isEmpty() && !QString::fromUtf8(what).contains(only)) return;
         try { shot(); }
         catch (const std::exception& e) { std::fprintf(stderr, "%s: %s\n", what, e.what()); }
     }
@@ -569,6 +574,7 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     resources = QDir(QString::fromLocal8Bit(argv[1]));
+    if (argc > 2) only = QString::fromLocal8Bit(argv[2]);
     if (!resources.exists("information")) {
         std::fprintf(stderr, "%s has no information folder\n", argv[1]);
         return 1;
@@ -672,6 +678,43 @@ int main(int argc, char* argv[]) {
             drop(scene, start, by);
             save(scenePicture(scene), "information/moveEquivalent/04.png");
         }
+    });
+
+    // ── Resizing a box ────────────────────────────────────────────────────────
+    run("resize box", [] {
+        // The 2 widened by its right edge: held, with its size above it, and let go.
+        auto ed = fork();
+        DiagramScene scene(ed.get());
+        scene.rebuild();
+        settle();
+        NodeItem* two = itemOf(scene, "2");
+        const QRectF box = two->mapRectToScene(two->rect());
+        const QPointF start(box.right(), box.center().y());
+        const QPointF by(40.0, 0.0);
+        mouse(scene, QEvent::GraphicsSceneMousePress, start, Qt::LeftButton, Qt::LeftButton, start);
+        constexpr int STEPS = 10;
+        for (int i = 1; i <= STEPS; ++i) {
+            mouse(scene, QEvent::GraphicsSceneMouseMove, start + by * (double(i) / STEPS),
+                  Qt::NoButton, Qt::LeftButton, start);
+            settle(25);
+        }
+        settle(200);
+        save(compose(scene, diagramArea(scene), {}), "information/resizeBox/01.png");
+        mouse(scene, QEvent::GraphicsSceneMouseRelease, start + by, Qt::LeftButton, Qt::NoButton, start);
+        settle(900); // the resize and its animation
+        save(scenePicture(scene), "information/resizeBox/02.png");
+    });
+    run("resize box, preview", [] {
+        // The dialog's preview of a box wider than its shape, with the shape's size behind.
+        NodeAttributes wide("2");
+        wide.width = 170.0;
+        NodeDialog dialog(NodeDialog::Mode::Edit, wide, {});
+        dialog.show();
+        settle(400);
+        auto* preview = dialog.findChild<NodePreview*>();
+        if (!preview) throw std::runtime_error("No preview in the box dialog");
+        save(preview->grab().toImage(), "information/resizeBox/03.png");
+        dialog.close();
     });
 
     // ── The joint diagram's box menu ──────────────────────────────────────────

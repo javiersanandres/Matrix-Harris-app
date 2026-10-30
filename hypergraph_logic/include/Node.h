@@ -63,6 +63,14 @@ namespace hypergraph_logic {
 		int font_size = DEFAULT_FONT_SIZE;
 		FireState fire = FireState::None;
 
+		// Size of the box the node is drawn in. Empty means the box follows the default size
+		// of its shape (see defaultWidth / defaultHeight), so it changes along with that default;
+		// a value is the size the user gave this box. Read them through boxWidth / boxHeight,
+		// which also keep them within [MIN_NODE_WIDTH, MAX_NODE_WIDTH] and
+		// [MIN_NODE_HEIGHT, MAX_NODE_HEIGHT] (LayoutTypes.h).
+		std::optional<double> width;
+		std::optional<double> height;
+
 		NodeAttributes() = default;
 
 		// Intentionally implicit: lets every API that takes NodeAttributes keep
@@ -72,6 +80,15 @@ namespace hypergraph_logic {
 
 		bool isFire() const noexcept { return fire != FireState::None; }
 		bool hasAshes() const noexcept { return fire == FireState::FireWithAshes; }
+
+		// Default size of a box of the given shape. Circles and rhombi report the side of the
+		// square they are inscribed in.
+		static double defaultWidth(NodeShape shape) noexcept;
+		static double defaultHeight(NodeShape shape) noexcept;
+
+		// The size the box is drawn with: its own size if it has one, else its shape's default.
+		double boxWidth() const noexcept;
+		double boxHeight() const noexcept;
 
 		// Gives the box the colours its fire state imposes: black with white text for Fire,
 		// white with black text for FireWithAshes. Without a fire, nothing changes.
@@ -89,7 +106,7 @@ namespace hypergraph_logic {
 		bool operator==(const NodeAttributes& other) const noexcept {
 			return name == other.name && shape == other.shape && colour == other.colour
 				&& font_colour == other.font_colour && font_size == other.font_size
-				&& fire == other.fire;
+				&& fire == other.fire && width == other.width && height == other.height;
 		}
 		bool operator!=(const NodeAttributes& other) const noexcept { return !(*this == other); }
 	};
@@ -196,9 +213,9 @@ namespace hypergraph_logic {
 
 		// ── getWidth / getHeight ──────────────────────────────────────────────────────────────────────
 		//
-		// Returns the width/height of the box this node occupies in the drawing, as defined in
-		// LayoutTypes.h for its shape. Circles and rhombi report the side of the square they are
-		// inscribed in. Dummy nodes report DUMMY_NODE_WIDTH / DUMMY_NODE_HEIGHT.
+		// Returns the width/height of the box this node occupies in the drawing: its own size if
+		// the user gave it one, else the default of its shape (NodeAttributes::boxWidth /
+		// boxHeight). Dummy nodes report DUMMY_NODE_WIDTH / DUMMY_NODE_HEIGHT.
 		//
 		double getWidth() const noexcept;
 		double getHeight() const noexcept;

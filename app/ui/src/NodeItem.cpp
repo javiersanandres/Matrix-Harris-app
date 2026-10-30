@@ -12,6 +12,7 @@
 #include <QCursor>
 #include <QGraphicsSceneContextMenuEvent>
 #include <QGraphicsScene>
+#include <QGraphicsView>
 #include <QPen>
 #include <QBrush>
 #include <QFont>
@@ -33,11 +34,42 @@ namespace ui {
     }
 
     QPainterPath NodeItem::shape() const {
-        return node_visuals::shapePath(node_->getShape(), rect());
+        // The band along the edges lets a circle or a rhombus be grabbed by the
+        // edges of its box too, where its handles are drawn.
+        const QRectF r = rect();
+        QPainterPath band;
+        band.addRect(r.adjusted(-HANDLE_REACH, -HANDLE_REACH, HANDLE_REACH, HANDLE_REACH));
+        QPainterPath inside;
+        inside.addRect(r.adjusted(HANDLE_REACH, HANDLE_REACH, -HANDLE_REACH, -HANDLE_REACH));
+        return node_visuals::shapePath(node_->getShape(), r).united(band.subtracted(inside));
     }
 
     QRectF NodeItem::boundingRect() const {
-        return rect().adjusted(-GLOW_MARGIN, -GLOW_MARGIN, GLOW_MARGIN, GLOW_MARGIN);
+        const QRectF glow = rect().adjusted(-GLOW_MARGIN, -GLOW_MARGIN, GLOW_MARGIN, GLOW_MARGIN);
+        return resizing_ ? glow.adjusted(-GLOW_MARGIN, -SIZE_CHIP_ROOM, GLOW_MARGIN, 0) : glow;
+    }
+
+    bool NodeItem::canResize() const {
+        if (mark_ != SelectionMark::None || dragging_) return false;
+        auto* ds = qobject_cast<DiagramScene*>(scene());
+        return ds && ds->canResizeBoxes();
+    }
+
+    int NodeItem::edgesAt(const QPointF& pos) const {
+        if (!canResize()) return 0;
+        // The same reach on screen at any zoom, but never so much that the
+        // middle of the box (which moves it) disappears.
+        double zoom = 1.0;
+        if (scene() && !scene()->views().isEmpty())
+            zoom = std::max(0.05, std::abs(scene()->views().first()->transform().m11()));
+        const double reach = std::min(HANDLE_REACH / zoom, std::min(rect().width(), rect().height()) / 4.0);
+        return node_visuals::resizeEdgesAt(rect(), pos, std::max(HANDLE_REACH, reach));
+    }
+
+    void NodeItem::showResizeCursor(int edges) {
+        if (mark_ != SelectionMark::None) return; // the mark decides the cursor
+        if (edges) setCursor(node_visuals::resizeCursor(edges));
+        else       unsetCursor();
     }
 
     void NodeItem::paint(QPainter* painter, const QStyleOptionGraphicsItem* option, QWidget* widget) {
@@ -81,6 +113,16 @@ namespace ui {
             painter->setPen(QPen(ring, (hovered_ && candidate) ? 3.2 : 2.4, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
             painter->drawPath(outline);
         }
+
+        if (resizing_ || (hovered_ && canResize())) {
+            // Zoomed in, the handles keep their size on screen instead of growing
+            // with the box; zoomed out, they shrink along with it, so they never
+            // dwarf it. The size chip keeps its size on screen, to stay readable.
+            const double screen_unit = 1.0 / std::max(0.05, std::abs(painter->worldTransform().m11()));
+            node_visuals::paintResizeFrame(painter, rect(), resizing_ ? resizing_ : hover_edges_,
+                std::min(screen_unit, 1.0));
+            if (resizing_) node_visuals::paintSizeChip(painter, rect(), screen_unit);
+        }
     }
 
     void NodeItem::setSelectionMark(SelectionMark mark) {
@@ -101,8 +143,20 @@ namespace ui {
         QGraphicsRectItem::hoverEnterEvent(event);
     }
 
+    void NodeItem::hoverMoveEvent(QGraphicsSceneHoverEvent* event) {
+        const int edges = edgesAt(event->pos());
+        showResizeCursor(edges);
+        if (edges != hover_edges_) {
+            hover_edges_ = edges;
+            update();
+        }
+        QGraphicsRectItem::hoverMoveEvent(event);
+    }
+
     void NodeItem::hoverLeaveEvent(QGraphicsSceneHoverEvent* event) {
         hovered_ = false;
+        hover_edges_ = 0;
+        if (mark_ == SelectionMark::None) unsetCursor();
         update();
         QGraphicsRectItem::hoverLeaveEvent(event);
     }
@@ -132,14 +186,29 @@ namespace ui {
             drag_start_x_ = event->scenePos().x();
             drag_current_x_ = drag_start_x_;
             drag_start_y_ = event->scenePos().y();       
-            drag_current_y_ = drag_start_y_;             
+            drag_current_y_ = drag_start_y_;
             dragging_ = false;
+            const int edges = edgesAt(event->pos());
+            if (edges) {
+                prepareGeometryChange(); // room for the size chip
+                resizing_ = edges;
+                press_rect_ = rect();
+                update();
+            }
         }
         // Do NOT call base — we handle selection ourselves.
     }
 
     void NodeItem::mouseMoveEvent(QGraphicsSceneMouseEvent* event) {
         if (!(event->buttons() & Qt::LeftButton)) return;
+
+        if (resizing_) {
+            // Both sides move, so the centre stays where the layout keeps it.
+            const QSizeF size = node_visuals::resizedBox(press_rect_.size(), resizing_, event->scenePos() - press_pos_);
+            const QPointF c = press_rect_.center();
+            setRect(QRectF(c - QPointF(size.width(), size.height()) / 2.0, size));
+            return;
+        }
 
         double dx = std::abs(event->scenePos().x() - press_pos_.x());
         double dy = std::abs(event->scenePos().y() - press_pos_.y());
@@ -163,6 +232,22 @@ namespace ui {
     }
 
     void NodeItem::mouseReleaseEvent(QGraphicsSceneMouseEvent* event) {
+        if (event->button() == Qt::LeftButton && resizing_) {
+            Qt::Orientations sides;
+            if (resizing_ & (node_visuals::ResizeLeft | node_visuals::ResizeRight)) sides |= Qt::Horizontal;
+            if (resizing_ & (node_visuals::ResizeTop | node_visuals::ResizeBottom)) sides |= Qt::Vertical;
+            const QSizeF size = rect().size();
+            prepareGeometryChange();
+            resizing_ = 0;
+            update();
+            // Queued: the scene rebuilds every item, this one included.
+            if (DiagramScene* ds = qobject_cast<DiagramScene*>(scene()))
+                QMetaObject::invokeMethod(ds, [ds, node = node_, size, sides]() {
+                    ds->resizeNode(node, size, sides);
+                    }, Qt::QueuedConnection);
+            return;
+        }
+
         if (event->button() == Qt::LeftButton && dragging_) {
             dragging_ = false;
 

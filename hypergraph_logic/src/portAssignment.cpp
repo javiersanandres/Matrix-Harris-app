@@ -33,8 +33,10 @@ namespace port_assignment_internal {
 
     PortAssigner::PortAssigner(int layer,
         const std::map<int, LayerData>& layers,
-        std::unordered_map<Node*, NodeLayout>& node_layout)
+        std::unordered_map<Node*, NodeLayout>& node_layout,
+        double block_sep)
         : layer_(layer)
+        , block_sep_(block_sep)
         , upper_(layers.at(layer))
         , lower_(layers.at(layer + 1))
         , node_layout_(node_layout)
@@ -270,7 +272,7 @@ namespace port_assignment_internal {
         // A root whose only connection is this one port (as source), or a leaf whose
         // only connection is this one port (as target), can take its whole box along
         // to align it: the range returned is where its centre, and so its port, may
-        // go without coming closer than MIN_BLOCK_SEP to its neighbours.
+        // go without coming closer than the block separation to its neighbours.
         auto movableBox = [&](Node* node, bool as_source) -> std::optional<std::pair<double, double>> {
             if (node->isDummy()) return std::nullopt;
             const NodeLayout& nl = node_layout_.at(node);
@@ -285,11 +287,11 @@ namespace port_assignment_internal {
             double high = std::numeric_limits<double>::infinity();
             if (i > 0) {
                 Node* l = nodes[i - 1].get();
-                low = node_layout_.at(l).x + (l->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
+                low = node_layout_.at(l).x + (l->getWidth() + node->getWidth()) * 0.5 + block_sep_;
             }
             if (i < k - 1) {
                 Node* r = nodes[i + 1].get();
-                high = node_layout_.at(r).x - (node->getWidth() + r->getWidth()) * 0.5 - MIN_BLOCK_SEP;
+                high = node_layout_.at(r).x - (node->getWidth() + r->getWidth()) * 0.5 - block_sep_;
             }
             if (low > high) return std::nullopt;
             return std::pair<double, double>{ low, high };
@@ -387,10 +389,10 @@ namespace port_assignment_internal {
         // A candidate is one source port and one target port of the same edge
         // that we would like to see on one vertical line. Two kinds:
         //
-        //  a) Nearly vertical ports: closer than MIN_BLOCK_SEP / 2. Two nodes of
-        //     a layer are at least MIN_BLOCK_SEP apart (plus half their widths)
+        //  a) Nearly vertical ports: closer than the block separation / 2. Two nodes of
+        //     a layer are at least the block separation apart (plus half their widths)
         //     and ports lie inside their node, so two ports of one edge in the
-        //     same layer are more than MIN_BLOCK_SEP apart: a port has at most
+        //     same layer are more than the block separation apart: a port has at most
         //     one partner this close, and one sweep over both sides sorted by x
         //     finds every such pair.
         //
@@ -433,7 +435,7 @@ namespace port_assignment_internal {
             size_t i = 0, j = 0;
             while (i < src_side.size() && j < tgt_side.size()) {
                 const double sx = src_side[i].first, tx = tgt_side[j].first;
-                if (std::abs(sx - tx) < MIN_BLOCK_SEP * 0.5) {
+                if (std::abs(sx - tx) < block_sep_ * 0.5) {
                     addCandidate(src_side[i].second, tgt_side[j].second);
                     ++i; ++j; // each has no other partner this close
                 }
@@ -580,53 +582,47 @@ namespace port_assignment_internal {
 
     // ── Conflict detection ────────────────────────────────────────────────────────
     //
-    // We sweep two pointers over the upper and lower node lists (both sorted by
-    // ascending x) and flag pairs whose boundary ports are closer than
+    // Flags every upper/lower node pair whose port spans (the source ports of the
+    // upper node, the target ports of the lower one) come closer than
     // min_vertical_sep. This is a necessary (but not sufficient) condition for a
     // vertical-segment overlap. The actual check happens in solveConflict.
     //
-    // Three cases per step:
-    //   xi.x < yj.x -> the rightmost source port of xi might be too close to the
-    //                  leftmost target port of yj. It could also happen that the
-    //                  ports span of xi and yj overlap.                    
-    //   xi.x > yj.x -> the leftmost source port of xi might be too close to the
-    //                  rightmost target port of yj. It could also happen that
-    // 				    the ports span of xi and yj overlap.
-    //   xi.x == yj.x -> always a potential conflict. Advance the narrower node
-    //                   (or both if widths are equal).
+    // Every port lies on its node's box and the boxes of a layer are at least
+    // the block separation apart, which is never under 2 * MIN_VERTICAL_SEP
+    // (LayoutSettings), so the spans of each layer are disjoint and sorted, even
+    // after widening the upper ones by min_vertical_sep on each side. Two pointers
+    // then find every pair of intersecting spans: whichever span ends first cannot
+    // reach any later span of the other layer, so that pointer advances.
+    //
+    // Sweeping by the span's end, not by the node's x, matters when boxes differ
+    // in width: a wide box may reach past its neighbour in the other layer and
+    // conflict with the node after it.
 
     std::vector<std::pair<Node*, Node*>>
         PortAssigner::detectConflicts(double min_vertical_sep) const {
+        struct Span { Node* node; double lo, hi; };
+        auto spans = [&](const LayerData& layer, bool upper) {
+            std::vector<Span> result;
+            for (const auto& n : layer.nodes) {
+                const NodeLayout& nl = node_layout_.at(n.get());
+                const std::vector<Port>& ports = upper ? nl.source_ports : nl.target_ports;
+                if (!ports.empty()) result.push_back({ n.get(), ports.front().x, ports.back().x });
+            }
+            return result;
+        };
+        const std::vector<Span> upper = spans(upper_, true);
+        const std::vector<Span> lower = spans(lower_, false);
+
         std::vector<std::pair<Node*, Node*>> conflicts;
-        int i = 0, j = 0;
-        int nu = static_cast<int>(upper_.nodes.size());
-        int nl = static_cast<int>(lower_.nodes.size());
+        size_t i = 0, j = 0;
+        while (i < upper.size() && j < lower.size()) {
+            const Span& xi = upper[i];
+            const Span& yj = lower[j];
+            if (yj.lo - xi.hi < min_vertical_sep && xi.lo - yj.hi < min_vertical_sep)
+                conflicts.emplace_back(xi.node, yj.node);
 
-        while (i < nu && j < nl) {
-            const NodeLayout& xi = node_layout_.at(upper_.nodes[i].get());
-            const NodeLayout& yj = node_layout_.at(lower_.nodes[j].get());
-
-            if (xi.x < yj.x) {
-                if (!xi.source_ports.empty() && !yj.target_ports.empty())
-                    if (yj.target_ports.front().x - xi.source_ports.back().x < min_vertical_sep)
-                        conflicts.emplace_back(upper_.nodes[i].get(), lower_.nodes[j].get());
-                i++;
-            }
-            else if (xi.x > yj.x) {
-                if (!xi.source_ports.empty() && !yj.target_ports.empty())
-                    if (xi.source_ports.front().x - yj.target_ports.back().x < min_vertical_sep)
-                        conflicts.emplace_back(upper_.nodes[i].get(), lower_.nodes[j].get());
-                j++;
-            }
-            else {
-                if (!xi.source_ports.empty() && !yj.target_ports.empty())
-                    conflicts.emplace_back(upper_.nodes[i].get(), lower_.nodes[j].get());
-                double wi = upper_.nodes[i]->getWidth();
-                double wj = lower_.nodes[j]->getWidth();
-                if (wi < wj) i++;
-                else if (wi > wj) j++;
-                else { i++; j++; }
-            }
+            if (xi.hi + min_vertical_sep < yj.hi) i++;
+            else j++;
         }
         return conflicts;
     }
@@ -1138,7 +1134,7 @@ namespace port_assignment_internal {
     }
 
     static Interval memberLayerWindow(const LayerData& data, int idx,
-        std::unordered_map<Node*, NodeLayout>& node_layout)
+        std::unordered_map<Node*, NodeLayout>& node_layout, double block_sep)
     {
         const auto& nodes = data.nodes;
         double low = std::numeric_limits<double>::lowest();
@@ -1146,12 +1142,12 @@ namespace port_assignment_internal {
         if (idx > 0) {
             Node* l = nodes[idx - 1].get();
             double width_l = l->getWidth();
-            low = node_layout.at(l).x + width_l * 0.5 + MIN_BLOCK_SEP;
+            low = node_layout.at(l).x + width_l * 0.5 + block_sep;
         }
         if (idx < static_cast<int>(nodes.size()) - 1) {
             Node* r = nodes[idx + 1].get();
             double width_r = r->getWidth();
-            high = node_layout.at(r).x - width_r * 0.5 - MIN_BLOCK_SEP;
+            high = node_layout.at(r).x - width_r * 0.5 - block_sep;
         }
         return { low, high };
     }
@@ -1160,7 +1156,7 @@ namespace port_assignment_internal {
     static Interval chainSeparationWindow(const DummyChain& chain,
         const std::map<int, LayerData>& layers,
         std::unordered_map<Node*, NodeLayout>& node_layout,
-        const std::vector<PortAssigner*>& assigners)
+        const std::vector<PortAssigner*>& assigners, double block_sep)
     {
         double low = std::numeric_limits<double>::lowest();
         double high = std::numeric_limits<double>::max();
@@ -1168,7 +1164,7 @@ namespace port_assignment_internal {
             int layer = member->getLayer();
             auto [assigner, is_upper] = assignerForLayer(layer, assigners);
             int idx = assigner ? assigner->positionInLayer(member, is_upper) : -1;
-            Interval w = memberLayerWindow(layers.at(layer), idx, node_layout);
+            Interval w = memberLayerWindow(layers.at(layer), idx, node_layout, block_sep);
             low = std::max(low, w.first);
             high = std::min(high, w.second);
         }
@@ -1260,6 +1256,7 @@ namespace port_assignment_internal {
         std::vector<double> min_spacing;
 
         std::vector<DummyChain> chains;
+        double block_sep; // LayoutSettings::block_sep of the graph
         std::unordered_map<Node*, int> node_to_chain;
 
         std::vector<Interval> sep_window;
@@ -1506,7 +1503,7 @@ namespace port_assignment_internal {
 
     // Recomputes everything derived from real node/port positions for one chain.
     static void refreshChainInfo(ChainPlacementContext& ctx, int i) {
-        ctx.sep_window[i] = chainSeparationWindow(ctx.chains[i], ctx.layers, ctx.node_layout, ctx.assigners);
+        ctx.sep_window[i] = chainSeparationWindow(ctx.chains[i], ctx.layers, ctx.node_layout, ctx.assigners, ctx.block_sep);
         ctx.forbidden_regions[i] = forbiddenRegions(ctx.chains[i], ctx.min_spacing, ctx.assigners);
     }
 
@@ -1878,7 +1875,7 @@ namespace port_assignment_internal {
     }
 
     // Range of x over which a real node's box can slide without breaking
-    // MIN_BLOCK_SEP against its immediate neighbours in the layer.
+    // the block separation against its immediate neighbours in the layer.
     static Interval realNodeMovableRange(ChainPlacementContext& ctx, int layer, int pos) {
         const auto& nodes = ctx.layers.at(layer).nodes;
         int k = static_cast<int>(nodes.size());
@@ -1888,12 +1885,12 @@ namespace port_assignment_internal {
         if (pos > 0) {
             Node* l = nodes[pos - 1].get();
             double wl = l->getWidth();
-            low = ctx.node_layout.at(l).x + (wl + nodes[pos]->getWidth()) * 0.5 + MIN_BLOCK_SEP;
+            low = ctx.node_layout.at(l).x + (wl + nodes[pos]->getWidth()) * 0.5 + ctx.block_sep;
         }
         if (pos < k - 1) {
             Node* r = nodes[pos + 1].get();
             double wr = r->getWidth();
-            high = ctx.node_layout.at(r).x - (wr + nodes[pos]->getWidth()) * 0.5 - MIN_BLOCK_SEP;
+            high = ctx.node_layout.at(r).x - (wr + nodes[pos]->getWidth()) * 0.5 - ctx.block_sep;
         }
         return { low, high };
     }
@@ -2060,7 +2057,7 @@ namespace hypergraph_logic {
         std::vector<double> min_spacing(assigners.size(), MIN_VERTICAL_SEP);
         for (int layer = 0; layer < layer_count - 1; layer++) {
             if (layers_.at(layer).outgoing_edges.empty()) continue;
-            assigners[layer] = std::make_unique<PortAssigner>(layer, layers_, node_layout_);
+            assigners[layer] = std::make_unique<PortAssigner>(layer, layers_, node_layout_, layout_settings_.block_sep);
             min_spacing[layer] = assigners[layer]->buildPorts();
         }
 
@@ -2094,7 +2091,8 @@ namespace hypergraph_logic {
         std::vector<DummyChain> chains = findDummyChains(layers_);
         if (chains.empty()) return;
 
-        ChainPlacementContext ctx{ layers_, node_layout_, assigners, min_spacing, std::move(chains) };
+        ChainPlacementContext ctx{ layers_, node_layout_, assigners, min_spacing, std::move(chains),
+            layout_settings_.block_sep };
         int n = static_cast<int>(ctx.chains.size());
 
         for (int i = 0; i < n; ++i)
@@ -2178,14 +2176,14 @@ namespace hypergraph_logic {
                     if (i > 0) {
                         Node* l = nodes[i - 1].get();
                         double width_l = l->getWidth();
-                        low = node_layout_.at(l).x + (width_l + width_n) * 0.5 + MIN_BLOCK_SEP;
+                        low = node_layout_.at(l).x + (width_l + width_n) * 0.5 + layout_settings_.block_sep;
                     }
 
                     double high = std::numeric_limits<double>::max();
                     if (i < k - 1) {
                         Node* r = nodes[i + 1].get();
                         double width_r = r->getWidth();
-                        high = node_layout_.at(r).x - (width_n + width_r) * 0.5 - MIN_BLOCK_SEP;
+                        high = node_layout_.at(r).x - (width_n + width_r) * 0.5 - layout_settings_.block_sep;
                     }
 
                     if (low <= high)
@@ -2217,7 +2215,7 @@ namespace hypergraph_logic {
     //      its source ports for a tail), so the anchor stays symmetric;
     //   2. the anchor's current x (its other ports are then not symmetric).
     // If neither is, nothing moves. X is feasible when every box of the chain fits
-    // there with MIN_BLOCK_SEP to its neighbours, the anchor's other ports stay on
+    // there with the block separation to its neighbours, the anchor's other ports stay on
     // its box, and, in every gap the chain crosses, its vertical line keeps
     // MIN_VERTICAL_SEP from every other port without sweeping past one, so no
     // crossing is added or removed.
@@ -2244,11 +2242,11 @@ namespace hypergraph_logic {
             double high = std::numeric_limits<double>::infinity();
             if (i > 0) {
                 Node* l = nodes[i - 1].get();
-                low = node_layout_.at(l).x + (l->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
+                low = node_layout_.at(l).x + (l->getWidth() + node->getWidth()) * 0.5 + layout_settings_.block_sep;
             }
             if (i < k - 1) {
                 Node* r = nodes[i + 1].get();
-                high = node_layout_.at(r).x - (node->getWidth() + r->getWidth()) * 0.5 - MIN_BLOCK_SEP;
+                high = node_layout_.at(r).x - (node->getWidth() + r->getWidth()) * 0.5 - layout_settings_.block_sep;
             }
             return { low, high };
         };
@@ -2422,10 +2420,10 @@ namespace hypergraph_logic {
                     double candidate = (min_x + max_x) * 0.5;
 
                     double low = (i == 0) ? -INF :
-                        node_layout_.at(nodes[i - 1].get()).x + (nodes[i - 1]->getWidth() + node->getWidth()) * 0.5 + MIN_BLOCK_SEP;
+                        node_layout_.at(nodes[i - 1].get()).x + (nodes[i - 1]->getWidth() + node->getWidth()) * 0.5 + layout_settings_.block_sep;
 
                     double high = (i == k - 1) ? INF :
-                        node_layout_.at(nodes[i + 1].get()).x - (nodes[i + 1]->getWidth() + node->getWidth()) * 0.5 - MIN_BLOCK_SEP;
+                        node_layout_.at(nodes[i + 1].get()).x - (nodes[i + 1]->getWidth() + node->getWidth()) * 0.5 - layout_settings_.block_sep;
 
                     // The vertical lines this one would run into: a root's line goes down
                     // to its bar, past the lines that come down from the bars above it to

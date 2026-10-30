@@ -37,7 +37,8 @@ namespace bk_internal {
 
 	// ── BrandesKopf: construction ─────────────────────────────────────────────────
 
-	BrandesKopf::BrandesKopf(const std::map<int, LayerData>& layers) {
+	BrandesKopf::BrandesKopf(const std::map<int, LayerData>& layers, double block_sep) {
+		g_.block_sep = block_sep;
 		std::map<Node*, int> node_to_g2;
 
 		g_.num_layers = static_cast<int>(layers.size());
@@ -242,7 +243,7 @@ namespace bk_internal {
 				int u = B.root[g.layers[layer_of_w][pred_pos]];
 				placeBlock(g, B, u, sink, shift, x, hdir);
 				if (sink[v] == v) sink[v] = sink[u];
-				double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + MIN_BLOCK_SEP;
+				double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + g.block_sep;
 				if (sink[v] == sink[u]) {
 					if (hdir == 1) x[v] = std::max(x[v], x[u] + sep);
 					else            x[v] = std::min(x[v], x[u] - sep);
@@ -304,7 +305,7 @@ namespace bk_internal {
 						if ((hdir == 1 && g.pos[v] > 0) ||
 							(hdir == -1 && g.pos[v] < static_cast<int>(g.layers[j].size()) - 1)) {
 							int u = g.layers[j][(hdir == 1) ? g.pos[v] - 1 : g.pos[v] + 1];
-							double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + MIN_BLOCK_SEP;
+							double sep = (B.block_widths[v] + B.block_widths[u]) * 0.5 + g.block_sep;
 							if (hdir == 1)
 								shift[sink[u]] = std::min(shift[sink[u]], shift[sink[v]] + x[v] - x[u] - sep);
 							else
@@ -412,7 +413,7 @@ namespace bk_internal {
 	}
 
 	// One left-to-right sweep over a single layer, clamping each candidate's
-	// move so it never gets closer than MIN_BLOCK_SEP (plus half-widths) to
+	// move so it never gets closer than the block separation (plus half-widths) to
 	// its immediate left/right sibling.
 	static void brightenLayer(const G2& g, std::vector<double>& x, int layer) {
 		const auto& nodes = g.layers[layer];
@@ -429,14 +430,14 @@ namespace bk_internal {
 			if (i > 0) {
 				int l = nodes[i - 1];
 				double width_l = g.nodes[l]->getWidth();
-				low = x[l] + (width_l + width_v) * 0.5 + MIN_BLOCK_SEP;
+				low = x[l] + (width_l + width_v) * 0.5 + g.block_sep;
 			}
 
 			double high = std::numeric_limits<double>::max();
 			if (i < k - 1) {
 				int r = nodes[i + 1];
 				double width_r = g.nodes[r]->getWidth();
-				high = x[r] - (width_v + width_r) * 0.5 - MIN_BLOCK_SEP;
+				high = x[r] - (width_v + width_r) * 0.5 - g.block_sep;
 			}
 
 			if (low <= target && target <= high) {
@@ -464,7 +465,7 @@ namespace hypergraph_logic {
 
 		using namespace bk_internal;
 
-		BrandesKopf bk(layers_);
+		BrandesKopf bk(layers_, layout_settings_.block_sep);
 		if (bk.g_.nodes.empty()) return;
 
 		std::vector<double> x = bk.run();

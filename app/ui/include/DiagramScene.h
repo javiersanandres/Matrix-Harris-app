@@ -356,7 +356,7 @@ namespace ui {
         // per layer above the first or below the last.
         double rowSceneY(int layer) const;
         // Scene y of the line past which a box or block opens a new layer above
-        // (or below) everything: (H + LAYER_GAP) / 2 beyond the outermost row,
+        // (or below) everything: (H + layer gap) / 2 beyond the outermost row,
         // H being that row's tallest box (see GraphicalHypergraph::layerForY).
         // The new-layer guides are drawn on it, right where the cursor crosses.
         double newLayerEdgeY(bool above) const;
@@ -438,6 +438,11 @@ namespace ui {
         void createNodeWithDialog(const QString& default_name,
             const std::function<void(const hypergraph_logic::NodeAttributes&)>& create);
         void showNodeProperties(NodeItem* item);
+        // A box dragged by its edges (see NodeItem) was dropped at `size`: the
+        // dragged sides become its own size and the layout glides around it.
+        // Boxes can only be resized while no other interaction is pending.
+        void resizeNode(hypergraph_logic::Node* node, const QSizeF& size, Qt::Orientations sides);
+        bool canResizeBoxes() const;
         QList<QColor> recentColours() const;
         void rememberColours(const QList<QColor>& colours);
         // Makes the dialog's colours and font size the project's defaults where it was asked to.

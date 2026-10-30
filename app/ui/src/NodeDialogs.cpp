@@ -143,6 +143,9 @@ namespace ui {
                 accept->setToolTip(a.name.empty() ? QStringLiteral("El nombre no puede estar vacío") : QString());
             };
             QObject::connect(form, &NodeAttributesForm::attributesChanged, dialog, refresh);
+            // The box's size is chosen on the preview itself.
+            preview->setResizable(true);
+            QObject::connect(preview, &NodePreview::sizeEdited, form, &NodeAttributesForm::setBoxSize);
             refresh();
 
             // The footer only needs a divider when the body actually scrolls.

@@ -64,7 +64,7 @@ static int countTotalCrossings(sifting_internal::SiftState& S,
 // ── BK shim ───────────────────────────────────────────────────────────────────
 
 struct VizBK : bk_internal::BrandesKopf {
-    explicit VizBK(bk_internal::G2 g) : BrandesKopf(dummyLayers_()) {
+    explicit VizBK(bk_internal::G2 g) : BrandesKopf(dummyLayers_(), hypergraph_logic::MIN_BLOCK_SEP) {
         g_ = std::move(g);
     }
     static const std::map<int, hypergraph_logic::LayerData>& dummyLayers_() {

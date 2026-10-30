@@ -69,6 +69,7 @@ namespace ui::style {
         EquivalenceSolid,  // two boxes side by side joined by a continuous line
         EquivalenceDashed, // the same with a discontinuous line
         RemoveEquivalence, // two boxes side by side whose line is cut
+        Resize,            // a box grown out of its old size, with a corner knob
     };
 
     QIcon icon(Icon which);

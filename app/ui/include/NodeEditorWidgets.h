@@ -7,8 +7,10 @@
 #include <QFrame>
 #include <QList>
 #include <QPixmap>
+#include <QPointer>
 #include <QString>
 #include <QToolButton>
+#include <QVariantAnimation>
 #include <QWidget>
 
 #include <array>
@@ -20,6 +22,8 @@ class QLabel;
 class QLineEdit;
 class QListWidget;
 class QMenu;
+class QPushButton;
+class QSpinBox;
 
 namespace ui {
 
@@ -179,6 +183,13 @@ namespace ui {
     //
     // Draws a node exactly as it will look on the canvas (same painter), centred
     // on a dotted "canvas" card.
+    //
+    // Resizable (setResizable), it is also where the box's size is chosen: its
+    // edges and corners are dragged as on the canvas, the default size of its
+    // shape stays behind it as a shadow once the box has a size of its own, and
+    // the fields in the bottom right corner show the size in pixels, to type it,
+    // with a button to go back to the shape's size. The preview zooms to keep
+    // both in sight once the drag ends.
     // ============================================================================
     class NodePreview : public QWidget {
         Q_OBJECT
@@ -186,13 +197,43 @@ namespace ui {
         explicit NodePreview(QWidget* parent = nullptr);
 
         void setAttributes(const hypergraph_logic::NodeAttributes& attributes);
-        QSize sizeHint() const override { return QSize(320, 150); }
+        void setResizable(bool resizable);
+        QSize sizeHint() const override { return resizable_ ? QSize(320, 240) : QSize(320, 150); }
+
+    signals:
+        // The user gave the box this size; an empty side follows its shape's default.
+        void sizeEdited(std::optional<double> width, std::optional<double> height);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
+        void resizeEvent(QResizeEvent* event) override;
+        void mousePressEvent(QMouseEvent* event) override;
+        void mouseMoveEvent(QMouseEvent* event) override;
+        void mouseReleaseEvent(QMouseEvent* event) override;
+        void leaveEvent(QEvent* event) override;
 
     private:
+        QRectF stage() const;      // where the box is drawn (the card minus hint and fields)
+        double fitScale() const;   // the zoom that shows the box and its shadow comfortably
+        QRectF boxRect() const;    // the box, in widget coordinates, at the current zoom
+        void zoomToFit();          // glides to fitScale()
+        void syncFields();
+
         hypergraph_logic::NodeAttributes attributes_;
+        bool resizable_ = false;
+        double scale_ = 0.0;       // 0 until the first layout
+        QPointer<QVariantAnimation> zoom_;
+
+        int hover_edges_ = 0;
+        int drag_edges_ = 0;       // the edges being dragged (0 when not resizing)
+        QPointF press_pos_;
+        QSizeF press_size_;
+
+        QWidget* fields_ = nullptr;
+        QSpinBox* width_ = nullptr;
+        QSpinBox* height_ = nullptr;
+        QToolButton* reset_ = nullptr;
+        bool syncing_ = false;
     };
 
     // ============================================================================
@@ -220,6 +261,10 @@ namespace ui {
     // out as a three-way merge: each row shows the left node's value, a button
     // to take it, the editable result, a button to take the right node's value,
     // and the right node's value. Rows where the two nodes differ are flagged.
+    // It also has a "Tamaño" row, to take either node's size.
+    //
+    // The box's size is chosen in the dialog's preview (NodePreview), which
+    // hands it over through setBoxSize.
     // ============================================================================
     class NodeAttributesForm : public QWidget {
         Q_OBJECT
@@ -237,6 +282,9 @@ namespace ui {
 
         hypergraph_logic::NodeAttributes attributes() const;
         void setAttributes(const hypergraph_logic::NodeAttributes& attributes);
+
+        // Gives the box this size; an empty side follows its shape's default.
+        void setBoxSize(std::optional<double> width, std::optional<double> height);
 
         // Colours the user explicitly picked while the form was open, so the
         // project can offer them again next time.
@@ -261,7 +309,7 @@ namespace ui {
         void attributesChanged();
 
     private:
-        enum Field { Name, Shape, Colour, FontColour, FontSize, Fire, FieldCount };
+        enum Field { Name, Shape, Size, Colour, FontColour, FontSize, Fire, FieldCount };
 
         struct MergeRow {
             QFrame* left_chip = nullptr;
@@ -304,6 +352,7 @@ namespace ui {
         // Editors.
         QLineEdit* name_ = nullptr;
         QListWidget* shape_ = nullptr;
+        QLabel* size_ = nullptr; // merge mode only
         ColorPickerButton* colour_ = nullptr;
         ColorPickerButton* font_colour_ = nullptr;
         TickBox* colour_default_ = nullptr;

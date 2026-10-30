@@ -24,6 +24,7 @@ add_executable(hypergraph_logic_tests
     test_graph_blocks.cpp
     test_copy_paste.cpp
     test_equivalences.cpp
+    test_layout_settings.cpp
 )
 
 target_include_directories(hypergraph_logic_tests

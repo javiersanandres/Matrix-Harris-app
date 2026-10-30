@@ -21,6 +21,8 @@ namespace hypergraph_logic {
     // in the same layer, after block-width has been accounted for.
     // Formula used in BK compaction:
     //   sep(a, b) = (blockWidth(a) + blockWidth(b)) / 2 + MIN_BLOCK_SEP
+    // Default of LayoutSettings::block_sep (as LAYER_GAP and HORIZONTAL_SEP
+    // below are of theirs), which the layout actually uses.
     inline constexpr double MIN_BLOCK_SEP = 60.0;
 
     // Width assigned to a rectangular real node box.
@@ -42,6 +44,13 @@ namespace hypergraph_logic {
 
     inline constexpr double RHOMBUS_NODE_WIDTH = 90.0;
     inline constexpr double RHOMBUS_NODE_HEIGHT = 90.0;
+
+    // Range a real box may be resized within (any shape). Narrower boxes leave
+    // no room for their ports and labels; larger ones dwarf the rest of the diagram.
+    inline constexpr double MIN_NODE_WIDTH = 40.0;
+    inline constexpr double MAX_NODE_WIDTH = 400.0;
+    inline constexpr double MIN_NODE_HEIGHT = 30.0;
+    inline constexpr double MAX_NODE_HEIGHT = 300.0;
 
     // Dummy nodes are invisible bend-points on edges. Due to vertical overlap
     // issues, we need to assing them a width for the port assignment step.
@@ -74,4 +83,56 @@ namespace hypergraph_logic {
 	// enough horizontal space to draw them separately, they are merged into a
 	// single smooth Bézier arch. This constant controls the height of such arches.
     static constexpr double ARCH_HEIGHT = 10.0; // Height of merged-hop Bézier arches.
+
+    // -------------------------------------------------------------------------
+    // LayoutSettings
+    //
+    // The distances of the drawing the user may change. Each graph has its own
+    // (GraphicalHypergraph::getLayoutSettings); a default-constructed one holds
+    // MIN_BLOCK_SEP, LAYER_GAP and HORIZONTAL_SEP above, which is what every
+    // layout used before they could be changed.
+    //
+    // MIN_VERTICAL_SEP, HOP_RADIUS, ARCH_HEIGHT and the dummy sizes are not
+    // settings: the layout's guarantees rest on them.
+    // -------------------------------------------------------------------------
+    struct LayoutSettings {
+        // Gap between the boxes of two neighbours in a layer (see MIN_BLOCK_SEP).
+        double block_sep = MIN_BLOCK_SEP;
+        // Gap between a layer's boxes and the nearest horizontal segment of the
+        // connections above or below them (see LAYER_GAP).
+        double layer_gap = LAYER_GAP;
+        // Gap between two horizontal segments stacked in the same layer gap
+        // (see HORIZONTAL_SEP).
+        double horizontal_sep = HORIZONTAL_SEP;
+
+        // ── Ranges ───────────────────────────────────────────────────────────
+        // The gap between boxes must leave room for a vertical segment's
+        // MIN_VERTICAL_SEP on both sides of each box: the vertical overlap
+        // detection relies on the port spans of a layer staying that far apart.
+        static constexpr double MIN_BLOCK_SEP_SETTING = 2.0 * MIN_VERTICAL_SEP;
+        static constexpr double MAX_BLOCK_SEP_SETTING = 300.0;
+        // Below this, the segments would touch the boxes' outlines.
+        static constexpr double MIN_LAYER_GAP_SETTING = 20.0;
+        static constexpr double MAX_LAYER_GAP_SETTING = 300.0;
+        // A segment's merged hops rise ARCH_HEIGHT over it: they must not reach
+        // the segment stacked above.
+        static constexpr double MIN_HORIZONTAL_SEP_SETTING = ARCH_HEIGHT + 5.0;
+        static constexpr double MAX_HORIZONTAL_SEP_SETTING = 120.0;
+
+        // The same settings with every value brought inside its range.
+        LayoutSettings clamped() const {
+            auto clamp = [](double v, double lo, double hi) { return v < lo ? lo : (v > hi ? hi : v); };
+            LayoutSettings s;
+            s.block_sep = clamp(block_sep, MIN_BLOCK_SEP_SETTING, MAX_BLOCK_SEP_SETTING);
+            s.layer_gap = clamp(layer_gap, MIN_LAYER_GAP_SETTING, MAX_LAYER_GAP_SETTING);
+            s.horizontal_sep = clamp(horizontal_sep, MIN_HORIZONTAL_SEP_SETTING, MAX_HORIZONTAL_SEP_SETTING);
+            return s;
+        }
+
+        bool operator==(const LayoutSettings& other) const noexcept {
+            return block_sep == other.block_sep && layer_gap == other.layer_gap
+                && horizontal_sep == other.horizontal_sep;
+        }
+        bool operator!=(const LayoutSettings& other) const noexcept { return !(*this == other); }
+    };
 } // namespace hypergraph_logic

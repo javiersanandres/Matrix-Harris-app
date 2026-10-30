@@ -1241,6 +1241,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             applyProjectDefaults(dlg); // the box stays as it was, the project may not
             return;
         }
+        // A new shape or size may move the boxes around it: they glide there.
+        const auto from = nodeCenters();
         try {
             if (font_size_for_all) {
                 if (is_joint_) joint_editor_->setNodeAttributesWithFontSizeForAll(node_ptr, updated);
@@ -1255,7 +1257,35 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
         rememberColours(dlg.pickedColours());
         applyProjectDefaults(dlg);
-        rebuild();
+        rebuildAnimated(from);
+        emit graphChanged();
+    }
+
+    bool DiagramScene::canResizeBoxes() const {
+        return state_ == InteractionState::Idle && !piece_move_ && !box_drag_;
+    }
+
+    void DiagramScene::resizeNode(Node* node, const QSizeF& size, Qt::Orientations sides) {
+        // Only what was dragged becomes the box's own: the other side keeps following its default.
+        NodeAttributes resized = node->getAttributes();
+        if (sides & Qt::Horizontal) resized.width = std::round(size.width());
+        if (sides & Qt::Vertical)   resized.height = std::round(size.height());
+        if (resized == node->getAttributes()) {
+            rebuild(); // dropped at the size it had
+            return;
+        }
+        // The resized box is already drawn at its new size; the rest glides.
+        const auto from = nodeCenters();
+        try {
+            if (is_joint_) joint_editor_->setNodeAttributes(node->shared_from_this(), resized);
+            else           regular_editor_->setNodeAttributes(node->shared_from_this(), resized);
+        }
+        catch (const std::exception& e) {
+            showError(e);
+            rebuild(); // back to the size it had
+            return;
+        }
+        rebuildAnimated(from);
         emit graphChanged();
     }
 
@@ -1507,7 +1537,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         double tallest = 0.0;
         for (const auto& n : data.nodes)
             if (!n->isDummy()) tallest = std::max(tallest, n->getHeight());
-        const double reach = (tallest + LAYER_GAP) / 2.0;
+        const double reach = (tallest + currentGraph().getLayoutSettings().layer_gap) / 2.0;
         return above ? rowSceneY(layer) - reach : rowSceneY(layer) + reach;
     }
 
@@ -2261,8 +2291,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const double half = move.bounds.width() / 2.0;
         double ghost_x = at_x;
         for (const auto& [lo, hi] : move.regions) {
-            if (at_x == hi) ghost_x = hi + MIN_BLOCK_SEP + half;
-            else if (at_x == lo) ghost_x = lo - MIN_BLOCK_SEP - half;
+            if (at_x == hi) ghost_x = hi + currentGraph().getLayoutSettings().block_sep + half;
+            else if (at_x == lo) ghost_x = lo - currentGraph().getLayoutSettings().block_sep - half;
         }
         // A new layer above or below everything is shown where it opens: a slim
         // dashed band on the edge of the outermost layer, with the ghost's first

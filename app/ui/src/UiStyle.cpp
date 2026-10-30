@@ -373,6 +373,19 @@ namespace ui::style {
                 head(m + QPointF(0, 7.5), { 0, 1 });
                 break;
             }
+            case Icon::Resize: {
+                // The box grown out of its old size (dashed, inside), and the knob that grew it.
+                c.existing({ 1.5, 2.5, 15.0, 12.5 });
+                p.setPen(c.pen(palette::faint, 1.1, Qt::DashLine));
+                p.setBrush(Qt::NoBrush);
+                p.drawRoundedRect(QRectF(3.5, 4.5, 7.0, 5.0), 1.2, 1.2);
+                p.setPen(c.pen(palette::accent, 1.4));
+                p.drawLine(QPointF(11.0, 10.0), QPointF(14.6, 13.4));
+                p.setPen(c.pen(palette::accent, 1.3));
+                p.setBrush(Qt::white);
+                p.drawEllipse(QPointF(16.5, 15.0), 2.3, 2.3);
+                break;
+            }
             case Icon::TakeOut: {
                 // The joint's dashed frame, and a piece leaving it up and to the right.
                 p.setPen(c.pen(palette::faint, 1.2, Qt::DashLine));

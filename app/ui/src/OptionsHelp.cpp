@@ -271,6 +271,35 @@ namespace ui::help {
                 },
                 QStringLiteral("mover desplazar grupo esquema") });
 
+            t.push_back({ "resizeBox", BOX_MENU, QStringLiteral("Cambiar el tamaño de una caja"), I::Resize,
+                QStringLiteral("Haz una caja más ancha, más estrecha, más alta o más baja arrastrando sus bordes."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Pasa el ratón por encima de una caja: aparece su marco, con un tirador en cada "
+                                        "esquina y en el centro de cada lado. Arrastra uno de ellos. Los dos lados se "
+                                        "mueven a la vez, así que la caja crece o encoge sin moverse de su sitio, y una "
+                                        "etiqueta encima de ella indica su tamaño en píxeles. Al soltar, el resto del "
+                                        "esquema se recoloca para dejarle sitio.")),
+                    pair(pic("resizeBox", 1), QStringLiteral("Arrastrando el borde derecho de la caja 2…"),
+                         pic("resizeBox", 2), QStringLiteral("…que se ensancha: la 3 se aparta para dejarle sitio.")),
+                    heading(QStringLiteral("Desde las propiedades")),
+                    text(QStringLiteral("En el diálogo de la caja (doble clic sobre ella, o <b>Propiedades</b> en su menú) "
+                                        "el tamaño se cambia sobre la vista previa: arrastra sus bordes igual que en el "
+                                        "esquema o escribe el ancho y el alto en la esquina inferior derecha. Detrás de la "
+                                        "caja queda, como una sombra, el tamaño por defecto de su forma, para compararlos.")),
+                    picture(pic("resizeBox", 3), QStringLiteral("Una caja más ancha que su forma, con la sombra del tamaño "
+                                                                "por defecto detrás.")),
+                    heading(QStringLiteral("Volver al tamaño de la forma")),
+                    text(QStringLiteral("En la vista previa, pulsa <b>↺</b> junto a las medidas. Mientras una caja tiene el "
+                                        "tamaño de su forma, lo sigue: si le cambias la forma, cambia con ella. Si solo "
+                                        "arrastras un lado (el ancho o el alto), el otro sigue siendo el de la forma; en "
+                                        "la vista previa se ve en gris.")),
+                    note(QStringLiteral("El ancho va de 40 a 400 píxeles y el alto de 30 a 300. La caja no crece sola con "
+                                        "el texto: si no cabe, se desplaza con la rueda del ratón. Al fusionar dos cajas "
+                                        "puedes quedarte con el tamaño de cualquiera de ellas. Con <b>Ctrl+Z</b> se deshace.")),
+                },
+                QStringLiteral("tamaño redimensionar ancho alto agrandar ampliar estrechar encoger bordes tiradores píxeles") });
+
             t.push_back({ "copyPiece", BOX_MENU, QStringLiteral("Copiar bloque o esquema"), I::Copy,
                 QStringLiteral("Copia el bloque de esta caja, o el esquema entero, para pegarlo en cualquier esquema."),
                 {

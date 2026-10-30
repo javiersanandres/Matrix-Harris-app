@@ -1,7 +1,10 @@
 #include "NodeVisuals.h"
 #include "LayoutTypes.h"
+#include "UiStyle.h"
 
 #include <QApplication>
+#include <QFontMetricsF>
+#include <QLinearGradient>
 #include <QPainter>
 #include <QPolygonF>
 #include <QTextLayout>
@@ -232,6 +235,132 @@ namespace ui::node_visuals {
             }
         }
 
+        painter->restore();
+    }
+
+    // ============================================================================
+    // Resizing
+    // ============================================================================
+
+    int resizeEdgesAt(const QRectF& box, const QPointF& pos, double reach) {
+        if (!box.adjusted(-reach, -reach, reach, reach).contains(pos)) return 0;
+        int edges = 0;
+        if (std::abs(pos.x() - box.left()) <= reach) edges |= ResizeLeft;
+        else if (std::abs(pos.x() - box.right()) <= reach) edges |= ResizeRight;
+        if (std::abs(pos.y() - box.top()) <= reach) edges |= ResizeTop;
+        else if (std::abs(pos.y() - box.bottom()) <= reach) edges |= ResizeBottom;
+        return edges;
+    }
+
+    Qt::CursorShape resizeCursor(int edges) {
+        const bool horizontal = edges & (ResizeLeft | ResizeRight);
+        const bool vertical = edges & (ResizeTop | ResizeBottom);
+        if (horizontal && vertical) {
+            // Top left and bottom right share a diagonal; the other two corners, the other one.
+            const bool main_diagonal = bool(edges & ResizeLeft) == bool(edges & ResizeTop);
+            return main_diagonal ? Qt::SizeFDiagCursor : Qt::SizeBDiagCursor;
+        }
+        if (horizontal) return Qt::SizeHorCursor;
+        if (vertical)   return Qt::SizeVerCursor;
+        return Qt::ArrowCursor;
+    }
+
+    QSizeF resizedBox(const QSizeF& start, int edges, const QPointF& delta) {
+        double w = start.width();
+        double h = start.height();
+        if (edges & ResizeRight)  w += 2.0 * delta.x();
+        if (edges & ResizeLeft)   w -= 2.0 * delta.x();
+        if (edges & ResizeBottom) h += 2.0 * delta.y();
+        if (edges & ResizeTop)    h -= 2.0 * delta.y();
+        return QSizeF(std::round(std::clamp(w, MIN_NODE_WIDTH, MAX_NODE_WIDTH)),
+                      std::round(std::clamp(h, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT)));
+    }
+
+    void paintResizeFrame(QPainter* painter, const QRectF& box, int active, double unit) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+
+        // A soft indigo halo with a fine line on it.
+        QColor halo = style::palette::accent;
+        halo.setAlphaF(0.14f);
+        painter->setBrush(Qt::NoBrush);
+        painter->setPen(QPen(halo, 5.0 * unit));
+        painter->drawRect(box);
+        QColor line = style::palette::accent;
+        line.setAlphaF(0.75f);
+        painter->setPen(QPen(line, 1.0 * unit));
+        painter->drawRect(box);
+
+        // Round knobs on the corners, pills along the edges.
+        const QColor shadow(31, 35, 48, 45);
+        auto knob = [&](const QPointF& c, int edges) {
+            const bool on = edges == active;
+            const double grow = on ? 1.25 : 1.0;
+            QPainterPath path;
+            if ((edges & (ResizeLeft | ResizeRight)) && (edges & (ResizeTop | ResizeBottom))) {
+                const double r = 4.5 * grow * unit;
+                path.addEllipse(c, r, r);
+            }
+            else {
+                const bool along_x = edges & (ResizeTop | ResizeBottom);
+                const double l = 14.0 * grow * unit, t = 6.0 * grow * unit;
+                const QSizeF s = along_x ? QSizeF(l, t) : QSizeF(t, l);
+                path.addRoundedRect(QRectF(c - QPointF(s.width(), s.height()) / 2.0, s), t / 2.0, t / 2.0);
+            }
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(shadow);
+            painter->drawPath(path.translated(0.0, 1.0 * unit));
+            if (on) {
+                QLinearGradient fill(path.boundingRect().topLeft(), path.boundingRect().bottomRight());
+                fill.setColorAt(0.0, style::palette::accent);
+                fill.setColorAt(1.0, style::palette::violet);
+                painter->setBrush(fill);
+                painter->setPen(QPen(Qt::white, 1.4 * unit));
+            }
+            else {
+                painter->setBrush(Qt::white);
+                painter->setPen(QPen(style::palette::accent, 1.4 * unit));
+            }
+            painter->drawPath(path);
+        };
+        const QPointF c = box.center();
+        knob(QPointF(c.x(), box.top()), ResizeTop);
+        knob(QPointF(c.x(), box.bottom()), ResizeBottom);
+        knob(QPointF(box.left(), c.y()), ResizeLeft);
+        knob(QPointF(box.right(), c.y()), ResizeRight);
+        knob(box.topLeft(), ResizeLeft | ResizeTop);
+        knob(box.topRight(), ResizeRight | ResizeTop);
+        knob(box.bottomLeft(), ResizeLeft | ResizeBottom);
+        knob(box.bottomRight(), ResizeRight | ResizeBottom);
+        painter->restore();
+    }
+
+    void paintSizeChip(QPainter* painter, const QRectF& box, double unit) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        const QString text = QStringLiteral("%1 × %2").arg(qRound(box.width())).arg(qRound(box.height()));
+        QFont font = QApplication::font();
+        font.setPointSizeF(8.0);
+        font.setBold(true);
+        // Measured and drawn in screen pixels, then scaled back into the painter's units.
+        const QSizeF text_size = QFontMetricsF(font).size(Qt::TextSingleLine, text);
+        const QSizeF chip_size(text_size.width() + 18.0, text_size.height() + 6.0);
+        const QPointF anchor(box.center().x(), box.top() - 12.0 * unit);
+        painter->translate(anchor);
+        painter->scale(unit, unit);
+        const QRectF chip(-chip_size.width() / 2.0, -chip_size.height(), chip_size.width(), chip_size.height());
+        const double radius = chip.height() / 2.0;
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(31, 35, 48, 40));
+        painter->drawRoundedRect(chip.translated(0.0, 1.5), radius, radius);
+        QLinearGradient fill(chip.topLeft(), chip.topRight());
+        fill.setColorAt(0.0, style::palette::accent);
+        fill.setColorAt(1.0, style::palette::violet);
+        painter->setBrush(fill);
+        painter->drawRoundedRect(chip, radius, radius);
+        painter->setFont(font);
+        painter->setPen(Qt::white);
+        painter->drawText(chip, Qt::AlignCenter, text);
         painter->restore();
     }
 

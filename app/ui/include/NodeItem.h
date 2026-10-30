@@ -22,6 +22,12 @@ namespace ui {
 //   - Mouse press + drag → the box lifts and follows the mouse (the scene shows
 //                          where it would land); on release the scene relocates
 //                          it and the layout glides to its new shape.
+//   - Drag of an edge    → resizes the box around its centre (where the layout
+//                          keeps it), within the limits of LayoutTypes.h, with its
+//                          size shown above it; on release the scene gives the box
+//                          that size and the layout glides around it. While no
+//                          other interaction is pending, hovering a box shows its
+//                          frame and handles.
 //
 // The item stores a raw Node* for identification. The pointer is valid for the
 // lifetime of the scene because the scene is rebuilt from scratch after every
@@ -49,9 +55,11 @@ public:
     SelectionMark selectionMark() const { return mark_; }
 
     // rect() is the node's bounding box; the node itself is drawn and hit-tested
-    // with its own shape (rectangle, circle or rhombus) inscribed in that box.
+    // with its own shape (rectangle, circle or rhombus) inscribed in that box,
+    // plus a thin band along the box's edges, where it is grabbed to resize it.
     QPainterPath shape() const override;
-    // rect() plus room for the selection glow around it.
+    // rect() plus room for the selection glow around it (and, while resizing,
+    // for the size shown above it).
     QRectF boundingRect() const override;
     void paint(QPainter* painter, const QStyleOptionGraphicsItem* option,
                QWidget* widget = nullptr) override;
@@ -63,10 +71,17 @@ protected:
     void mouseDoubleClickEvent(QGraphicsSceneMouseEvent* event) override;
     void wheelEvent(QGraphicsSceneWheelEvent* event) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent* event) override;
+    void hoverMoveEvent(QGraphicsSceneHoverEvent* event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent* event) override;
     void contextMenuEvent(QGraphicsSceneContextMenuEvent* event) override;
 
 private:
+    // Edges of the box under a point (item coordinates), as node_visuals::ResizeEdge
+    // flags; 0 when the box cannot be resized now.
+    int edgesAt(const QPointF& pos) const;
+    bool canResize() const;
+    void showResizeCursor(int edges);
+
     hypergraph_logic::Node* node_;
 
     SelectionMark mark_  = SelectionMark::None;
@@ -81,8 +96,15 @@ private:
     double drag_current_y_ = 0.0;
     QPointF press_pos_;               // scene position at press
 
+    // Resize state: the edges being dragged (0 when not resizing) and the box at press.
+    int    resizing_ = 0;
+    int    hover_edges_ = 0;   // edges under the mouse, whose handle stands out
+    QRectF press_rect_;
+
     static constexpr double DRAG_THRESHOLD = 5.0; // pixels before drag activates
     static constexpr double GLOW_MARGIN = 16.0;   // room around rect() for the glow
+    static constexpr double HANDLE_REACH = 5.0;   // distance to an edge that grabs it
+    static constexpr double SIZE_CHIP_ROOM = 60.0; // room above rect() for the size while resizing (zoomed out too)
 };
 
 } // namespace ui

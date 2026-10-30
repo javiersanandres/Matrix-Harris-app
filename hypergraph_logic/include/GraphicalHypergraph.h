@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Hypergraph.h"
+#include "LayoutTypes.h"
 #include <nlohmann/json.hpp>
 #include <functional>
 #include <memory>
@@ -118,6 +119,17 @@ namespace hypergraph_logic {
 		void computeLayout(const std::set<int>& mip_layers);
 		void computeLayout();
 
+		// ── Layout settings ───────────────────────────────────────────────────────
+		//
+		// The distances the drawing keeps (see LayoutSettings). setLayoutSettings
+		// brings them inside their ranges and redraws the graph with them, keeping
+		// the order of its boxes and bars; nothing happens if they do not change.
+		// They are kept by clone(), copyOf() and duplicate(), but not saved by
+		// toJSON(): they belong to the project, which hands them to its graphs.
+		//
+		const LayoutSettings& getLayoutSettings() const { return layout_settings_; }
+		void setLayoutSettings(const LayoutSettings& settings);
+
 		// ── refreshUncertainPorts ─────────────────────────────────────────────────
 		//
 		// Copies each connection's uncertain ends into Port::uncertain on the
@@ -187,13 +199,13 @@ namespace hypergraph_logic {
 		// to new_y_coordinate. The span of a layer is calculated as follows:
 		//	[ ( h(next(layer)) + h(layer) ) / 2, ( h(prev(layer)) + h(layer) ) / 2 ]
 		// If there were no deepest layers the lower bound will be computed as:
-		//				h(layer) - (H(layer) + LAYER_GAP) / 2
+		//				h(layer) - (H(layer) + layer_gap) / 2
 		// If there were no shallowest layers the upper bound will be computed as:
-		//				h(layer) + (H(layer) + LAYER_GAP) / 2
+		//				h(layer) + (H(layer) + layer_gap) / 2
 		// where H(layer) is the height of the layer's tallest node. A coordinate
-		// above every span (past h(shallowest) + (H(shallowest) + LAYER_GAP) / 2)
+		// above every span (past h(shallowest) + (H(shallowest) + layer_gap) / 2)
 		// requests a new shallowest layer, and one below every span (past
-		// h(deepest) - (H(deepest) + LAYER_GAP) / 2) a new deepest one: the same
+		// h(deepest) - (H(deepest) + layer_gap) / 2) a new deepest one: the same
 		// half gap on both sides.
 		// The layer is chosen by layerForY.
 		//
@@ -379,6 +391,8 @@ namespace hypergraph_logic {
 		std::unordered_map<Hyperedge*, double> edge_layout_;
 		std::unordered_map<int, double>        layer_layout_;
 
+		LayoutSettings layout_settings_;
+
 		// ── mergeFrom ─────────────────────────────────────────────────────────────
 		//
 		// Merges the contents of another GraphicalHypergraph (passed by rvalue so
@@ -456,7 +470,7 @@ namespace hypergraph_logic {
 		// Assigns a y coordinate to the horizontal span of each hyperedge, a
 		// y coordinate to each layer, and a y coordinate to every port.
 		//
-		// Every node's centre lies on its layer's y. LAYER_GAP is measured from
+		// Every node's centre lies on its layer's y. layer_gap is measured from
 		// the layer's tallest node, i.e. from layer_y -/+ getLayerHeight(layer) / 2.
 		//
 		void assignYCoordinates();

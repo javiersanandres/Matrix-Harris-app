@@ -63,6 +63,9 @@ namespace bk_internal {
         std::vector<std::vector<int>> layers;  // layers[layer_key] = ordered node ids
         int num_layers = 0;                    // number of layers in the original hypergraph
         std::vector<int> pos;                  // pos[id] = position within its layer
+        // Gap between neighbouring blocks: the constructor sets it from the graph's
+        // LayoutSettings::block_sep; the default only serves views built by hand (tests).
+        double block_sep = MIN_BLOCK_SEP;
 
         // Segments marked as type-1 conflicted during preprocessing.
         // A pair (u, v) in this set means the segment u->v must not be used
@@ -97,7 +100,8 @@ namespace bk_internal {
     // Encapsulates all state and algorithms required to run a full Brandes–Köpf
     // horizontal coordinate assignment pass over a hypergraph layer map.
     struct BrandesKopf {
-        explicit BrandesKopf(const std::map<int, LayerData>& layers);
+        // block_sep: the gap kept between neighbouring blocks (see LayoutSettings).
+        BrandesKopf(const std::map<int, LayerData>& layers, double block_sep);
 
         // Run the full BK pipeline (Algorithms 1–4) and return the final
         // x-coordinate for every node, indexed by G2 id.

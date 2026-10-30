@@ -20,10 +20,10 @@ namespace hypergraph_logic {
 
             struct TestBrandesKopf : BrandesKopf {
                 explicit TestBrandesKopf(const std::map<int, LayerData>& layers)
-                    : BrandesKopf(layers) {
+                    : BrandesKopf(layers, MIN_BLOCK_SEP) {
                 }
 
-                explicit TestBrandesKopf(G2 g) : BrandesKopf(dummyLayers_()) {
+                explicit TestBrandesKopf(G2 g) : BrandesKopf(dummyLayers_(), MIN_BLOCK_SEP) {
                     g_ = std::move(g);
                 }
 

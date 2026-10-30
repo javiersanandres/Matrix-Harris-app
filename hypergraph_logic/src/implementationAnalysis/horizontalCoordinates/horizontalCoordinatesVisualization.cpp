@@ -24,7 +24,7 @@ using namespace bk_internal;
 // so we subclass, inject g_ directly (it is public), and call run().
 
 struct VisBK : bk_internal::BrandesKopf {
-    explicit VisBK(bk_internal::G2 g) : BrandesKopf(dummyLayers_()) {
+    explicit VisBK(bk_internal::G2 g) : BrandesKopf(dummyLayers_(), hypergraph_logic::MIN_BLOCK_SEP) {
         g_ = std::move(g);
     }
     static const std::map<int, hypergraph_logic::LayerData>& dummyLayers_() {

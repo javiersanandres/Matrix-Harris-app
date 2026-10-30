@@ -230,10 +230,10 @@ namespace app_logic {
 
 		// ── setNodeAttributes ─────────────────────────────────────────────────────
 		//
-		// Sets the node's attributes (name, shape, colours, font size and fire
-		// state all at once). Local change: undone without copying the graph.
+		// Sets the node's attributes (name, shape, size, colours, font size and
+		// fire state all at once). Local change: undone without copying the graph.
 		//
-		// A new shape changes the node's width and height, so the layout is
+		// A new shape or size changes the node's box, so the layout is
 		// recomputed in that case, which may re-order the bars around the node's
 		// layer. The entry remembers that re-ordering, so undo and redo bring back
 		// exactly the drawing there was, not just an equivalent one.
@@ -295,7 +295,8 @@ namespace app_logic {
 			if (old_attributes == attributes) return std::nullopt;
 			const NodeLocator at = locate(graph, node);
 
-			if (node->getShape() == attributes.shape) {
+			if (node->getShape() == attributes.shape && node->getWidth() == attributes.boxWidth()
+				&& node->getHeight() == attributes.boxHeight()) {
 				node->setAttributes(attributes);
 				return LocalChange{
 					[at, old_attributes](GraphicalHypergraph& g) { resolve(g, at)->setAttributes(old_attributes); },

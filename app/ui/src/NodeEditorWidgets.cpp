@@ -1,5 +1,6 @@
 #include "NodeEditorWidgets.h"
 #include "NodeVisuals.h"
+#include "LayoutTypes.h"
 
 #include <QColorDialog>
 #include <QEnterEvent>
@@ -15,6 +16,7 @@
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
+#include <QSpinBox>
 #include <QStyle>
 #include <QTimer>
 #include <QVBoxLayout>
@@ -57,6 +59,12 @@ namespace ui {
         // Shorter names for the shape tiles, where the full one does not fit.
         QString shapeTileName(NodeShape shape) {
             return shape == NodeShape::RoundedRectangle ? QStringLiteral("Redondeado") : shapeName(shape);
+        }
+
+        // "120 × 50 px", marked when it is just the shape's default.
+        QString sizeText(const NodeAttributes& a) {
+            return QStringLiteral("%1 × %2 px%3").arg(qRound(a.boxWidth())).arg(qRound(a.boxHeight()))
+                .arg(a.width || a.height ? QString() : QStringLiteral(" (de la forma)"));
         }
 
         QString fireName(FireState fire) {
@@ -127,6 +135,23 @@ QLineEdit, QComboBox {
     background: white; color: #1F2330; selection-background-color: #6366F1;
 }
 QLineEdit:focus, QComboBox:focus { border: 1px solid #6366F1; }
+QFrame#previewFields {
+    background: rgba(255, 255, 255, 235); border: 1px solid #E3E6EF; border-radius: 10px;
+}
+QSpinBox#previewSpin {
+    border: 1px solid transparent; border-radius: 6px; padding: 2px 4px; background: transparent;
+    color: #1F2330; font-weight: 600; selection-background-color: #6366F1;
+}
+QSpinBox#previewSpin:hover { background: #F4F5F9; }
+QSpinBox#previewSpin:focus { border-color: #6366F1; background: white; }
+QSpinBox#previewSpin[inherited="true"] { color: #8A90A2; font-weight: 400; }
+QLabel#previewUnit { color: #8A90A2; font-size: 8pt; }
+QToolButton#previewReset {
+    border: none; border-radius: 6px; background: #EEF0FF; color: #4F46E5;
+    font-weight: 700; padding: 2px 7px;
+}
+QToolButton#previewReset:hover { background: #E2E4FF; }
+QToolButton#previewReset:disabled { background: transparent; color: #C4C7D3; }
 QComboBox::drop-down { border: none; width: 18px; }
 QToolButton#pickerButton {
     border: 1px solid #D6DAE4; border-radius: 8px; padding: 4px 22px 4px 8px;
@@ -732,10 +757,69 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
     {
         setMinimumSize(300, 140);
         setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
+
+        // The size in pixels, in the bottom right corner: [ 100 × 50 px ↺ ].
+        auto* fields = new QFrame(this);
+        fields->setObjectName("previewFields");
+        fields_ = fields;
+        auto* h = new QHBoxLayout(fields);
+        h->setContentsMargins(6, 3, 4, 3);
+        h->setSpacing(2);
+        auto makeSpin = [](double min, double max, const QString& what) {
+            auto* spin = new QSpinBox;
+            spin->setObjectName("previewSpin");
+            spin->setRange(static_cast<int>(min), static_cast<int>(max));
+            spin->setButtonSymbols(QAbstractSpinBox::NoButtons);
+            spin->setKeyboardTracking(false); // one change per typed value, not per digit
+            spin->setAlignment(Qt::AlignCenter);
+            spin->setFixedWidth(46);
+            spin->setToolTip(QStringLiteral("%1 de la caja, en píxeles (de %2 a %3)")
+                .arg(what).arg(static_cast<int>(min)).arg(static_cast<int>(max)));
+            return spin;
+        };
+        auto makeUnit = [](const QString& text) {
+            auto* label = new QLabel(text);
+            label->setObjectName("previewUnit");
+            return label;
+        };
+        width_ = makeSpin(MIN_NODE_WIDTH, MAX_NODE_WIDTH, QStringLiteral("Ancho"));
+        height_ = makeSpin(MIN_NODE_HEIGHT, MAX_NODE_HEIGHT, QStringLiteral("Alto"));
+        reset_ = new QToolButton;
+        reset_->setObjectName("previewReset");
+        reset_->setText(QStringLiteral("↺"));
+        reset_->setCursor(Qt::PointingHandCursor);
+        reset_->setToolTip(QStringLiteral("Volver al tamaño de la forma (y seguirlo si cambia)"));
+        h->addWidget(width_);
+        h->addWidget(makeUnit(QStringLiteral("×")));
+        h->addWidget(height_);
+        h->addWidget(makeUnit(QStringLiteral("px")));
+        h->addSpacing(6);
+        h->addWidget(reset_);
+
+        connect(width_, &QSpinBox::valueChanged, this, [this](int v) {
+            if (!syncing_) emit sizeEdited(static_cast<double>(v), attributes_.height);
+        });
+        connect(height_, &QSpinBox::valueChanged, this, [this](int v) {
+            if (!syncing_) emit sizeEdited(attributes_.width, static_cast<double>(v));
+        });
+        connect(reset_, &QToolButton::clicked, this, [this] { emit sizeEdited(std::nullopt, std::nullopt); });
+        fields_->setVisible(false);
     }
 
     void NodePreview::setAttributes(const NodeAttributes& attributes) {
         attributes_ = attributes;
+        syncFields();
+        if (!drag_edges_) zoomToFit(); // while dragging, the zoom holds so the box follows the mouse
+        update();
+    }
+
+    void NodePreview::setResizable(bool resizable) {
+        resizable_ = resizable;
+        fields_->setVisible(resizable);
+        setMouseTracking(resizable);
+        setMinimumHeight(resizable ? 220 : 140);
+        updateGeometry();
+        scale_ = 0.0;
         update();
     }
 
@@ -759,15 +843,53 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         p.setBrush(Qt::NoBrush);
         p.drawPath(card_path);
 
-        // The node, scaled to fit (up to 1.6x so small nodes read well).
-        const QSizeF box = nv::boxSize(attributes_);
-        const double scale = std::min({ 1.6,
-            (card.width() - 40.0) / box.width(),
-            (card.height() - 36.0) / box.height() });
-        const QRectF node_box(-box.width() / 2.0, -box.height() / 2.0, box.width(), box.height());
+        const bool own_size = attributes_.width || attributes_.height;
+        if (resizable_) {
+            QFont small = font();
+            small.setPointSizeF(8.0);
+            p.setFont(small);
+            p.setPen(MUTED);
+            p.drawText(card.adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop,
+                QStringLiteral("Arrastra los bordes de la caja para cambiar su tamaño"));
 
-        p.translate(card.center());
+            if (own_size) {
+                // Legend of the shadow, level with the size fields.
+                const double y = fields_->geometry().center().y();
+                const QRectF swatch(card.left() + 14.0, y - 5.0, 16.0, 10.0);
+                QColor fill = ACCENT;
+                fill.setAlpha(28);
+                p.setBrush(fill);
+                QColor dash = ACCENT;
+                dash.setAlpha(170);
+                p.setPen(QPen(dash, 1.0, Qt::DashLine));
+                p.drawRoundedRect(swatch, 2, 2);
+                p.setPen(MUTED);
+                p.drawText(QRectF(swatch.right() + 6.0, y - 10.0, 160.0, 20.0), Qt::AlignLeft | Qt::AlignVCenter,
+                    QStringLiteral("Tamaño de la forma"));
+            }
+        }
+
+        // The node, scaled to fit (up to 1.6x so small nodes read well).
+        const double scale = scale_ > 0.0 ? scale_ : fitScale();
+        const QSizeF box = nv::boxSize(attributes_);
+        const QRectF node_box(-box.width() / 2.0, -box.height() / 2.0, box.width(), box.height());
+        const QPointF ghost_size(NodeAttributes::defaultWidth(attributes_.shape), NodeAttributes::defaultHeight(attributes_.shape));
+        const QPainterPath ghost = nv::shapePath(attributes_.shape, QRectF(-ghost_size / 2.0, QSizeF(ghost_size.x(), ghost_size.y())));
+        const bool show_ghost = resizable_ && own_size;
+
+        p.save();
+        p.setClipPath(card_path);
+        p.translate(stage().center());
         p.scale(scale, scale);
+
+        // The shape's default size, as a shadow behind the box...
+        if (show_ghost) {
+            QColor fill = ACCENT;
+            fill.setAlpha(26);
+            p.setPen(Qt::NoPen);
+            p.setBrush(fill);
+            p.drawPath(ghost);
+        }
 
         // Soft drop shadow.
         p.save();
@@ -778,6 +900,147 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         p.restore();
 
         nv::paintNode(&p, attributes_, node_box);
+
+        // ...whose outline still shows where the box covers it.
+        if (show_ghost) {
+            QColor dash = ACCENT;
+            dash.setAlpha(150);
+            p.setPen(QPen(dash, 1.2 / scale, Qt::DashLine));
+            p.setBrush(Qt::NoBrush);
+            p.drawPath(ghost);
+        }
+
+        if (resizable_)
+            nv::paintResizeFrame(&p, node_box, drag_edges_ ? drag_edges_ : hover_edges_, 1.0 / scale);
+        p.restore();
+    }
+
+    void NodePreview::resizeEvent(QResizeEvent* event) {
+        QWidget::resizeEvent(event);
+        fields_->adjustSize();
+        fields_->move(width() - fields_->width() - 12, height() - fields_->height() - 10);
+        if (zoom_) zoom_->stop();
+        scale_ = fitScale();
+    }
+
+    // ── Geometry ──────────────────────────────────────────────────────────────────
+
+    QRectF NodePreview::stage() const {
+        const QRectF card = QRectF(rect()).adjusted(0.5, 0.5, -0.5, -0.5);
+        if (!resizable_) return card;
+        return card.adjusted(0.0, 24.0, 0.0, -(fields_->height() + 14.0)); // under the hint, over the fields
+    }
+
+    double NodePreview::fitScale() const {
+        const QRectF s = stage();
+        QSizeF box = nv::boxSize(attributes_);
+        if (resizable_) // its shadow must fit too
+            box = box.expandedTo(QSizeF(NodeAttributes::defaultWidth(attributes_.shape),
+                NodeAttributes::defaultHeight(attributes_.shape)));
+        const double room_y = resizable_ ? 26.0 : 36.0; // the stage already leaves room above and below
+        return std::max(0.05, std::min({ 1.6, (s.width() - 40.0) / box.width(), (s.height() - room_y) / box.height() }));
+    }
+
+    QRectF NodePreview::boxRect() const {
+        const QSizeF box = nv::boxSize(attributes_) * (scale_ > 0.0 ? scale_ : fitScale());
+        return QRectF(stage().center() - QPointF(box.width(), box.height()) / 2.0, box);
+    }
+
+    void NodePreview::zoomToFit() {
+        const double target = fitScale();
+        if (scale_ <= 0.0 || !isVisible()) {
+            if (zoom_) zoom_->stop();
+            scale_ = target;
+            return;
+        }
+        if (std::abs(target - scale_) < 1e-3) return;
+        if (zoom_) zoom_->stop();
+        zoom_ = new QVariantAnimation(this);
+        zoom_->setDuration(240);
+        zoom_->setStartValue(scale_);
+        zoom_->setEndValue(target);
+        zoom_->setEasingCurve(QEasingCurve::OutCubic);
+        connect(zoom_, &QVariantAnimation::valueChanged, this, [this](const QVariant& v) {
+            scale_ = v.toDouble();
+            update();
+        });
+        zoom_->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    void NodePreview::syncFields() {
+        syncing_ = true;
+        width_->setValue(qRound(attributes_.boxWidth()));
+        height_->setValue(qRound(attributes_.boxHeight()));
+        // A side the box does not have shows, greyed, the shape's default it follows.
+        for (auto [spin, inherited] : { std::pair{ width_, !attributes_.width }, std::pair{ height_, !attributes_.height } }) {
+            if (spin->property("inherited").toBool() != inherited) {
+                spin->setProperty("inherited", inherited);
+                dialog_theme::repolish(spin);
+            }
+        }
+        reset_->setEnabled(attributes_.width || attributes_.height);
+        syncing_ = false;
+    }
+
+    // ── Dragging the edges ────────────────────────────────────────────────────────
+
+    namespace {
+        constexpr double PREVIEW_HANDLE_REACH = 7.0;
+    }
+
+    void NodePreview::mousePressEvent(QMouseEvent* event) {
+        if (resizable_ && event->button() == Qt::LeftButton) {
+            const int edges = nv::resizeEdgesAt(boxRect(), event->position(), PREVIEW_HANDLE_REACH);
+            if (edges) {
+                if (zoom_) zoom_->stop(); // the box stays under the mouse while it is dragged
+                drag_edges_ = edges;
+                press_pos_ = event->position();
+                press_size_ = nv::boxSize(attributes_);
+                update();
+                return;
+            }
+        }
+        QWidget::mousePressEvent(event);
+    }
+
+    void NodePreview::mouseMoveEvent(QMouseEvent* event) {
+        if (drag_edges_) {
+            const QSizeF size = nv::resizedBox(press_size_, drag_edges_, (event->position() - press_pos_) / scale_);
+            // Only what is dragged becomes the box's own: the other side keeps following its shape.
+            std::optional<double> w = attributes_.width;
+            std::optional<double> h = attributes_.height;
+            if (drag_edges_ & (nv::ResizeLeft | nv::ResizeRight)) w = size.width();
+            if (drag_edges_ & (nv::ResizeTop | nv::ResizeBottom)) h = size.height();
+            if (w != attributes_.width || h != attributes_.height) emit sizeEdited(w, h);
+            return;
+        }
+        if (!resizable_) return;
+        const int edges = nv::resizeEdgesAt(boxRect(), event->position(), PREVIEW_HANDLE_REACH);
+        if (edges == hover_edges_) return;
+        hover_edges_ = edges;
+        if (edges) setCursor(nv::resizeCursor(edges));
+        else       unsetCursor();
+        update();
+    }
+
+    void NodePreview::mouseReleaseEvent(QMouseEvent* event) {
+        if (drag_edges_ && event->button() == Qt::LeftButton) {
+            drag_edges_ = 0;
+            hover_edges_ = nv::resizeEdgesAt(boxRect(), event->position(), PREVIEW_HANDLE_REACH);
+            zoomToFit(); // the box and its shadow back in sight
+            update();
+            return;
+        }
+        QWidget::mouseReleaseEvent(event);
+    }
+
+    void NodePreview::leaveEvent(QEvent* event) {
+        if (!drag_edges_ && hover_edges_) {
+            hover_edges_ = 0;
+            unsetCursor();
+            update();
+        }
+        QWidget::leaveEvent(event);
     }
 
     // ============================================================================
@@ -828,6 +1091,14 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             font_auto_ = nv::toQColor(current_.font_colour).rgb()
                 == nv::contrastingTextColour(nv::toQColor(current_.colour)).rgb();
         }
+        sync();
+        emit attributesChanged();
+    }
+
+    void NodeAttributesForm::setBoxSize(std::optional<double> width, std::optional<double> height) {
+        if (current_.width == width && current_.height == height) return;
+        current_.width = width;
+        current_.height = height;
         sync();
         emit attributesChanged();
     }
@@ -950,6 +1221,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         addSection(QStringLiteral("Identidad"));
         addField(Name, QStringLiteral("Nombre"));
         addField(Shape, QStringLiteral("Forma"));
+        if (merge) addField(Size, QStringLiteral("Tamaño"));
         addSection(QStringLiteral("Apariencia"));
         addField(Colour, QStringLiteral("Color de fondo"));
         addField(FontColour, QStringLiteral("Color del texto"));
@@ -1006,6 +1278,12 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 emit attributesChanged();
             });
             return shape_;
+        }
+        case Size: {
+            // Only shown: the size is changed in the preview.
+            size_ = new QLabel;
+            size_->setToolTip(QStringLiteral("Cambia el tamaño en la vista previa, arrastrando los bordes de la caja"));
+            return size_;
         }
         case Colour: {
             colour_ = new ColorPickerButton;
@@ -1149,6 +1427,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             addIcon(renderNodeIcon(iconAttributes(side.shape), QSize(26, 18), dpr));
             addText(shapeName(side.shape));
             break;
+        case Size:
+            addText(sizeText(side));
+            break;
         case Colour:
             addIcon(swatchPixmap(nv::toQColor(side.colour), QSize(22, 16), dpr));
             addText(hexOf(nv::toQColor(side.colour)));
@@ -1256,6 +1537,10 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         case Shape:
             current_.shape = side.shape;
             break;
+        case Size:
+            current_.width = side.width;
+            current_.height = side.height;
+            break;
         case Colour:
             setBackground(nv::toQColor(side.colour));
             return;
@@ -1289,6 +1574,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         switch (field) {
         case Name:       return a.name == b.name;
         case Shape:      return a.shape == b.shape;
+        case Size:       return a.width == b.width && a.height == b.height;
         case Colour:     return a.colour == b.colour;
         case FontColour: return a.font_colour == b.font_colour;
         case FontSize:   return a.font_size == b.font_size;
@@ -1309,6 +1595,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 break;
             }
         }
+
+        if (size_) size_->setText(sizeText(current_));
 
         const bool fire = current_.isFire();
         colour_->setColour(nv::toQColor(current_.colour), false);

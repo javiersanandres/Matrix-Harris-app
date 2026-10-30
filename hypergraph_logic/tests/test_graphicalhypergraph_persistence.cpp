@@ -992,6 +992,7 @@ namespace hypergraph_logic {
                 a.font_colour = { 250, 240, 230, 255 };
                 a.font_size = 17;
                 a.fire = FireState::FireWithAshes;
+                a.width = 130.0; // the height keeps following the shape's default
                 return a;
             }
 
