@@ -8,9 +8,12 @@
 
 #include <algorithm>
 #include <cmath>
+#include <initializer_list>
 #include <map>
+#include <numeric>
 #include <set>
 #include <string>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -24,19 +27,86 @@
 // "A polyhedral approach to the multi-layer crossing minimization problem."
 // In: Graph Drawing (GD 1997), LNCS 1353, pp. 13-24. Springer.
 //
-// This is the textbook model exactly (equation 3.8 and its constraints): one
-// ordering variable x^i_uw per pair of nodes u < w sharing row i (u < w meaning
-// u's CURRENT position in the row precedes w's -- the row is never re-sorted by
-// node id), one crossing variable c^i_uvxy per compared pair of edges (u,v),(w,y)
-// between rows i-1 and i, split into the two textbook cases on whether v < y or
-// y < v (by current position in row i).
+// The textbook model (equation 3.8 and its constraints), plus type-2-conflict
+// prevention and the equivalences.
 //
-// The one addition beyond the textbook model is type-2-conflict prevention. A
-// long edge's dummy chain is represented, inside one block, by a run of inner
-// segments. For every pair of edges between two consecutive rows that are BOTH
-// inner segments, instead of the usual crossing variable and linking
-// inequalities, a hard equality is imposed forbidding them from crossing at all:
-// x^i_vy = x^{i-1}_uw when v < y, or x^i_yv + x^{i-1}_uw = 1 when y < v.
+// ── The drawing ──────────────────────────────────────────────────────────────
+//
+// Rows r = 0..2n: row 2l holds the nodes of layer l (real nodes and dummies), row
+// 2l+1 the hubs of the connections from layer l to layer l+1. A hub is joined by a
+// segment to each of its sources (the row above) and to each of its targets (the
+// row below). A long connection's dummies, with the hubs between them, form one
+// block; a segment whose two ends are in the same block is an inner segment.
+//
+// In a layer row r:
+//   D_r   its dummies;
+//   E_r   its equivalences, each a set of real nodes E = {e_1, ..., e_k}, k >= 2,
+//         e_1 being a fixed representative; different equivalences are disjoint;
+//   N_r   its real nodes in no equivalence. Two of them with exactly the same hubs
+//         above and below (the same connections in and out) are twins: swapping
+//         them never changes the crossings.
+//
+// Every row has a reference order, its current one, written a < b. It only names
+// the variables: the solution may reverse any pair.
+//
+// ── Variables ────────────────────────────────────────────────────────────────
+//
+//   x^r_ab    in {0,1}  for a < b in row r: 1 iff a is placed before b.
+//             For any a != b of a row, X^r_ab ("a before b") stands for x^r_ab if
+//             a < b, and for 1 - x^r_ba if b < a. It is not a variable of its own.
+//   c^r_uvwy  in {0,1}  for two segments (u,v), (w,y) from row r to row r+1 with
+//             u < w and v != y (segments sharing an end never cross), not both
+//             inner: 1 iff they cross.
+//   c^r_dE    in {0,1}  for d in D_r and E in E_r with k = 2: 1 iff d lies between
+//             the two members of E, crossing E's line.
+//   l^r_dE, m^r_dE in [0,1]  for d in D_r and E in E_r with k >= 3: 1 iff d lies
+//             before (l) or after (m) every member of E.
+//
+// ── Model ────────────────────────────────────────────────────────────────────
+//
+//   min   sum c^r_uvwy  +  sum_{k = 2} c^r_dE  +  sum_{k >= 3} (1 - l^r_dE - m^r_dE)
+//
+//   s.t.
+//   (1)  0 <= x^r_uw + x^r_wz - x^r_uz <= 1          u < w < z in row r
+//   (2)  -c^r_uvwy <= X^{r+1}_vy - X^r_uw <= c^r_uvwy    (u,v), (w,y) not both inner
+//   (3)  X^{r+1}_vy = X^r_uw                          (u,v), (w,y) both inner
+//   (4)  X^r_{a e_j} = X^r_{a e_1}                    a in N_r, E in E_r, j = 2..k
+//   (5)  X^r_ef = X^r_{e_1 f_1}                       E != F in E_r, (e,f) in E x F
+//   (6)  -c^r_dE <= X^r_{d e_2} - X^r_{d e_1} <= c^r_dE  d in D_r, E in E_r, k = 2
+//   (7)  l^r_dE <= X^r_{d e_j},  m^r_dE <= X^r_{e_j d}   d in D_r, E in E_r, k >= 3,
+//                                                      j = 1..k
+//   (8)  X^r_ab = 1                                    a, b twins in N_r, a before b
+//                                                      in the heuristic's order
+//
+//   (1) makes every row a linear order.
+//   (2) two segments cross iff their upper ends and their lower ends are in different
+//       orders. Written with X it is one line; with x it is the textbook's two cases,
+//       -c <= x_vy - x_uw <= c when v < y, and 1 - c <= x_yv + x_uw <= 1 + c when y < v.
+//   (3) two long connections never cross (type-2 conflicts): (2) with c = 0.
+//   (4) a real node is on one side of all the members of every equivalence.
+//   (5) one equivalence lies wholly before or after another, so they never mix. The
+//       members of one equivalence are not constrained among themselves: the solve
+//       may reorder them.
+//   (6) a dummy between the two members of an equivalence crosses its line once.
+//   (7) the same for three or more members: the objective raises l and m as far as
+//       (7) lets it, so 1 - l - m is 0 when d is on one side of E and 1 when d lies
+//       between two members. This bounds the fractional solutions tighter than (6)
+//       would with k >= 3; with k = 2 both are equally tight and (6) is smaller.
+//       l and m need not be integer: with x integer, their best values are 0 or 1.
+//   (8) twins keep the order they have: every order of them has the same crossings,
+//       so this only spares the solver proving the same thing once per order. It is
+//       a bound on the pair's column, not a row. Members of an equivalence are never
+//       fixed this way, which would pin their whole equivalence.
+//
+//   The objective counts the segment crossings and the dummies crossing an
+//   equivalence line, as Global Sifting does. Its constant term (one per pair d, E
+//   with k >= 3) is added back to the count reported.
+//
+// ── Building it ──────────────────────────────────────────────────────────────
+//
+// (4) and (5) are not added as rows: the pairs they make equal (or opposite) share
+// one column, and the transitivity rows that leaves always true, or repeated, are
+// left out. The size limits below count the model that is actually built.
 //
 // Solver backend: the model itself (columns + sparse rows, below) is built
 // once, independent of which solver ends up running it. HiGHS is always
@@ -70,9 +140,12 @@ namespace sifting_internal {
 		// (before building a huge model) instead of hanging. Tune freely; these are
 		// deliberately conservative given the O(m^3) transitivity blow-up per row
 		// and match the "~40 vertices" ballpark the source paper reports for
-		// practical branch-and-cut instances.
+		// practical branch-and-cut instances. The first two count the model as built
+		// (merged columns, transitivity rows kept); the last bounds the triples looked
+		// at to build it.
 		constexpr long long kMaxTransitivityConstraints = 300000;
 		constexpr long long kMaxColumns = 200000;
+		constexpr long long kMaxEnumeratedTriples = 5000000;
 
 		constexpr int kFallbackSiftingRounds = 10;
 
@@ -86,9 +159,9 @@ namespace sifting_internal {
 		};
 
 		// The fully-assembled ILP, in a form neither solver backend needs to know
-		// was built by this file. Every column is binary (0/1); col_integrality is
-		// only consulted by the HiGHS backend (HiGHS wants it spelled out per
-		// column), Gurobi columns are simply declared GRB_BINARY.
+		// was built by this file. Every column is in [0,1]; col_integrality says
+		// which are binary (kInteger) and which continuous. HiGHS takes it as is,
+		// Gurobi declares the binary ones GRB_BINARY.
 		struct ILPModel {
 			std::vector<double> col_lower, col_upper, col_cost, col_guess;
 			std::vector<HighsVarType> col_integrality;
@@ -214,7 +287,8 @@ namespace sifting_internal {
 			mip.lower = m.col_lower;
 			mip.upper = m.col_upper;
 			mip.cost = m.col_cost;
-			mip.binary.assign(m.col_lower.size(), true);
+			mip.binary.reserve(m.col_integrality.size());
+			for (HighsVarType type : m.col_integrality) mip.binary.push_back(type == HighsVarType::kInteger);
 			mip.start = m.col_guess; // warm start from the heuristic's already-computed block order
 			mip.rows.reserve(m.rows.size());
 			for (const auto& row : m.rows)
@@ -261,6 +335,14 @@ namespace sifting_internal {
 	// ── runCrossingILP ────────────────────────────────────────────────────────────
 
 	int GlobalSifter::runCrossingILP(double time_budget_seconds) {
+		// The hooks armed for this call apply to it alone, so they are taken before
+		// anything else: no early return below may leave them for a later call.
+		ILPBackendOverride backend = g_ilp_backend_override;
+		g_ilp_backend_override = ILPBackendOverride::kAuto;
+
+		ILPCancellationToken* cancel_token = g_active_cancel_token;
+		g_active_cancel_token = nullptr;
+
 		// Rows (G1 layers) in ascending order.
 		std::vector<int> row_keys;
 		row_keys.reserve(S_.g1_layers.size());
@@ -271,8 +353,8 @@ namespace sifting_internal {
 		// Node-index list per row, in CURRENT order -- i.e. whatever order
 		// S_.g1_layers already has them in (the heuristic's finished order, since
 		// Hypergraph::minimizeCrossingsILP() always calls runSifting() first on
-		// this same sifter). u < w in every constraint below means exactly this:
-		// u's CURRENT position in the row precedes w's.
+		// this same sifter). This is the reference order: u < w in every constraint
+		// below means u's CURRENT position in the row precedes w's.
 		std::vector<std::vector<int>> row_nodes(row_keys.size());
 		for (size_t r = 0; r < row_keys.size(); r++)
 			row_nodes[r] = S_.g1_layers.at(row_keys[r]); // copy, order preserved
@@ -283,18 +365,100 @@ namespace sifting_internal {
 			for (size_t p = 0; p < nodes.size(); p++)
 				pos_in_row[nodes[p]] = static_cast<int>(p);
 
-		// Safety valve on model size, before we build anything.
+		// Safety valve on model size, before we build anything. Without equivalences
+		// every triple is a transitivity row of its own, so the limit on rows applies
+		// right away; with them, merging may leave fewer, and the rows are counted as
+		// they are built.
 		long long worst_case_triples = 0;
 		for (const auto& nodes : row_nodes) {
 			long long m = static_cast<long long>(nodes.size());
 			worst_case_triples += m * (m - 1) * (m - 2) / 6;
 		}
-		if (worst_case_triples > kMaxTransitivityConstraints) return -1;
+		if (worst_case_triples > kMaxEnumeratedTriples) return -1;
+		if (chains_.empty() && worst_case_triples > kMaxTransitivityConstraints) return -1;
 
-		// One binary ordering variable x^i_uw per pair of nodes u < w sharing a
-		// row (u < w by current position, as above). A raw G1 node belongs to
-		// exactly one row, so a given pair can only ever be created once.
-		std::map<std::pair<int, int>, int> pair_var;
+		// ── Ordering variables ───────────────────────────────────────────────────
+		//
+		// One pair per two nodes u < w sharing a row. A raw G1 node belongs to exactly
+		// one row, so a given pair can only ever be created once.
+		std::map<std::pair<int, int>, int> pair_index;
+		std::vector<std::pair<int, int>> pairs;
+		for (const auto& nodes : row_nodes) {
+			for (size_t i = 0; i < nodes.size(); i++) {
+				for (size_t j = i + 1; j < nodes.size(); j++) {
+					pair_index.emplace(std::make_pair(nodes[i], nodes[j]), static_cast<int>(pairs.size()));
+					pairs.push_back({ nodes[i], nodes[j] });
+				}
+			}
+		}
+		if (pairs.empty()) return 0; // no row has 2+ nodes: nothing to decide.
+
+		// X_ab, "a before b", for any two nodes of a row: the pair's x, or 1 - x when
+		// b comes first in the reference order (flip).
+		struct Lit {
+			int pair;
+			char flip;
+		};
+		auto before = [&](int a, int b) -> Lit {
+			if (pos_in_row[a] < pos_in_row[b]) return { pair_index.at({ a, b }), 0 };
+			return { pair_index.at({ b, a }), 1 };
+		};
+
+		// The members of every chain, and the dummies and lone real nodes of its rows.
+		struct ChainRow {
+			std::vector<std::vector<int>> chains; // the members (g1 indices) of each
+			std::vector<int> dummies;             // D_r
+			std::vector<int> lone;                // N_r
+		};
+		std::map<int, ChainRow> chain_rows;
+		for (const auto& [row, chain_ids] : chains_at_row_) {
+			ChainRow& cr = chain_rows[row];
+			for (int c : chain_ids) {
+				cr.chains.emplace_back();
+				for (int bid : chains_[c].blocks) cr.chains.back().push_back(S_.blocks[bid].g1_nodes.front());
+			}
+			for (int g1 : S_.g1_layers.at(row)) {
+				const Node* original = S_.g1_nodes[g1].original;
+				if (original == nullptr) continue;
+				if (original->isDummy()) cr.dummies.push_back(g1);
+				else if (chainOf(S_.g1_nodes[g1].block_id) < 0) cr.lone.push_back(g1);
+			}
+		}
+
+		// The pairs (4) and (5) make equal form classes, each sharing one column: the
+		// pairs of a lone node a with a chain E, represented by (a, e_1), and those of two
+		// chains E and F, represented by (e_1, f_1). rep[p] is the representative of p's
+		// class (p itself when it is in none), and flipped[p] whether p's x is 1 minus the
+		// representative's. A pair has either a lone node and a member, or members of two
+		// chains, so the classes never overlap: one level is all it takes, and no class
+		// can tie a pair to itself with the opposite sign.
+		std::vector<int> rep(pairs.size());
+		std::iota(rep.begin(), rep.end(), 0);
+		std::vector<char> flipped(pairs.size(), 0);
+		// X_l = X_r: x_l = x_r, or 1 - x_r when the two are written the other way round.
+		auto tie = [&](Lit l, Lit r) {
+			rep[l.pair] = r.pair;
+			flipped[l.pair] = l.flip ^ r.flip;
+		};
+		for (const auto& [row, cr] : chain_rows) {
+			// (4) a lone real node on one side of all the members of every chain.
+			for (int a : cr.lone)
+				for (const auto& members : cr.chains)
+					for (size_t j = 1; j < members.size(); j++)
+						tie(before(a, members[j]), before(a, members[0]));
+			// (5) two chains never mix.
+			for (size_t c = 0; c < cr.chains.size(); c++) {
+				for (size_t d = c + 1; d < cr.chains.size(); d++) {
+					const auto& E = cr.chains[c];
+					const auto& F = cr.chains[d];
+					const Lit representative = before(E[0], F[0]);
+					for (int e : E)
+						for (int f : F)
+							if (e != E[0] || f != F[0]) tie(before(e, f), representative);
+				}
+			}
+		}
+
 		std::vector<double> col_lower, col_upper, col_cost, col_guess;
 		std::vector<HighsVarType> col_integrality;
 
@@ -304,40 +468,67 @@ namespace sifting_internal {
 		// every transitivity constraint, and since it treats each chain as one
 		// atomic block with a single pi value shared across every row it spans,
 		// two edges from the same chain-pair comparison get identical guessed
-		// order under it too -- so this guess is a fully feasible integral
-		// solution, not just a rough hint, and gives HiGHS a valid incumbent to
-		// prune against from the start. guessOrder(u,v) answers "does u come
-		// before v" for ANY pair u,v, independent of which one is the row's
-		// "u" or "w" label.
+		// order under it too. It also keeps every equivalence together, with only
+		// dummies between its members, so the pairs merged above all agree under it.
+		// So this guess is a fully feasible integral solution, not just a rough
+		// hint, and gives the solver a valid incumbent to prune against from the
+		// start. guessOrder(u,v) answers "does u come before v" for ANY pair u,v,
+		// independent of which one is the row's "u" or "w" label.
 		auto guessOrder = [&](int u, int v) -> double {
 			return (S_.pi[S_.g1_nodes[u].block_id] < S_.pi[S_.g1_nodes[v].block_id]) ? 1.0 : 0.0;
 			};
 
-		auto addColumn = [&](double cost, double guess) -> int {
+		auto addColumn = [&](double cost, double guess, bool binary = true) -> int {
 			int idx = static_cast<int>(col_lower.size());
 			col_lower.push_back(0.0);
 			col_upper.push_back(1.0);
 			col_cost.push_back(cost);
-			col_integrality.push_back(HighsVarType::kInteger);
+			col_integrality.push_back(binary ? HighsVarType::kInteger : HighsVarType::kContinuous);
 			col_guess.push_back(guess);
 			return idx;
 			};
 
-		// Every pair of nodes sharing a row gets exactly one column, keyed (u,w)
-		// with u appearing first in the row's current order -- created once, up
-		// front, per row.
-		for (const auto& nodes : row_nodes) {
-			for (size_t i = 0; i < nodes.size(); i++) {
-				for (size_t j = i + 1; j < nodes.size(); j++) {
-					int u = nodes[i], w = nodes[j]; // u before w by current position
-					int idx = addColumn(0.0, guessOrder(u, w)); // pure ordering variables don't enter the objective
-					pair_var.emplace(std::make_pair(u, w), idx);
+		// One column per class, created up front: its representative's.
+		std::vector<int> col_of_rep(pairs.size(), -1);
+		for (int p = 0; p < static_cast<int>(pairs.size()); p++) {
+			if (rep[p] != p) continue;
+			// pure ordering variables don't enter the objective
+			col_of_rep[p] = addColumn(0.0, guessOrder(pairs[p].first, pairs[p].second));
+		}
+		if (static_cast<long long>(col_lower.size()) > kMaxColumns) return -1;
+
+		// (8) Twins: real nodes of a layer row in no equivalence with exactly the same
+		// hubs above and below (the same connections in and out). Swapping two of them
+		// never changes the crossings, so their order is fixed, as the heuristic left it
+		// (so the warm start still satisfies it): the solver does not have to prove the
+		// same thing once per order of them. Members of an equivalence are never fixed,
+		// which would pin their whole equivalence. Their pairs are never merged, so each
+		// has a column of its own.
+		for (size_t r = 0; r < row_keys.size(); r++) {
+			if (row_keys[r] % 2 != 0) continue; // hub rows: two hubs never share both ends
+			std::map<std::pair<std::vector<int>, std::vector<int>>, std::vector<int>> twins;
+			for (int g1 : row_nodes[r]) {
+				const Node* original = S_.g1_nodes[g1].original;
+				if (original == nullptr || original->isDummy() || chainOf(S_.g1_nodes[g1].block_id) >= 0) continue;
+				std::vector<int> up = S_.g1_in[g1], down = S_.g1_out[g1];
+				std::sort(up.begin(), up.end());
+				std::sort(down.begin(), down.end());
+				twins[{ std::move(up), std::move(down) }].push_back(g1);
+			}
+			for (auto& [neighbours, group] : twins) {
+				if (group.size() < 2) continue;
+				std::sort(group.begin(), group.end(), [&](int a, int b) { return guessOrder(a, b) == 1.0; });
+				for (size_t i = 0; i < group.size(); i++) {
+					for (size_t j = i + 1; j < group.size(); j++) {
+						// X_{t_i t_j} = 1: the pair's x at 1, or at 0 when written the other way.
+						const Lit l = before(group[i], group[j]);
+						const int col = col_of_rep[rep[l.pair]];
+						if ((flipped[l.pair] ^ l.flip) != 0) col_upper[col] = 0.0;
+						else col_lower[col] = 1.0;
+					}
 				}
 			}
 		}
-
-		if (static_cast<long long>(col_lower.size()) > kMaxColumns) return -1;
-		if (pair_var.empty()) return 0; // no row has 2+ nodes: nothing to decide.
 
 		// Is the G1 edge (u,v) an inner segment of a long edge's dummy chain? True
 		// iff both endpoints belong to the same block and that block is a genuine
@@ -350,43 +541,76 @@ namespace sifting_internal {
 			return S_.blocks[bu].g1_nodes.size() > 1;
 			};
 
-		// Constraint rows.
-		std::vector<SparseRow> rows;
+		// Constraint rows, built as linear expressions over the columns: a literal
+		// adds its column (or a constant minus it), a column adds itself.
+		struct Linear {
+			std::map<int, double> terms;
+			double constant = 0.0;
+		};
+		auto addLit = [&](Linear& e, Lit l, double coeff) {
+			const int col = col_of_rep[rep[l.pair]];
+			if ((flipped[l.pair] ^ l.flip) != 0) { e.constant += coeff; e.terms[col] -= coeff; }
+			else e.terms[col] += coeff;
+			};
+		auto expr = [&](std::initializer_list<std::pair<Lit, double>> lits,
+			std::initializer_list<std::pair<int, double>> cols = {}) {
+				Linear e;
+				for (const auto& [l, coeff] : lits) addLit(e, l, coeff);
+				for (const auto& [col, coeff] : cols) e.terms[col] += coeff;
+				return e;
+			};
 
-		auto addConstraint = [&](std::vector<std::pair<int, double>> terms, double lo, double hi) {
-			std::map<int, double> merged; // merge duplicate columns, if any
-			for (auto& [idx, coeff] : terms) merged[idx] += coeff;
-			SparseRow row;
-			for (auto& [idx, coeff] : merged) {
+		std::vector<SparseRow> rows;
+		// Rows already added, to leave out repeated ones.
+		std::set<std::tuple<std::vector<std::pair<int, double>>, double, double>> seen;
+
+		// lo <= e <= hi. Every column lies in [0,1] (the twins' fixed ones within it), so
+		// a row the expression can never break for any values in [0,1] is left out, as is
+		// one already added. Returns whether it was added.
+		auto addConstraint = [&](const Linear& e, double lo, double hi) -> bool {
+			std::vector<std::pair<int, double>> terms;
+			double low = 0.0, high = 0.0; // the expression's range over [0,1] columns
+			for (const auto& [idx, coeff] : e.terms) {
 				if (coeff == 0.0) continue;
+				terms.push_back({ idx, coeff });
+				(coeff < 0.0 ? low : high) += coeff;
+			}
+			const double row_lo = (lo <= -kInf) ? -kInf : lo - e.constant;
+			const double row_hi = (hi >= kInf) ? kInf : hi - e.constant;
+			if (low >= row_lo - 1e-9 && high <= row_hi + 1e-9) return false;
+			if (!seen.insert({ terms, row_lo, row_hi }).second) return false;
+			SparseRow row;
+			for (const auto& [idx, coeff] : terms) {
 				row.idx.push_back(idx);
 				row.val.push_back(coeff);
 			}
-			row.lo = (lo <= -kInf) ? -kInf : lo;
-			row.hi = (hi >= kInf) ? kInf : hi;
+			row.lo = row_lo;
+			row.hi = row_hi;
 			rows.push_back(std::move(row));
+			return true;
 			};
 
-		// Transitivity within each row: 0 <= x_uw + x_wz - x_uz <= 1 for every
-		// u < w < z by current position (standard order-polytope inequality).
+		// (1) Transitivity within each row: 0 <= x_uw + x_wz - x_uz <= 1 for every
+		// u < w < z (standard order-polytope inequality).
+		long long transitivity_rows = 0;
 		for (const auto& nodes : row_nodes) {
 			int m = static_cast<int>(nodes.size());
 			for (int i = 0; i < m; i++) {
 				for (int j = i + 1; j < m; j++) {
-					int Xuw = pair_var.at({ nodes[i], nodes[j] });
+					const Lit Xuw = before(nodes[i], nodes[j]);
 					for (int k = j + 1; k < m; k++) {
-						int Xwz = pair_var.at({ nodes[j], nodes[k] });
-						int Xuz = pair_var.at({ nodes[i], nodes[k] });
-						addConstraint({ {Xuw, 1.0}, {Xwz, 1.0}, {Xuz, -1.0} }, 0.0, 1.0);
+						const Linear e = expr({ { Xuw, 1.0 },
+							{ before(nodes[j], nodes[k]), 1.0 }, { before(nodes[i], nodes[k]), -1.0 } });
+						if (addConstraint(e, 0.0, 1.0) && ++transitivity_rows > kMaxTransitivityConstraints)
+							return -1;
 					}
 				}
 			}
 		}
 
-		// Crossing variables and linking constraints between every pair of
+		// (2)-(3) Crossing variables and linking constraints between every pair of
 		// consecutive rows, with type-2-conflict prevention for pairs of inner
-		// segments. Edges are compared as (u,v),(w,y) with u < w by current
-		// position in the upper row (i-1), exactly as the equations are stated.
+		// segments. Edges are compared as (u,v),(w,y) with u < w in the upper row.
 		for (size_t r = 0; r + 1 < row_keys.size(); r++) {
 			std::set<std::pair<int, int>> edge_set; // distinct (upper,lower) G1 edges
 			for (int a : row_nodes[r]) {
@@ -412,32 +636,49 @@ namespace sifting_internal {
 					auto [w, y] = edges[e2];
 					if (u == w || v == y) continue; // shared endpoint: can never cross.
 
-					int Xuw = pair_var.at({ u, w });
-					bool inner_pair = isInnerSegment(u, v) && isInnerSegment(w, y);
-
-					if (pos_in_row[v] < pos_in_row[y]) {
-						int Xvy = pair_var.at({ v, y });
-						if (inner_pair) {
-							// Type-2-conflict prevention: x^i_vy = x^{i-1}_uw.
-							addConstraint({ {Xvy, 1.0}, {Xuw, -1.0} }, 0.0, 0.0);
-							continue;
-						}
-						int c_idx = addColumn(1.0, std::fabs(guessOrder(v, y) - guessOrder(u, w)));
-						// -c <= x_vy - x_uw <= c
-						addConstraint({ {Xvy, 1.0}, {Xuw, -1.0}, {c_idx, 1.0} }, 0.0, kInf);
-						addConstraint({ {Xvy, 1.0}, {Xuw, -1.0}, {c_idx, -1.0} }, -kInf, 0.0);
+					// X_vy - X_uw: 0 when the two pairs are in the same order. In the
+					// textbook's terms, x_vy - x_uw when v < y, and 1 - x_yv - x_uw
+					// when y < v.
+					const Lit Xuw = before(u, w), Xvy = before(v, y);
+					if (isInnerSegment(u, v) && isInnerSegment(w, y)) {
+						// (3) Type-2-conflict prevention: X_vy = X_uw.
+						addConstraint(expr({ { Xvy, 1.0 }, { Xuw, -1.0 } }), 0.0, 0.0);
+						continue;
 					}
-					else {
-						int Xyv = pair_var.at({ y, v });
-						if (inner_pair) {
-							// Type-2-conflict prevention: x^i_yv + x^{i-1}_uw = 1.
-							addConstraint({ {Xyv, 1.0}, {Xuw, 1.0} }, 1.0, 1.0);
-							continue;
-						}
-						int c_idx = addColumn(1.0, std::fabs(guessOrder(v, y) - guessOrder(u, w)));
-						// 1-c <= x_yv + x_uw <= 1+c
-						addConstraint({ {Xyv, 1.0}, {Xuw, 1.0}, {c_idx, 1.0} }, 1.0, kInf);
-						addConstraint({ {Xyv, 1.0}, {Xuw, 1.0}, {c_idx, -1.0} }, -kInf, 1.0);
+					// (2) -c <= X_vy - X_uw <= c
+					int c_idx = addColumn(1.0, std::fabs(guessOrder(v, y) - guessOrder(u, w)));
+					addConstraint(expr({ { Xvy, 1.0 }, { Xuw, -1.0 } }, { { c_idx, 1.0 } }), 0.0, kInf);
+					addConstraint(expr({ { Xvy, 1.0 }, { Xuw, -1.0 } }, { { c_idx, -1.0 } }), -kInf, 0.0);
+				}
+			}
+		}
+
+		// (6)-(7) The dummies between the members of a chain, one crossing each with
+		// its line.
+		double objective_constant = 0.0;
+		for (const auto& [row, cr] : chain_rows) {
+			for (int d : cr.dummies) {
+				for (const auto& E : cr.chains) {
+					if (E.size() == 2) {
+						// (6) -c <= X_{d e_2} - X_{d e_1} <= c
+						const Lit second = before(d, E[1]), first = before(d, E[0]);
+						int c_idx = addColumn(1.0, std::fabs(guessOrder(d, E[1]) - guessOrder(d, E[0])));
+						addConstraint(expr({ { second, 1.0 }, { first, -1.0 } }, { { c_idx, 1.0 } }), 0.0, kInf);
+						addConstraint(expr({ { second, 1.0 }, { first, -1.0 } }, { { c_idx, -1.0 } }), -kInf, 0.0);
+						continue;
+					}
+					// (7) l <= X_{d e_j}, m <= X_{e_j d}; 1 - l - m in the objective.
+					bool all_after = true, all_before = true; // d, in the guess
+					for (int e : E) {
+						all_after = all_after && guessOrder(d, e) == 1.0;
+						all_before = all_before && guessOrder(e, d) == 1.0;
+					}
+					int l_idx = addColumn(-1.0, all_after ? 1.0 : 0.0, false);
+					int m_idx = addColumn(-1.0, all_before ? 1.0 : 0.0, false);
+					objective_constant += 1.0;
+					for (int e : E) {
+						addConstraint(expr({ { before(d, e), -1.0 } }, { { l_idx, 1.0 } }), -kInf, 0.0);
+						addConstraint(expr({ { before(e, d), -1.0 } }, { { m_idx, 1.0 } }), -kInf, 0.0);
 					}
 				}
 			}
@@ -451,8 +692,8 @@ namespace sifting_internal {
 		// including a Gurobi run that throws partway through -- falls back to
 		// HiGHS rather than giving up. A forced backend (see
 		// ILPBackendTestHook.h) skips that auto-detect entirely, for
-		// benchmarking one solver in isolation; it is read once here and reset
-		// immediately so it can never apply to a later call.
+		// benchmarking one solver in isolation; it was read, and reset, at the
+		// start of this call, so it can never apply to a later one.
 		ILPModel ilp_model;
 		ilp_model.col_lower = std::move(col_lower);
 		ilp_model.col_upper = std::move(col_upper);
@@ -460,12 +701,6 @@ namespace sifting_internal {
 		ilp_model.col_guess = std::move(col_guess);
 		ilp_model.col_integrality = std::move(col_integrality);
 		ilp_model.rows = std::move(rows);
-
-		ILPBackendOverride backend = g_ilp_backend_override;
-		g_ilp_backend_override = ILPBackendOverride::kAuto;
-
-		ILPCancellationToken* cancel_token = g_active_cancel_token;
-		g_active_cancel_token = nullptr;
 
 		ILPSolveResult result;
 		switch (backend) {
@@ -491,20 +726,19 @@ namespace sifting_internal {
 		if (!result.success) return -1; // neither backend found anything usable in time.
 
 		const std::vector<double>& sol = result.col_value;
-		int achieved_crossings = static_cast<int>(std::lround(result.objective));
+		int achieved_crossings = static_cast<int>(std::lround(result.objective + objective_constant));
 
 		// Reorder each row of S_.g1_layers to match the solution. Every row is
 		// independent here (a node belongs to exactly one row), so this is a
-		// plain per-row sort keyed by current position, not by raw node id.
+		// plain per-row sort by the solved "a before b" of every pair.
+		auto valueOf = [&](Lit l) {
+			const double x = sol[col_of_rep[rep[l.pair]]];
+			return (flipped[l.pair] ^ l.flip) != 0 ? 1.0 - x : x;
+			};
 		for (size_t r = 0; r < row_keys.size(); r++) {
 			auto& nodes_vec = S_.g1_layers.at(row_keys[r]);
 			std::sort(nodes_vec.begin(), nodes_vec.end(), [&](int a, int b) {
-				if (a == b) return false;
-				bool a_first = pos_in_row[a] < pos_in_row[b];
-				int u = a_first ? a : b, w = a_first ? b : a;
-				double x_uw = sol[pair_var.at({ u, w })];
-				bool u_before_w = x_uw > 0.5;
-				return a_first ? u_before_w : !u_before_w;
+				return a != b && valueOf(before(a, b)) > 0.5;
 				});
 		}
 
@@ -564,8 +798,21 @@ namespace hypergraph_logic {
 	// Whichever result is smaller is committed to layers_: the ILP path via
 	// writeBackFromG1Order(), the heuristic path via the existing block/pi-based
 	// writeBack(). A cancelled or timed-out exact solve is handled identically
-	// either way -- it just falls back to the heuristic baseline.
+	// either way -- it just falls back to the heuristic baseline. Both keep every
+	// equivalence together (the exact model through its constraints (4)-(5), see
+	// the top of this file) and count the dummies crossing its line.
 	int Hypergraph::minimizeCrossingsILP() {
+		// The hooks armed for this call (beginInterruptibleILP, the backend override)
+		// are dropped however it ends: runCrossingILP takes them when it runs, but this
+		// may return, or throw, before that, and a token left behind would outlive the
+		// dialog that owns it.
+		struct DropHooks {
+			~DropHooks() {
+				g_active_cancel_token = nullptr;
+				g_ilp_backend_override = ILPBackendOverride::kAuto;
+			}
+		} drop_hooks;
+
 		if (getLayers().empty() || getAllHyperedges().size() < 2) {
 			throw std::logic_error("No hay cruces que minimizar.");
 		}
@@ -573,7 +820,8 @@ namespace hypergraph_logic {
 
 		placeUnpositionedNodes(0, last_layer);
 		GlobalSifter sifter(0, last_layer, layers_, true, {}, {}, equivalencesToSift());
-		// The barycenter pass and the baseline may reorder a chain's members.
+		// The barycenter pass, the baseline and the exact solve may all reorder a chain's
+		// members: the stored chains follow the layers afterwards.
 		auto commitSifting = [&] { sifter.writeBack(); syncEquivalenceOrder(); };
 		if (sifter.countCrossings() == 0) { commitSifting(); return 0; }
 
@@ -582,22 +830,14 @@ namespace hypergraph_logic {
 		int fallback_crossings = sifter.countCrossings();
 		if (fallback_crossings == 0) { commitSifting(); return 0; }
 
-		// The exact model does not know about equivalences yet: with any, the baseline it is
-		// (the hooks armed for the solve are dropped, as the solve itself would).
-		if (!equivalences_.empty()) {
-			g_active_cancel_token = nullptr;
-			g_ilp_backend_override = ILPBackendOverride::kAuto;
-			commitSifting();
-			return fallback_crossings;
-		}
-
 		int ilp_crossings = sifter.runCrossingILP(kILPTimeBudgetSeconds);
 		if (ilp_crossings >= 0 && ilp_crossings <= fallback_crossings) {
 			sifter.writeBackFromG1Order();
+			syncEquivalenceOrder();
 			return ilp_crossings;
 		}
 
-		sifter.writeBack();
+		commitSifting();
 		return fallback_crossings;
 	}
 

@@ -188,7 +188,10 @@ namespace sifting_internal {
 		// hand, so only the global minimization asks for it.
 		void runSifting(int sifting_rounds, bool stability = true, bool reorder_chains = false);
 
-		// Solve an ILP to minimize crossings.
+		// Solve an ILP to minimize crossings, the chains' lines included, keeping every
+		// chain together (the model is at the top of minimizeCrossingsILP.cpp). Leaves
+		// the order in S_.g1_layers (see writeBackFromG1Order) and returns its crossing
+		// count, or -1 when the model is too big or no solution was found.
 		int runCrossingILP(double time_budget_seconds);
 
 		// Commit the block ordering back to LayerData::nodes for every layer

@@ -1,11 +1,19 @@
 #include "GraphicalHypergraph.h"
 #include "GlobalSifting.h"
+#include "ILPBackendTestHook.h"
+#include "ILPCancellationToken.h"
 #include <gtest/gtest.h>
 
 #include <random>
 #include <stdexcept>
 #include <string>
 #include <vector>
+
+// The hooks the next exact solve takes (defined in minimizeCrossingsILP.cpp).
+namespace sifting_internal {
+    extern hypergraph_logic::ILPCancellationToken* g_active_cancel_token;
+    extern ILPBackendOverride g_ilp_backend_override;
+}
 
 // ============================================================================
 // Equivalences between boxes (Hypergraph::addEquivalence and the rules every
@@ -965,6 +973,189 @@ namespace hypergraph_logic {
                 g.minimizeCrossings();
                 expectChainsTogether(g);
                 expectLayering(g);
+            }
+        }
+
+        // ── Exact solve ───────────────────────────────────────────────────────
+        //
+        // The whole drawing, solved by the ILP itself (not the heuristic baseline it is
+        // compared with), then written back and the chains synced, as the global
+        // minimization does.
+
+        int solveExactly(Sifted& g, bool with_equivalences = true) {
+            const int last = g.layers().rbegin()->first;
+            sifting_internal::GlobalSifter s(0, last, g.layers(), true, {}, {},
+                with_equivalences ? g.getEquivalences() : std::vector<EquivalenceChain>{});
+            const int crossings = s.runCrossingILP(30.0);
+            if (crossings >= 0) {
+                s.writeBackFromG1Order();
+                g.syncChains();
+            }
+            return crossings;
+        }
+
+        // A -> {a, x}, B -> {x, b}: a x b crosses nothing, but a ≡ b keeps x out.
+        struct Between {
+            Sifted g{ "between" };
+            NodePtr A = boxAtEnd(g, "A", 0), B = boxAtEnd(g, "B", 0);
+            NodePtr a = childAtEnd(g, "a", A), x = childAtEnd(g, "x", A), b = childAtEnd(g, "b", B);
+            Between() {
+                g.addConnection(B, x);
+                g.computeLayout();
+            }
+            bool xInside() {
+                const auto names = row(g, 1);
+                return names == std::vector<std::string>{ "a", "x", "b" } || names == std::vector<std::string>{ "b", "x", "a" };
+            }
+        };
+
+        TEST(EquivalenceILP, ARealBoxNeverEndsInsideAChain) {
+            Between free;
+            EXPECT_EQ(solveExactly(free.g), 0);
+            EXPECT_TRUE(free.xInside());
+
+            Between t;
+            t.g.addEquivalence(t.a, t.b);
+            t.g.computeLayout();
+            const int crossings = solveExactly(t.g);
+            EXPECT_EQ(crossings, 1);
+            EXPECT_FALSE(t.xInside());
+            expectChainsTogether(t.g);
+            EXPECT_EQ(crossings, t.g.crossings(true));
+        }
+
+        TEST(EquivalenceILP, ADummyGoesInsideAChainWhenThatIsCheapest) {
+            // L, L2, M -> a and R, R2, M -> b, a ≡ b, and M -> C two layers down. Out of
+            // the chain, M's dummy d crosses two connections; between a and b, only the line.
+            Sifted g("dummy inside");
+            auto L = boxAtEnd(g, "L", 0), L2 = boxAtEnd(g, "L2", 0), M = boxAtEnd(g, "M", 0);
+            auto R = boxAtEnd(g, "R", 0), R2 = boxAtEnd(g, "R2", 0);
+            auto a = childAtEnd(g, "a", L), b = childAtEnd(g, "b", R), C = boxAtEnd(g, "C", 2);
+            for (const auto& [p, c] : std::vector<std::pair<NodePtr, NodePtr>>{ { L2, a }, { M, a }, { R2, b }, { M, b }, { M, C } }) {
+                ASSERT_TRUE(g.canAddConnection(p, c)) << p->getName() << " -> " << c->getName();
+                g.addConnection(p, c);
+            }
+            g.computeLayout();
+            g.addEquivalence(a, b);
+            g.computeLayout();
+
+            const int crossings = solveExactly(g);
+            EXPECT_EQ(crossings, 1);
+            std::vector<std::string> names;
+            for (const auto& n : g.getNodesAt(1)) names.push_back(n->isDummy() ? "." : n->getName());
+            EXPECT_TRUE(names == (std::vector<std::string>{ "a", ".", "b" }) || names == (std::vector<std::string>{ "b", ".", "a" }))
+                << ::testing::PrintToString(names);
+            expectChainsTogether(g);
+            EXPECT_EQ(crossings, g.crossings(true));
+        }
+
+        TEST(EquivalenceILP, OnRandomDrawingsItCountsWhatItDrawsAndKeepsTheChainsTogether) {
+            // Chains of two members and of more (the two ways of counting the line), on
+            // drawings with long connections.
+            int longer_chains = 0;
+            for (unsigned seed = 1; seed <= 25; ++seed) {
+                std::mt19937 rng(seed);
+                auto pick = [&](const std::vector<NodePtr>& v) { return v[rng() % v.size()]; };
+                Sifted g("random");
+                std::vector<NodePtr> boxes;
+                for (int i = 0; i < 3; ++i) boxes.push_back(boxAtEnd(g, ("r" + std::to_string(i)).c_str(), 0));
+                for (int i = 0; i < 11; ++i)
+                    boxes.push_back(childAtEnd(g, ("n" + std::to_string(i)).c_str(), pick(boxes)));
+                for (int k = 0; k < 8; ++k) {
+                    auto p = pick(boxes), c = pick(boxes);
+                    if (g.canAddConnection(p, c)) g.addConnection(p, c);
+                }
+                g.computeLayout();
+                for (int k = 0; k < 60; ++k) {
+                    auto a = pick(boxes), b = pick(boxes);
+                    if (!g.canAddEquivalence(a, b)) continue;
+                    g.addEquivalence(a, b);
+                    g.computeLayout();
+                }
+                for (const auto& chain : g.getEquivalences())
+                    if (chain.members.size() >= 3) ++longer_chains;
+
+                const int last = g.layers().rbegin()->first;
+                sifting_internal::GlobalSifter s(0, last, g.layers(), true, {}, {}, g.getEquivalences());
+                s.runSifting(3, false, true);
+                const int heuristic = s.countCrossings();
+                const int crossings = s.runCrossingILP(30.0);
+                ASSERT_GE(crossings, 0) << "seed " << seed;
+                EXPECT_LE(crossings, heuristic) << "seed " << seed;
+                s.writeBackFromG1Order();
+                g.syncChains();
+                expectChainsTogether(g);
+                EXPECT_EQ(crossings, g.crossings(true)) << "seed " << seed;
+            }
+            EXPECT_GT(longer_chains, 0);
+        }
+
+        TEST(EquivalenceILP, TwinsKeepTheirOrderWhileTheRestIsSolved) {
+            // P -> {x, y, z} is one connection, so x, y and z share their hub: twins. Q -> w
+            // starts left of them and crosses all three; w ≡ v, Q -> v, keeps a chain in
+            // the row, which is never fixed.
+            Sifted g("twins");
+            auto P = boxAtEnd(g, "P", 0), Q = boxAtEnd(g, "Q", 0);
+            auto w = boxAtEnd(g, "w", 1), v = boxAtEnd(g, "v", 1);
+            auto x = boxAtEnd(g, "x", 1), y = boxAtEnd(g, "y", 1), z = boxAtEnd(g, "z", 1);
+            auto edge = g.addConnection(P, x);
+            g.addTargetToEdge(edge, y);
+            g.addTargetToEdge(edge, z);
+            g.addConnection(Q, w);
+            g.addConnection(Q, v);
+            g.computeLayout();
+            g.addEquivalence(w, v);
+            g.computeLayout();
+            g.layers().at(0).nodes = { P, Q };
+            g.layers().at(1).nodes = { w, v, x, y, z };
+
+            const int last = g.layers().rbegin()->first;
+            sifting_internal::GlobalSifter s(0, last, g.layers(), false, {}, {}, g.getEquivalences());
+            const int crossings = s.runCrossingILP(30.0);
+            ASSERT_EQ(crossings, 0);
+            s.writeBackFromG1Order();
+            g.syncChains();
+
+            std::vector<std::string> twins;
+            for (const auto& name : row(g, 1))
+                if (name == "x" || name == "y" || name == "z") twins.push_back(name);
+            EXPECT_EQ(twins, (std::vector<std::string>{ "x", "y", "z" }));
+            expectChainsTogether(g);
+            EXPECT_EQ(crossings, g.crossings(true));
+        }
+
+        TEST(ILPHooks, AMinimizationThatNeverSolvesLeavesNoHookBehind) {
+            using sifting_internal::ILPBackendOverride;
+            auto arm = [](ILPCancellationToken& token) {
+                beginInterruptibleILP(token);
+                sifting_internal::setILPBackendOverrideForTesting(ILPBackendOverride::kForceGurobi);
+            };
+            auto expectDropped = [] {
+                EXPECT_EQ(sifting_internal::g_active_cancel_token, nullptr);
+                EXPECT_EQ(sifting_internal::g_ilp_backend_override, ILPBackendOverride::kAuto);
+            };
+
+            // No crossings: it returns before the exact solve.
+            {
+                Graph g("no crossings");
+                auto A = boxAtEnd(g, "A", 0), B = boxAtEnd(g, "B", 0);
+                childAtEnd(g, "a", A);
+                childAtEnd(g, "b", B);
+                g.computeLayout();
+                ILPCancellationToken token;
+                arm(token);
+                EXPECT_EQ(g.minimizeCrossings(), 0);
+                expectDropped();
+            }
+            // Nothing to minimize: it throws.
+            {
+                Graph g("one connection");
+                childAtEnd(g, "a", boxAtEnd(g, "A", 0));
+                g.computeLayout();
+                ILPCancellationToken token;
+                arm(token);
+                EXPECT_THROW(g.minimizeCrossings(), std::logic_error);
+                expectDropped();
             }
         }
 

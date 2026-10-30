@@ -1217,7 +1217,9 @@ namespace hypergraph_logic {
 		// The exact result is only kept if it is at least as good;
 		// otherwise the heuristic ordering already written into the layers
 		// stands untouched. Returns the resulting (possibly still heuristic)
-		// crossing count.
+		// crossing count, the dummies crossing an equivalence's line included.
+		// Both keep every equivalence together, but may reorder its members; the
+		// stored chains follow the layers afterwards (syncEquivalenceOrder).
 		int minimizeCrossingsILP();
 
 		// ── minimizeCrossingsForNodes ─────────────────────────────────────────────────────────────────
