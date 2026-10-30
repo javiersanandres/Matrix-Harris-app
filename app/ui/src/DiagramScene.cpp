@@ -1,6 +1,7 @@
 #include "DiagramScene.h"
 #include "NodeDialogs.h"
 #include "NodeEditorWidgets.h"
+#include "NodeVisuals.h"
 #include "LayoutTypes.h"
 #include "UiStyle.h"
 #include "OptionsHelp.h"
@@ -750,12 +751,14 @@ namespace ui {
                 [this, left, right] { onSetEquivalenceStyle(left, right, false); });
             a->setToolTip(QStringLiteral("Marca esta equivalencia como hipotética: las cajas de un lado de la "
                                          "línea dejan de ser seguras con las del otro"));
+            a->setProperty(help::TOPIC_PROPERTY, QStringLiteral("equivalenceStyle"));
         }
         else {
             QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceSolid), QStringLiteral("Usar línea continua"),
                 [this, left, right] { onSetEquivalenceStyle(left, right, true); });
             a->setToolTip(QStringLiteral("Da esta equivalencia por segura: las cajas seguras con una lo pasan a ser "
                                          "con la otra, y alguna otra línea de la cadena puede volverse continua"));
+            a->setProperty(help::TOPIC_PROPERTY, QStringLiteral("equivalenceStyle"));
         }
 
         style::addMenuSection(menu, QStringLiteral("Eliminar"));
@@ -1207,7 +1210,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const std::function<void(const NodeAttributes&)>& create)
     {
         cancelInteraction();
-        NodeDialog dlg(NodeDialog::Mode::Create, NodeAttributes(default_name.toStdString()),
+        const std::string name = default_name.toStdString();
+        NodeDialog dlg(NodeDialog::Mode::Create, new_attributes_ ? new_attributes_(name) : NodeAttributes(name),
             recentColours(), dialogParent());
         if (dlg.exec() != QDialog::Accepted) return;
 
@@ -1217,6 +1221,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         catch (const std::exception& e) { showError(e); return; }
 
         rememberColours(dlg.pickedColours());
+        applyProjectDefaults(dlg);
         rebuild();
         emit graphChanged();
     }
@@ -1232,7 +1237,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
         const NodeAttributes updated = dlg.attributes();
         const bool font_size_for_all = dlg.fontSizeForAll();
-        if (updated == node_ptr->getAttributes() && !font_size_for_all) return;
+        if (updated == node_ptr->getAttributes() && !font_size_for_all) {
+            applyProjectDefaults(dlg); // the box stays as it was, the project may not
+            return;
+        }
         try {
             if (font_size_for_all) {
                 if (is_joint_) joint_editor_->setNodeAttributesWithFontSizeForAll(node_ptr, updated);
@@ -1246,8 +1254,39 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         catch (const std::exception& e) { showError(e); return; }
 
         rememberColours(dlg.pickedColours());
+        applyProjectDefaults(dlg);
         rebuild();
         emit graphChanged();
+    }
+
+    void DiagramScene::setProjectDefaultsStore(
+        std::function<NodeAttributes(const std::string&)> new_attributes,
+        std::function<void(const QColor&)> set_colour,
+        std::function<void(const QColor&)> set_font_colour,
+        std::function<void(int)> set_font_size)
+    {
+        new_attributes_ = std::move(new_attributes);
+        set_default_colour_ = std::move(set_colour);
+        set_default_font_colour_ = std::move(set_font_colour);
+        set_default_font_size_ = std::move(set_font_size);
+    }
+
+    void DiagramScene::applyProjectDefaults(const NodeDialog& dialog) {
+        const NodeAttributes a = dialog.attributes();
+        bool changed = false;
+        if (dialog.colourAsDefault() && set_default_colour_) {
+            set_default_colour_(node_visuals::toQColor(a.colour));
+            changed = true;
+        }
+        if (dialog.fontColourAsDefault() && set_default_font_colour_) {
+            set_default_font_colour_(node_visuals::toQColor(a.font_colour));
+            changed = true;
+        }
+        if (dialog.fontSizeAsDefault() && set_default_font_size_) {
+            set_default_font_size_(a.font_size);
+            changed = true;
+        }
+        if (changed) emit graphChanged(); // the title shows the unsaved change
     }
 
     void DiagramScene::setColourStore(std::function<QList<QColor>()> recent,
@@ -1771,10 +1810,44 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             a->setToolTip(QStringLiteral("Elimina esta caja y todas las que están unidas a ella, con sus conexiones"));
             return;
         }
-        QAction* a = menu->addAction(style::icon(style::Icon::TakeOut), QStringLiteral("Quitar bloque"),
-            [this, box] { onRemoveBlock(box); });
-        a->setToolTip(QStringLiteral("Quita del esquema conjunto esta caja y todas las que están unidas a ella; "
-                                     "los esquemas originales no cambian"));
+        // In the joint: the box's whole diagram, while it is not mixed with others
+        // (equivalences aside, which just go with it), and its block, when that is
+        // something else: the diagram has more blocks, or the block reaches into
+        // other diagrams (through an equivalence, or because they are mixed).
+        const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
+        std::unordered_set<Node*> block;
+        try { block = joint.getComponentNodes(box); }
+        catch (const std::exception&) { return; }
+        auto realBoxes = [](const std::unordered_set<Node*>& nodes) {
+            std::unordered_set<Node*> out;
+            for (Node* n : nodes) if (!n->isDummy()) out.insert(n);
+            return out;
+        };
+
+        std::string diagram_id;
+        std::unordered_set<Node*> diagram;
+        const auto ids = joint.graphsOf(box);
+        if (ids.size() == 1 && !ids.begin()->empty() && joint.isRemovable(*ids.begin())) {
+            diagram_id = *ids.begin();
+            try { diagram = realBoxes(joint.getRemovableNodes(diagram_id)); }
+            catch (const std::exception&) { diagram_id.clear(); }
+        }
+
+        if (!diagram_id.empty()) {
+            const QString name = QFontMetrics(menu->font()).elidedText(
+                QString::fromStdString(joint.getIncorporatedName(diagram_id)), Qt::ElideRight, 200);
+            QAction* a = menu->addAction(style::icon(style::Icon::TakeOut),
+                name.isEmpty() ? QStringLiteral("Quitar este esquema") : QStringLiteral("Quitar esquema «%1»").arg(name),
+                [this, diagram_id] { onRemoveDiagram(diagram_id); });
+            a->setToolTip(QStringLiteral("Quita del esquema conjunto todas las cajas de este esquema; "
+                                         "el esquema original no cambia"));
+        }
+        if (diagram_id.empty() || realBoxes(block) != diagram) {
+            QAction* a = menu->addAction(style::icon(style::Icon::TakeOut), QStringLiteral("Quitar bloque"),
+                [this, box] { onRemoveBlock(box); });
+            a->setToolTip(QStringLiteral("Quita del esquema conjunto esta caja y todas las que están unidas a ella "
+                                         "(también por equivalencias); los esquemas originales no cambian"));
+        }
     }
 
     void DiagramScene::onRemoveDiagram(const std::string& diagram_id) {

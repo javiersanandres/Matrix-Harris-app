@@ -428,6 +428,56 @@ namespace app_logic {
                 fs::remove(tmp);
             }
 
+            // ── Defaults for new boxes ──────────────────────────────────────────────
+
+            TEST(Project, NewBoxesTakeTheProjectsDefaults) {
+                Project p("P");
+                EXPECT_EQ(p.newNodeAttributes("A"), NodeAttributes("A"));
+                EXPECT_FALSE(p.hasUnsavedChanges());
+
+                const Color navy{ 0, 32, 96, 255 }, white{ 255, 255, 255, 255 };
+                p.setDefaultColour(navy);
+                p.setDefaultFontColour(white);
+                p.setDefaultFontSize(14);
+                const NodeAttributes a = p.newNodeAttributes("A");
+                EXPECT_EQ(a.name, "A");
+                EXPECT_EQ(a.colour, navy);
+                EXPECT_EQ(a.font_colour, white);
+                EXPECT_EQ(a.font_size, 14);
+                EXPECT_EQ(a.shape, NodeAttributes().shape); // only the defaults change
+                EXPECT_TRUE(p.hasUnsavedChanges());
+            }
+
+            TEST(Project, DefaultsSurviveSaveAndLoad) {
+                namespace fs = std::filesystem;
+                fs::path tmp = fs::temp_directory_path() / "test_project_default_colours.json";
+                {
+                    Project p("P");
+                    p.setDefaultColour(Color{ 10, 20, 30, 255 });
+                    p.setDefaultFontColour(Color{ 240, 230, 220, 255 });
+                    p.setDefaultFontSize(20);
+                    p.save(tmp);
+                }
+
+                auto loaded = Project::load(tmp);
+                EXPECT_EQ(loaded->getDefaultColour(), (Color{ 10, 20, 30, 255 }));
+                EXPECT_EQ(loaded->getDefaultFontColour(), (Color{ 240, 230, 220, 255 }));
+                EXPECT_EQ(loaded->getDefaultFontSize(), 20);
+                EXPECT_FALSE(loaded->hasUnsavedChanges());
+                loaded.reset();
+
+                // Files saved before default colours existed keep the usual ones.
+                nlohmann::json j;
+                { std::ifstream in(tmp); in >> j; }
+                j.erase("defaults");
+                { std::ofstream out(tmp); out << j.dump(); }
+                loaded = Project::load(tmp);
+                EXPECT_EQ(loaded->getDefaultColour(), NodeAttributes().colour);
+                EXPECT_EQ(loaded->getDefaultFontColour(), NodeAttributes().font_colour);
+                EXPECT_EQ(loaded->getDefaultFontSize(), NodeAttributes::DEFAULT_FONT_SIZE);
+                fs::remove(tmp);
+            }
+
             // ── The joint's names follow the diagrams' ───────────────────────
 
             // Diagram 0 ("A", in the joint) and diagram 1 ("B", not in it).

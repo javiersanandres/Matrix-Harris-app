@@ -1044,6 +1044,18 @@ namespace hypergraph_logic {
                 EXPECT_EQ(by_name.at("B")->getDesiredLayer(), -1);
             }
 
+            TEST_F(PersistenceTest, InMemory_RoundTrip_PreservesRoundedRectangles) {
+                NodeAttributes rounded("R");
+                rounded.shape = NodeShape::RoundedRectangle;
+                g.createNode(rounded, 0, -1, nullptr);
+                g.computeLayout();
+                nlohmann::json j;
+                g.toJSON(j);
+                EXPECT_EQ(j.at("nodes")[0].at("shape"), "rounded_rectangle");
+                auto loaded = TestableGraphicalHypergraph(GraphicalHypergraph::fromJSON(j));
+                EXPECT_EQ(nodesByName(loaded).at("R")->getShape(), NodeShape::RoundedRectangle);
+            }
+
             TEST_F(PersistenceTest, FromJSON_AcceptsOpaqueHexColour) {
                 buildSimpleGraph();
                 nlohmann::json j;

@@ -200,17 +200,21 @@ namespace ui {
     //
     // Every editable attribute of a node:
     //   - Nombre             : typed.
-    //   - Forma              : picked from a list (rectangle, circle, rhombus).
+    //   - Forma              : picked from a list (rectangle, rounded rectangle,
+    //                          circle, rhombus).
     //   - Color de fondo     : ColorPickerButton.
     //   - Color del texto    : ColorPickerButton with "Automático", which follows
     //                          the background (black or white, whichever reads
     //                          better) until the user picks a colour explicitly.
-    //   - Tamaño de fuente   : FontSizeSelector, optionally with a tick box to
-    //                          give that size to every box of the diagram.
-    //   - Fuego / Fuego con cenizas : two mutually exclusive tick boxes. Either
-    //                          one forces a white background and black text (and
-    //                          locks both pickers); unticking restores the colours
-    //                          in use before.
+    //                          Both colours optionally have a tick box to make
+    //                          them the project's defaults for new boxes.
+    //   - Tamaño de fuente   : FontSizeSelector, optionally with tick boxes to
+    //                          give that size to every box of the diagram and to
+    //                          make it the project's default, stacked on its right.
+    //   - Capa negra / Hogar : two mutually exclusive tick boxes. Capa negra forces
+    //                          a black background and white text, Hogar a white
+    //                          background and black text (both lock the pickers);
+    //                          unticking restores the colours in use before.
     //
     // Merge mode (when both `left` and `right` are given) lays the same editors
     // out as a three-way merge: each row shows the left node's value, a button
@@ -244,6 +248,14 @@ namespace ui {
         // the diagram (hidden by default), and whether it is ticked.
         void setFontSizeForAllAvailable(bool available);
         bool fontSizeForAll() const;
+
+        // Shows, next to each colour and the font size, a tick box to make it the
+        // project's default for new boxes (hidden by default), and whether each is
+        // ticked. The colours' are never ticked while a fire state imposes them.
+        void setProjectDefaultsAvailable(bool available);
+        bool colourAsDefault() const;
+        bool fontColourAsDefault() const;
+        bool fontSizeAsDefault() const;
 
     signals:
         void attributesChanged();
@@ -294,8 +306,11 @@ namespace ui {
         QListWidget* shape_ = nullptr;
         ColorPickerButton* colour_ = nullptr;
         ColorPickerButton* font_colour_ = nullptr;
+        TickBox* colour_default_ = nullptr;
+        TickBox* font_colour_default_ = nullptr;
         FontSizeSelector* font_size_ = nullptr;
         TickBox* font_size_all_ = nullptr;
+        TickBox* font_size_default_ = nullptr;
         TickBox* fire_ = nullptr;
         TickBox* ashes_ = nullptr;
 

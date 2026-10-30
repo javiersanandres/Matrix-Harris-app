@@ -29,6 +29,9 @@ namespace hypergraph_logic {
     // Height assigned to a rectangular real node box.
     inline constexpr double NODE_HEIGHT = 50.0;
 
+    // Corner radius of a rounded rectangular box, which has the rectangle's size.
+    inline constexpr double ROUNDED_NODE_RADIUS = 12.0;
+
     // Circles and rhombi (a square rotated 45 degrees) are regular shapes, so
     // both are inscribed in the same square bounding box. Its side is chosen so
     // both cover the same area as a rectangular box ((50 * sqrt(2))^2 ~ 100 * 50)

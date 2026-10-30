@@ -22,10 +22,14 @@ namespace hypergraph_logic {
 	// Color into a QColor (QColor(r, g, b, a)) when rendering.
 	// ============================================================================
 
-	enum class NodeShape { Rectangle, Circle, Rhombus };
+	// RoundedRectangle is a rectangle of the same size with rounded corners. It comes last so
+	// the values of the older shapes stay the same.
+	enum class NodeShape { Rectangle, Circle, Rhombus, RoundedRectangle };
 
 	// Whether a node represents a fire and, if so, whether that fire has ashes.
 	// A single enum (instead of two booleans) makes "ashes without fire" unrepresentable.
+	// The UI calls them "Capa negra" (Fire: black box, white text) and "Hogar"
+	// (FireWithAshes: white box with a black bottom band, black text).
 	enum class FireState { None, Fire, FireWithAshes };
 
 	struct Color {
@@ -68,6 +72,19 @@ namespace hypergraph_logic {
 
 		bool isFire() const noexcept { return fire != FireState::None; }
 		bool hasAshes() const noexcept { return fire == FireState::FireWithAshes; }
+
+		// Gives the box the colours its fire state imposes: black with white text for Fire,
+		// white with black text for FireWithAshes. Without a fire, nothing changes.
+		void applyFireColours() noexcept {
+			if (fire == FireState::Fire) {
+				colour = { 0, 0, 0, 255 };
+				font_colour = { 255, 255, 255, 255 };
+			}
+			else if (fire == FireState::FireWithAshes) {
+				colour = { 255, 255, 255, 255 };
+				font_colour = { 0, 0, 0, 255 };
+			}
+		}
 
 		bool operator==(const NodeAttributes& other) const noexcept {
 			return name == other.name && shape == other.shape && colour == other.colour

@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "Node.h"
 #include "Hypergraph.h"
+#include "LayoutTypes.h"
 
 using namespace hypergraph_logic;
 
@@ -53,6 +54,47 @@ namespace hypergraph_logic::node_tests {
         a.fire = FireState::Fire;
         EXPECT_TRUE(a.isFire());
         EXPECT_FALSE(a.hasAshes());
+    }
+
+    TEST(RealNode, FireStatesImposeTheirColours) {
+        NodeAttributes a("F");
+        a.colour = { 200, 0, 0, 255 };
+        a.font_colour = { 0, 0, 200, 255 };
+        a.applyFireColours();  // no fire: nothing changes
+        EXPECT_EQ(a.colour, (Color{ 200, 0, 0, 255 }));
+        EXPECT_EQ(a.font_colour, (Color{ 0, 0, 200, 255 }));
+
+        a.fire = FireState::Fire;  // "Capa negra"
+        a.applyFireColours();
+        EXPECT_EQ(a.colour, (Color{ 0, 0, 0, 255 }));
+        EXPECT_EQ(a.font_colour, (Color{ 255, 255, 255, 255 }));
+
+        a.fire = FireState::FireWithAshes;  // "Hogar"
+        a.applyFireColours();
+        EXPECT_EQ(a.colour, (Color{ 255, 255, 255, 255 }));
+        EXPECT_EQ(a.font_colour, (Color{ 0, 0, 0, 255 }));
+    }
+
+    TEST(RealNode, RoundedRectangleHasTheRectanglesSizeAndRoundedCorners) {
+        NodeAttributes a("R");
+        a.shape = NodeShape::RoundedRectangle;
+        const Node rounded(a);
+        const Node plain("P");
+        EXPECT_DOUBLE_EQ(rounded.getWidth(), plain.getWidth());
+        EXPECT_DOUBLE_EQ(rounded.getHeight(), plain.getHeight());
+
+        const double half_w = rounded.getWidth() / 2.0, half_h = rounded.getHeight() / 2.0;
+        // Flat until the corner starts...
+        EXPECT_DOUBLE_EQ(rounded.getBoundaryHalfHeight(0.0), half_h);
+        EXPECT_DOUBLE_EQ(rounded.getBoundaryHalfHeight(half_w - ROUNDED_NODE_RADIUS), half_h);
+        // ...then it shrinks along the arc, down to the side's straight part at the edge.
+        const double in_corner = rounded.getBoundaryHalfHeight(half_w - ROUNDED_NODE_RADIUS / 2.0);
+        EXPECT_LT(in_corner, half_h);
+        EXPECT_GT(in_corner, half_h - ROUNDED_NODE_RADIUS);
+        EXPECT_NEAR(rounded.getBoundaryHalfHeight(half_w), half_h - ROUNDED_NODE_RADIUS, 1e-9);
+        EXPECT_DOUBLE_EQ(rounded.getBoundaryHalfHeight(-half_w), rounded.getBoundaryHalfHeight(half_w));
+        // The plain rectangle keeps its square corners.
+        EXPECT_DOUBLE_EQ(plain.getBoundaryHalfHeight(half_w), half_h);
     }
 
     TEST(RealNode, SetNameKeepsOtherAttributes) {

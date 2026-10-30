@@ -40,7 +40,7 @@ namespace ui::tutorial {
 
         const QString SEEN_KEY = QStringLiteral("tutorial/seen");
 
-        constexpr int CARD_WIDTH = 470;
+        constexpr int CARD_WIDTH = 560;
         constexpr int CARD_PADDING = 22;
 
     } // namespace
@@ -82,7 +82,9 @@ namespace ui::tutorial {
 
             { QStringLiteral("Cambia el aspecto de una caja"),
               QStringLiteral("Haz %1 sobre una caja para editar su nombre, su forma, sus colores y el tamaño de la "
-                             "letra. Si el nombre no cabe, la rueda del ratón sobre la caja lo desplaza.")
+                             "letra. Sus colores pueden quedar como los <b>predeterminados del proyecto</b>, los que "
+                             "tendrán las cajas nuevas. Si el nombre no cabe, la rueda del ratón sobre la caja lo "
+                             "desplaza.")
                   .arg(key(QStringLiteral("doble clic"))),
               picture("properties"), { T::Canvas }, View::FirstDiagram },
 
@@ -256,9 +258,12 @@ namespace ui::tutorial {
         }
 
         // The picture with rounded corners and a hairline border, fitted into
-        // width x max_height.
+        // width x max_height but never enlarged past its own size on this screen
+        // (enlarging only blurs it).
         QPixmap roundedPicture(const QPixmap& source, int width, int max_height, qreal dpr) {
-            QSize size = source.size().scaled(width, max_height, Qt::KeepAspectRatio);
+            const QSize own = (QSizeF(source.size()) / dpr).toSize();
+            QSize size = own.width() <= width && own.height() <= max_height
+                ? own : own.scaled(width, max_height, Qt::KeepAspectRatio);
             QPixmap out(size * dpr);
             out.setDevicePixelRatio(dpr);
             out.fill(Qt::transparent);
@@ -474,7 +479,7 @@ QPushButton#skip:hover { color: #4F46E5; }
         if (!source.isNull()) {
             // As large as the window leaves room for (the rest of the card
             // takes about 330 px), so the menus in the pictures stay legible.
-            const int max_height = std::clamp(height() - 360, 140, 420);
+            const int max_height = std::clamp(height() - 360, 140, 520);
             picture_->setPixmap(roundedPicture(source, CARD_WIDTH - 2 * CARD_PADDING, max_height, devicePixelRatioF()));
         }
         prev_->setEnabled(current_ > 0);

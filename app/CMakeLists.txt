@@ -9,6 +9,7 @@
 
 add_subdirectory(editors/src)
 add_subdirectory(ui/src)
+add_subdirectory(tools)
 
 
 # ── Main executable ───────────────────────────────────────────────────────────

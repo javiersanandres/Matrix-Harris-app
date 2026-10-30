@@ -2387,8 +2387,8 @@ namespace hypergraph_logic {
                     // A root hangs its single connection below it; a leaf hangs from its
                     // single connection above it.
                     NodeLayout& nl = node_layout_.at(node);
-                    const bool root = node->getParents().empty() && nl.source_ports.size() == 1 && nl.target_ports.empty();
-                    const bool leaf = node->getChildren().empty() && nl.target_ports.size() == 1 && nl.source_ports.empty();
+                    const bool root = node->getParents().empty() && nl.source_ports.size() == 1 && nl.target_ports.empty() && nl.source_ports[0].edge->getSources().size() == 1;
+                    const bool leaf = node->getChildren().empty() && nl.target_ports.size() == 1 && nl.source_ports.empty() && nl.target_ports[0].edge->getTargets().size() == 1;
                     if (!root && !leaf) continue;
 
                     Port& own = root ? nl.source_ports[0] : nl.target_ports[0];

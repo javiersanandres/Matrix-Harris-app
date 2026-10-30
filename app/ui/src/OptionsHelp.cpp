@@ -76,6 +76,7 @@ namespace ui::help {
         const QString BACKGROUND = QStringLiteral("Fondo del esquema");
         const QString BOX_MENU = QStringLiteral("Menú de la caja");
         const QString CONNECTION_MENU = QStringLiteral("Menú de la conexión");
+        const QString EQUIVALENCES = QStringLiteral("Equivalencias");
         const QString JOINT = QStringLiteral("Esquema conjunto");
         const QString TABS = QStringLiteral("Pestañas");
 
@@ -303,6 +304,10 @@ namespace ui::help {
                     text(QStringLiteral("El submenú lista cada conexión de la caja, nombrada por las cajas del otro "
                                         "extremo y por si están arriba o abajo. Marca las que no tengas claras; elígelas "
                                         "de nuevo para quitar la marca.")),
+                    text(QStringLiteral("Si la caja tiene cajas equivalentes al lado, el submenú lista también esas "
+                                        "líneas, como <b>Con «…» (equivalencia)</b>: marcarlas es lo mismo que dibujarlas "
+                                        "discontinuas desde la propia línea (ver <b>Línea de equivalencia continua o "
+                                        "discontinua</b>).")),
                     pair(pic("uncertain", 1), QStringLiteral("Clic derecho en la 2 › Conexiones hipotéticas › Con «1»."),
                          pic("uncertain", 2), QStringLiteral("El tramo de la 2 se dibuja discontinuo.")),
                     note(QStringLiteral("Para marcar dudosa una conexión entera, usa <b>Usar línea discontinua</b> en el "
@@ -346,9 +351,120 @@ namespace ui::help {
                     pair(pic("removeBlock", 1), QStringLiteral("Clic derecho en la caja 3 › Eliminar bloque."),
                          pic("removeBlock", 2), QStringLiteral("El bloque 3–4 desaparece; el 1–2 sigue.")),
                     note(QStringLiteral("En el esquema conjunto la opción se llama <b>Quitar bloque</b>: saca esas cajas "
-                                        "del esquema conjunto, sin afectar al esquema original del que provienen.")),
+                                        "del esquema conjunto, sin afectar al esquema original del que provienen. Si el "
+                                        "bloque es el esquema entero, aparece en su lugar <b>Quitar esquema</b>.")),
                 },
                 QStringLiteral("borrar quitar grupo") });
+
+            // ── Equivalences ────────────────────────────────────────────────
+            t.push_back({ "addEquivalence", EQUIVALENCES, QStringLiteral("Hacer equivalente a…"), I::Equivalent,
+                QStringLiteral("Marca dos cajas como equivalentes: quedan en el mismo nivel, una junto a la otra, "
+                               "unidas por una línea horizontal."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Haz clic derecho sobre la caja, elige <b>Hacer equivalente a…</b> y haz clic en "
+                                        "la otra: las que se pueden elegir se resaltan y el resto se apaga. Pulsa "
+                                        "<b>Esc</b> para cancelar. La línea que las une empieza continua: la "
+                                        "equivalencia se da por segura (ver <b>Línea de equivalencia continua o "
+                                        "discontinua</b>).")),
+                    triple(pic("addEquivalence", 1), QStringLiteral("Clic derecho en la caja 5 › Hacer equivalente a…"),
+                           pic("addEquivalence", 2), QStringLiteral("Se elige la 3."),
+                           pic("addEquivalence", 3), QStringLiteral("La 3 baja al nivel de la 5 y quedan unidas.")),
+                    heading(QStringLiteral("Dónde quedan las cajas")),
+                    text(QStringLiteral("Dos cajas equivalentes comparten nivel:"
+                                        "<ul style=\"margin-left:-18px\">"
+                                        "<li>Si están en niveles distintos, la de más arriba <b>baja</b> al nivel de la "
+                                        "otra, con todo lo que tiene debajo.</li>"
+                                        "<li>Entre dos cajas equivalentes no puede quedar ninguna otra caja, solo "
+                                        "conexiones que pasan. Si había cajas entre ellas, se apartan, sin cambiar su "
+                                        "orden.</li></ul>")),
+                    heading(QStringLiteral("Cadenas")),
+                    text(QStringLiteral("Una caja puede tener una caja equivalente a cada lado, así que se forman "
+                                        "<b>cadenas</b>: si 1 es equivalente a 2 y 2 a 3, las tres lo son entre sí. Solo "
+                                        "las cajas de los <b>extremos</b> de una cadena pueden hacerse equivalentes a "
+                                        "otra: el lado por el que se unirían tiene que estar libre en las dos.")),
+                    note(QStringLiteral("No se ofrecen las cajas que están una por encima de la otra, directa o "
+                                        "indirectamente, ni las que, a través de otras cadenas, harían que algo quedara "
+                                        "por encima de sí mismo. En el <b>esquema conjunto</b> se pueden hacer "
+                                        "equivalentes cajas de esquemas distintos: esos esquemas quedan mezclados y ya no "
+                                        "se pueden mover como un todo (no aparece <b>Mover esquema</b>), pero sí quitar "
+                                        "del conjunto; al quitar uno, solo se pierden sus equivalencias con los demás.")),
+                },
+                QStringLiteral("equivalente equivalencia igual misma cadena línea horizontal nivel") });
+
+            t.push_back({ "equivalenceStyle", EQUIVALENCES, QStringLiteral("Línea de equivalencia continua o discontinua"),
+                I::EquivalenceDashed,
+                QStringLiteral("Marca una equivalencia como segura (línea continua) o como hipotética (discontinua)."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Haz clic sobre la línea que une las dos cajas y elige <b>Usar línea "
+                                        "discontinua</b>; para volver, <b>Usar línea continua</b>. También desde una de "
+                                        "las cajas: clic derecho › <b>Conexiones hipotéticas</b> › <b>Con «…» "
+                                        "(equivalencia)</b>.")),
+                    pair(pic("equivalenceStyle", 1), QStringLiteral("Clic en la línea entre la 3 y la 5 › Usar línea discontinua."),
+                         pic("equivalenceStyle", 2), QStringLiteral("La equivalencia queda como hipotética.")),
+                    heading(QStringLiteral("En una cadena")),
+                    text(QStringLiteral("Una línea continua dice que sus dos cajas son equivalentes con seguridad. La "
+                                        "seguridad se transmite: si la 1 lo es con la 2 y la 2 con la 3, la 1 también lo "
+                                        "es con la 3. Por eso cambiar una línea puede afectar a otras cajas de la "
+                                        "cadena:"
+                                        "<ul style=\"margin-left:-18px\">"
+                                        "<li>Al hacerla <b>discontinua</b>, la cadena se divide por ahí: las cajas de un "
+                                        "lado dejan de ser seguras con las del otro. Solo cambia esa línea.</li>"
+                                        "<li>Al hacerla <b>continua</b>, todas las cajas seguras con una de las dos pasan "
+                                        "a serlo con la otra, así que otras líneas pueden volverse continuas a la vez. "
+                                        "Por ejemplo, en 1 – 2 – 3, si la 1 y la 3 son seguras entre sí y la 2 no lo es "
+                                        "con ninguna, hacer continua la línea 2 – 3 hace continua también la 1 – 2.</li>"
+                                        "</ul>")),
+                    note(QStringLiteral("Cada caja recuerda con qué cajas es segura, no el sitio que ocupa: si las "
+                                        "cambias de orden dentro de la cadena, puede cambiar qué líneas se dibujan "
+                                        "discontinuas.")),
+                },
+                QStringLiteral("equivalencia hipotética dudosa segura discontinua continua estilo cadena") });
+
+            t.push_back({ "removeEquivalence", EQUIVALENCES, QStringLiteral("Quitar equivalencia"), I::RemoveEquivalence,
+                QStringLiteral("Borra la línea entre dos cajas equivalentes: la cadena se parte en dos por ahí."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Haz clic derecho sobre una de las cajas y elige <b>Quitar equivalencia con "
+                                        "«…»</b> (hay una opción por cada lado que tenga una equivalente), o haz clic "
+                                        "sobre la línea y elige <b>Quitar equivalencia</b>.")),
+                    pair(pic("removeEquivalence", 1), QStringLiteral("Clic derecho en la caja 3 › Quitar equivalencia con «5»."),
+                         pic("removeEquivalence", 2), QStringLiteral("La 3 vuelve a su nivel, debajo de la 1.")),
+                    text(QStringLiteral("Cada parte de la cadena vuelve al nivel que le corresponde: una caja que había "
+                                        "bajado para estar junto a su equivalente puede volver a subir. Las cajas de cada "
+                                        "parte siguen siendo seguras con las mismas que antes.")),
+                    note(QStringLiteral("<b>Eliminar caja</b> sobre una caja de una cadena no la parte: sus vecinas "
+                                        "quedan unidas entre sí. <b>Fusionar</b> dos cajas junta también sus cadenas, y "
+                                        "lo que era seguro con cualquiera de ellas lo es con la caja fusionada.")),
+                },
+                QStringLiteral("quitar borrar equivalencia cadena separar partir") });
+
+            t.push_back({ "moveEquivalent", EQUIVALENCES, QStringLiteral("Mover cajas equivalentes"), I::Move,
+                QStringLiteral("Arrastra una caja de una cadena para cambiarla de sitio en ella o llevarte la cadena entera."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Arrastra la caja dentro de su nivel:"
+                                        "<ul style=\"margin-left:-18px\">"
+                                        "<li>Mientras no pase por encima de ninguna caja que no sea de la cadena, solo ella "
+                                        "cambia de sitio: puede ponerse delante o detrás de sus equivalentes, y a "
+                                        "cualquier lado de las conexiones que pasan entre ellas o junto a la cadena. Las "
+                                        "demás cajas de la cadena no se mueven.</li>"
+                                        "<li>Si la llevas más allá de una caja que no es de la cadena, la sigue <b>toda la "
+                                        "cadena</b>, y una etiqueta lo indica: «Toda la cadena se mueve».</li></ul>")),
+                    text(QStringLiteral("Aquí la 2 y la 3 son equivalentes, y la 4 está a su derecha:")),
+                    pair(pic("moveEquivalent", 1), QStringLiteral("La 2, llevada a la derecha de la 3 sin pasar la 4: "
+                                                                  "solo ella cambia de sitio."),
+                         pic("moveEquivalent", 2), QStringLiteral("Al soltarla, la cadena queda 3 – 2.")),
+                    pair(pic("moveEquivalent", 3), QStringLiteral("La 3, llevada más allá de la 4: la sigue toda la cadena."),
+                         pic("moveEquivalent", 4), QStringLiteral("La cadena entera queda a la derecha de la 4.")),
+                    text(QStringLiteral("Llevada a <b>otro nivel</b>, se lleva también la cadena entera, porque las cajas "
+                                        "equivalentes siempre comparten nivel.")),
+                    note(QStringLiteral("Al cambiar el orden, las líneas unen las cajas que quedan vecinas, y cada una "
+                                        "conserva con qué cajas es segura (ver <b>Línea de equivalencia continua o "
+                                        "discontinua</b>).")),
+                },
+                QStringLiteral("mover arrastrar reordenar equivalencia cadena orden") });
 
             // ── Connection menu ─────────────────────────────────────────────
             t.push_back({ "createBetween", CONNECTION_MENU, QStringLiteral("Crear caja entre"), I::BoxBetween,
@@ -524,6 +640,25 @@ namespace ui::help {
                                         "bloque, solo aparece Mover esquema, porque los dos harían lo mismo.")),
                 },
                 QStringLiteral("mover esquema entero conjunto bloques todos") });
+
+            t.push_back({ "removeDiagram", JOINT, QStringLiteral("Quitar esquema"), I::TakeOut,
+                QStringLiteral("Saca del esquema conjunto todas las cajas de un esquema, sin cambiar el original."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("En el esquema conjunto, haz clic derecho sobre una caja o conexión y elige <b>Quitar esquema "
+                                        "«…»</b> (el menú muestra el nombre de su esquema) y confirma. También se puede "
+                                        "con la papelera de <b>Administrar esquemas</b>, en el menú del fondo. El "
+                                        "esquema original no cambia y puedes volver a añadirlo.")),
+                    pair(pic("removeDiagram", 1), QStringLiteral("Clic derecho en la caja 3 › Quitar esquema «Esquema 1»."),
+                         pic("removeDiagram", 2), QStringLiteral("Solo queda el «Esquema 2».")),
+                    heading(QStringLiteral("Esquema o bloque")),
+                    text(QStringLiteral("<ul style=\"margin-left:-18px\">"
+                                        "<li><b>Quitar esquema</b> quita todas las cajas de ese esquema. Aparece mientras "
+                                        "el esquema no esté conectado ni fusionado con otros.</li>"
+                                        "<li><b>Quitar bloque</b> quita la caja o conexión y todo lo que está unido a "
+                                        "ella, aunque venga de otros esquemas.</li></ul>")),
+                },
+                QStringLiteral("quitar esquema conjunto bloque sacar borrar") });
 
             // ── Tabs ────────────────────────────────────────────────────────
             t.push_back({ "duplicateDiagram", TABS, QStringLiteral("Duplicar esquema"), I::Duplicate,
@@ -1147,6 +1282,9 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
             { QStringLiteral("Copiar esquema"), QStringLiteral("copyPiece") },
             { QStringLiteral("Copiar este esquema"), QStringLiteral("copyPiece") },
             { QStringLiteral("Duplicar esquema"), QStringLiteral("duplicateDiagram") },
+            { QStringLiteral("Hacer equivalente a…"), QStringLiteral("addEquivalence") },
+            { QStringLiteral("Quitar equivalencia"), QStringLiteral("removeEquivalence") },
+            { QStringLiteral("Quitar este esquema"), QStringLiteral("removeDiagram") },
         };
         const QString text = QString(entry).remove(QLatin1Char('&'));
         if (auto it = exact.find(text); it != exact.end()) return it->second;
@@ -1156,6 +1294,8 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
         if (above.match(text).hasMatch()) return QStringLiteral("addParentConnection");
         if (text.startsWith(QStringLiteral("Mover esquema «"))) return QStringLiteral("moveDiagram");
         if (text.startsWith(QStringLiteral("Copiar esquema «"))) return QStringLiteral("copyPiece");
+        if (text.startsWith(QStringLiteral("Quitar equivalencia con «"))) return QStringLiteral("removeEquivalence");
+        if (text.startsWith(QStringLiteral("Quitar esquema «"))) return QStringLiteral("removeDiagram");
         return {};
     }
 
@@ -1163,7 +1303,8 @@ QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical { background: trans
         std::vector<std::pair<QAction*, QString>> entries;
         for (QAction* a : menu->actions()) {
             if (a->isSeparator() || qobject_cast<QWidgetAction*>(a)) continue;
-            const QString topic = topicForMenuEntry(a->text());
+            const QVariant own = a->property(TOPIC_PROPERTY);
+            const QString topic = own.isValid() ? own.toString() : topicForMenuEntry(a->text());
             if (!topic.isEmpty()) entries.emplace_back(a, topic);
         }
         if (entries.empty()) return;

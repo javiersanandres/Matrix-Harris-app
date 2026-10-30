@@ -46,6 +46,10 @@ namespace ui::help {
     // Puts a "?" button at the right of every option of `menu` that has an
     // entry; clicking it closes the menu and opens the window there. Call
     // before showing the menu (it makes the menu a little wider for them).
+    // An action whose TOPIC_PROPERTY is set goes to that entry instead of the
+    // one its text names (the same text can mean another thing elsewhere, as
+    // "Usar línea discontinua" on an equivalence line).
+    inline constexpr const char* TOPIC_PROPERTY = "helpTopic";
     void addHelpButtons(QMenu* menu, QWidget* dialog_parent);
 
     // ── For tests ─────────────────────────────────────────────────────────────

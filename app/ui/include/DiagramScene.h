@@ -31,6 +31,8 @@ class QTimer;
 
 namespace ui {
 
+    class NodeDialog;
+
     // ============================================================================
     // InteractionState
     //
@@ -114,6 +116,15 @@ namespace ui {
         // and where they report every colour the user picks. Set by MainWindow.
         void setColourStore(std::function<QList<QColor>()> recent,
             std::function<void(const QColor&)> remember);
+
+        // Where new boxes take the project's defaults from, and where the node
+        // dialog sets a new default background, text colour or font size. Set by
+        // MainWindow; without it new boxes take the usual ones.
+        void setProjectDefaultsStore(
+            std::function<hypergraph_logic::NodeAttributes(const std::string&)> new_attributes,
+            std::function<void(const QColor&)> set_colour,
+            std::function<void(const QColor&)> set_font_colour,
+            std::function<void(int)> set_font_size);
 
         // The project's diagrams, for the joint diagram's "Administrar esquemas"
         // menu. Set by MainWindow.
@@ -222,6 +233,10 @@ namespace ui {
         // ── Project colour store (see setColourStore) ─────────────────────────────
         std::function<QList<QColor>()> recent_colours_;
         std::function<void(const QColor&)> remember_colour_;
+        std::function<hypergraph_logic::NodeAttributes(const std::string&)> new_attributes_;
+        std::function<void(const QColor&)> set_default_colour_;
+        std::function<void(const QColor&)> set_default_font_colour_;
+        std::function<void(int)> set_default_font_size_;
 
         // ── Project diagrams (see setDiagramCatalog) ──────────────────────────────
         std::function<std::vector<DiagramInfo>()> diagram_catalog_;
@@ -425,6 +440,8 @@ namespace ui {
         void showNodeProperties(NodeItem* item);
         QList<QColor> recentColours() const;
         void rememberColours(const QList<QColor>& colours);
+        // Makes the dialog's colours and font size the project's defaults where it was asked to.
+        void applyProjectDefaults(const NodeDialog& dialog);
         QWidget* dialogParent() const;
 
         // Convenience: get the graph from whichever editor is active.

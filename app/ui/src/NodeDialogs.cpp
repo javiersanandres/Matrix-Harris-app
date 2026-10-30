@@ -39,8 +39,11 @@ namespace ui {
             limit.adjust(WINDOW_MARGIN, WINDOW_MARGIN, -WINDOW_MARGIN, -WINDOW_MARGIN);
 
             const QSize content = scroll->widget()->sizeHint();
-            const int scrollbar = scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent);
-            const int want_w = std::max(preferred_width, content.width() + scrollbar);
+            // Room for the vertical scroll bar (as the style sheet draws it) and the
+            // card's border, so a body that scrolls never needs to scroll sideways too.
+            const int scrollbar = std::max(scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent),
+                scroll->verticalScrollBar()->sizeHint().width());
+            const int want_w = std::max(preferred_width, content.width() + scrollbar + 2);
             const int want_h = banner->height() + content.height() + footer->sizeHint().height();
 
             const int max_w = limit.width();
@@ -177,11 +180,12 @@ namespace ui {
 
         form_ = new NodeAttributesForm(initial, recent_colours, this);
         form_->setFontSizeForAllAvailable(!create);
+        form_->setProjectDefaultsAvailable(true);
         preview_ = new NodePreview(this);
         preview_->setFixedWidth(340);
 
         accept_ = buildNodeDialog(this, banner, form_, preview_, QStringLiteral("Vista previa"),
-            create ? QStringLiteral("Crear") : QStringLiteral("Actualizar"), 580);
+            create ? QStringLiteral("Crear") : QStringLiteral("Actualizar"), 700);
 
         form_->focusName();
     }
@@ -189,6 +193,9 @@ namespace ui {
     NodeAttributes NodeDialog::attributes() const { return form_->attributes(); }
     QList<QColor> NodeDialog::pickedColours() const { return form_->pickedColours(); }
     bool NodeDialog::fontSizeForAll() const { return form_->fontSizeForAll(); }
+    bool NodeDialog::colourAsDefault() const { return form_->colourAsDefault(); }
+    bool NodeDialog::fontColourAsDefault() const { return form_->fontColourAsDefault(); }
+    bool NodeDialog::fontSizeAsDefault() const { return form_->fontSizeAsDefault(); }
 
     // ============================================================================
     // FuseNodesDialog

@@ -196,7 +196,10 @@ namespace app_logic {
 		//     "diagram_names": [<string>, ...],
 		//     "diagrams": [ <GraphicalHypergraph JSON>, ... ],
 		//     "joint": <JointGraphicalHypergraph JSON>,
-		//     "recent_colours": [ "#RRGGBBAA", ... ]   (optional when loading)
+		//     "recent_colours": [ "#RRGGBBAA", ... ],  (optional when loading)
+		//     "defaults": { "colour": "#RRGGBBAA", "font_colour": "#RRGGBBAA",
+		//                   "font_size": <int> }      (optional when loading, as
+		//                                              is each field)
 		//   }
 		// Updates file_path_ and resets the unsaved-changes flag.
 		// Throws std::runtime_error if the file cannot be written.
@@ -250,6 +253,23 @@ namespace app_logic {
 		//
 		void addRecentColour(const Color& colour);
 
+		// ── Defaults for new boxes ────────────────────────────────────────────────
+		//
+		// The background colour, text colour and font size every new box of this
+		// project starts with. They begin as NodeAttributes' own defaults and are
+		// saved with the project. Setting a different one counts as an unsaved
+		// change (no diagram history holds it).
+		//
+		const Color& getDefaultColour() const { return default_colour_; }
+		const Color& getDefaultFontColour() const { return default_font_colour_; }
+		int getDefaultFontSize() const { return default_font_size_; }
+		void setDefaultColour(const Color& colour);
+		void setDefaultFontColour(const Color& colour);
+		void setDefaultFontSize(int size);
+
+		// A new box named `name` with the project's defaults.
+		NodeAttributes newNodeAttributes(const std::string& name) const;
+
 	private:
 		std::string name_;
 		std::filesystem::path file_path_;
@@ -259,6 +279,9 @@ namespace app_logic {
 		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;
 		std::vector<Color> recent_colours_;
+		Color default_colour_ = NodeAttributes().colour;
+		Color default_font_colour_ = NodeAttributes().font_colour;
+		int default_font_size_ = NodeAttributes::DEFAULT_FONT_SIZE;
 	};
 
 } // namespace app_logic

@@ -198,6 +198,32 @@ namespace app_logic {
 			recent_colours_.resize(MAX_RECENT_COLOURS);
 	}
 
+	void Project::setDefaultColour(const Color& colour) {
+		if (colour == default_colour_) return;
+		default_colour_ = colour;
+		markUnsaved();
+	}
+
+	void Project::setDefaultFontColour(const Color& colour) {
+		if (colour == default_font_colour_) return;
+		default_font_colour_ = colour;
+		markUnsaved();
+	}
+
+	void Project::setDefaultFontSize(int size) {
+		if (size == default_font_size_) return;
+		default_font_size_ = size;
+		markUnsaved();
+	}
+
+	NodeAttributes Project::newNodeAttributes(const std::string& name) const {
+		NodeAttributes a(name);
+		a.colour = default_colour_;
+		a.font_colour = default_font_colour_;
+		a.font_size = default_font_size_;
+		return a;
+	}
+
 	// ============================================================================
 	// save
 	// ============================================================================
@@ -225,6 +251,10 @@ namespace app_logic {
 		for (const auto& c : recent_colours_)
 			colours.push_back(colorToHex(c));
 		j["recent_colours"] = std::move(colours);
+		j["defaults"] = {
+			{ "colour", colorToHex(default_colour_) },
+			{ "font_colour", colorToHex(default_font_colour_) },
+			{ "font_size", default_font_size_ } };
 
 		std::ofstream out(path);
 		if (!out.is_open())
@@ -285,6 +315,22 @@ namespace app_logic {
 				catch (const std::invalid_argument& e) {
 					throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
 				}
+			}
+		}
+
+		// Projects saved before the defaults existed keep the usual ones.
+		if (j.contains("defaults")) {
+			const json& d = j.at("defaults");
+			try {
+				if (d.contains("colour"))
+					p->default_colour_ = colorFromHex(d.at("colour").get<std::string>());
+				if (d.contains("font_colour"))
+					p->default_font_colour_ = colorFromHex(d.at("font_colour").get<std::string>());
+				if (d.contains("font_size"))
+					p->default_font_size_ = d.at("font_size").get<int>();
+			}
+			catch (const std::exception& e) {
+				throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
 			}
 		}
 

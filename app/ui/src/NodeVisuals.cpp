@@ -1,4 +1,5 @@
 #include "NodeVisuals.h"
+#include "LayoutTypes.h"
 
 #include <QApplication>
 #include <QPainter>
@@ -94,6 +95,11 @@ namespace ui::node_visuals {
             path.closeSubpath();
             break;
         }
+        case NodeShape::RoundedRectangle: {
+            const double r = std::min({ ROUNDED_NODE_RADIUS, box.width() / 2.0, box.height() / 2.0 });
+            path.addRoundedRect(box, r, r);
+            break;
+        }
         default:
             path.addRect(box);
             break;
@@ -117,6 +123,12 @@ namespace ui::node_visuals {
             inner = QRectF(0, 0, box.width() / 2.0, box.height() / 2.0);
             inner.moveCenter(box.center());
             break;
+        case NodeShape::RoundedRectangle: {
+            // A little more room at the sides, so the text corners stay clear of the arcs.
+            const double extra = ROUNDED_NODE_RADIUS * 0.3;
+            inner = box.adjusted(LABEL_PAD_X + extra, LABEL_PAD_Y, -LABEL_PAD_X - extra, -LABEL_PAD_Y);
+            break;
+        }
         default:
             inner = box.adjusted(LABEL_PAD_X, LABEL_PAD_Y, -LABEL_PAD_X, -LABEL_PAD_Y);
             break;
@@ -156,7 +168,9 @@ namespace ui::node_visuals {
         painter->setRenderHint(QPainter::TextAntialiasing, true);
 
         const QPainterPath outline = shapePath(attributes.shape, box);
-        QColor text_colour = toQColor(attributes.font_colour);
+        NodeAttributes shown = attributes;
+        shown.applyFireColours(); // a fire state decides the colours, whatever is stored
+        QColor text_colour = toQColor(shown.font_colour);
 
         // ── Fill ─────────────────────────────────────────────────────────────────
         painter->setPen(Qt::NoPen);
@@ -177,7 +191,7 @@ namespace ui::node_visuals {
             text_colour = Qt::black;
         }
         else {
-            painter->setBrush(toQColor(attributes.colour));
+            painter->setBrush(toQColor(shown.colour));
             painter->drawPath(outline);
         }
 

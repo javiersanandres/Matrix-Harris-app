@@ -43,6 +43,12 @@ public:
     // too ("Aplicar a todas las cajas del esquema").
     bool fontSizeForAll() const;
 
+    // Whether the background colour, text colour or font size should become the
+    // project's default for new boxes ("Por defecto en el proyecto").
+    bool colourAsDefault() const;
+    bool fontColourAsDefault() const;
+    bool fontSizeAsDefault() const;
+
 private:
     NodeAttributesForm* form_ = nullptr;
     NodePreview*        preview_ = nullptr;

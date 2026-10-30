@@ -155,6 +155,13 @@ namespace hypergraph_logic {
 		case NodeShape::Rhombus:
 			// Vertices at (±half_w, 0) and (0, ±half_h): the boundary is linear in |dx|.
 			return half_h * (1.0 - adx / half_w);
+		case NodeShape::RoundedRectangle: {
+			// Flat in the middle, then a quarter circle in each corner.
+			const double r = std::min({ ROUNDED_NODE_RADIUS, half_w, half_h });
+			const double into_corner = adx - (half_w - r);
+			if (into_corner <= 0.0) return half_h;
+			return half_h - r + std::sqrt(std::max(0.0, r * r - into_corner * into_corner));
+		}
 		default:
 			return half_h;
 		}

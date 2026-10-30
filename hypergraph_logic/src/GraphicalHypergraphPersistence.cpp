@@ -21,6 +21,7 @@ namespace hypergraph_logic {
 			switch (shape) {
 			case NodeShape::Circle:  return "circle";
 			case NodeShape::Rhombus: return "rhombus";
+			case NodeShape::RoundedRectangle: return "rounded_rectangle";
 			default:                 return "rectangle";
 			}
 		}
@@ -29,6 +30,7 @@ namespace hypergraph_logic {
 			if (s == "rectangle") return NodeShape::Rectangle;
 			if (s == "circle")    return NodeShape::Circle;
 			if (s == "rhombus")   return NodeShape::Rhombus;
+			if (s == "rounded_rectangle") return NodeShape::RoundedRectangle;
 			throw std::runtime_error("GraphicalHypergraph::fromJSON: unknown node shape: " + s);
 		}
 

@@ -39,21 +39,31 @@ namespace ui {
         const QColor MUTED("#7A8194");
         const QColor BORDER("#D6DAE4");
 
+        // Width of the colour pickers and the font size, so the tick boxes on their
+        // right line up in one column.
+        constexpr int EDITOR_WIDTH = 196;
+
         QString hexOf(const QColor& c) { return c.name(QColor::HexRgb).toUpper(); }
 
         QString shapeName(NodeShape shape) {
             switch (shape) {
             case NodeShape::Circle:  return QStringLiteral("Círculo");
             case NodeShape::Rhombus: return QStringLiteral("Rombo");
+            case NodeShape::RoundedRectangle: return QStringLiteral("Rectángulo redondeado");
             default:                 return QStringLiteral("Rectángulo");
             }
         }
 
+        // Shorter names for the shape tiles, where the full one does not fit.
+        QString shapeTileName(NodeShape shape) {
+            return shape == NodeShape::RoundedRectangle ? QStringLiteral("Redondeado") : shapeName(shape);
+        }
+
         QString fireName(FireState fire) {
             switch (fire) {
-            case FireState::Fire:          return QStringLiteral("Fuego");
-            case FireState::FireWithAshes: return QStringLiteral("Fuego con cenizas");
-            default:                       return QStringLiteral("Sin fuego");
+            case FireState::Fire:          return QStringLiteral("Capa negra");
+            case FireState::FireWithAshes: return QStringLiteral("Hogar");
+            default:                       return QStringLiteral("Ninguno");
             }
         }
 
@@ -76,7 +86,7 @@ namespace ui {
             a.shape = shape;
             a.fire = fire;
             if (fire == FireState::None) a.colour = nv::fromQColor(QColor("#E8E9FF"));
-            else                         a.colour = { 255, 255, 255, 255 };
+            else                         a.applyFireColours();
             return a;
         }
 
@@ -806,6 +816,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
     void NodeAttributesForm::setAttributes(const NodeAttributes& attributes) {
         current_ = attributes;
         if (current_.isFire()) {
+            current_.applyFireColours(); // boxes saved when a Capa negra was white
             // Colours before the fire are unknown: fall back to the defaults.
             const NodeAttributes defaults;
             pre_fire_colour_ = defaults.colour;
@@ -833,6 +844,26 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
     bool NodeAttributesForm::fontSizeForAll() const {
         return !font_size_all_->isHidden() && font_size_all_->isChecked();
+    }
+
+    void NodeAttributesForm::setProjectDefaultsAvailable(bool available) {
+        for (TickBox* box : { colour_default_, font_colour_default_, font_size_default_ }) {
+            box->setVisible(available);
+            if (!available) box->setChecked(false);
+        }
+    }
+
+    bool NodeAttributesForm::colourAsDefault() const {
+        return !colour_default_->isHidden() && colour_default_->isEnabled() && colour_default_->isChecked();
+    }
+
+    bool NodeAttributesForm::fontColourAsDefault() const {
+        return !font_colour_default_->isHidden() && font_colour_default_->isEnabled()
+            && font_colour_default_->isChecked();
+    }
+
+    bool NodeAttributesForm::fontSizeAsDefault() const {
+        return !font_size_default_->isHidden() && font_size_default_->isChecked();
     }
 
     // ── Building ──────────────────────────────────────────────────────────────────
@@ -953,14 +984,16 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             shape_->setIconSize(QSize(46, 34));
             shape_->setGridSize(QSize(98, 72));
             shape_->setFixedHeight(80);
-            shape_->setMinimumWidth(3 * 98 + 8);
+            shape_->setMinimumWidth(4 * 98 + 8);
             shape_->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
             shape_->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
             shape_->setSelectionMode(QAbstractItemView::SingleSelection);
             shape_->setCursor(Qt::PointingHandCursor);
-            for (NodeShape s : { NodeShape::Rectangle, NodeShape::Circle, NodeShape::Rhombus }) {
+            for (NodeShape s : { NodeShape::Rectangle, NodeShape::RoundedRectangle,
+                                 NodeShape::Circle, NodeShape::Rhombus }) {
                 auto* item = new QListWidgetItem(
-                    QIcon(renderNodeIcon(iconAttributes(s), QSize(46, 34), dpr)), shapeName(s));
+                    QIcon(renderNodeIcon(iconAttributes(s), QSize(46, 34), dpr)), shapeTileName(s));
+                item->setToolTip(shapeName(s));
                 item->setData(Qt::UserRole, static_cast<int>(s));
                 item->setTextAlignment(Qt::AlignHCenter | Qt::AlignBottom);
                 item->setSizeHint(QSize(92, 66));
@@ -981,10 +1014,17 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 rememberPicked(c);
                 setBackground(c);
             });
+            colour_default_ = new TickBox(QStringLiteral("Por defecto en el proyecto"));
+            colour_default_->setToolTip(QStringLiteral(
+                "Las cajas nuevas de este proyecto tendrán este color de fondo"));
+            colour_default_->setVisible(false);
             auto* wrap = new QWidget;
             auto* h = new QHBoxLayout(wrap);
             h->setContentsMargins(0, 0, 0, 0);
+            h->setSpacing(14);
+            colour_->setFixedWidth(EDITOR_WIDTH);
             h->addWidget(colour_);
+            h->addWidget(colour_default_);
             h->addStretch();
             return wrap;
         }
@@ -997,10 +1037,17 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 setFontColourManual(c);
             });
             connect(font_colour_, &ColorPickerButton::automaticPicked, this, [this] { setFontColourAutomatic(); });
+            font_colour_default_ = new TickBox(QStringLiteral("Por defecto en el proyecto"));
+            font_colour_default_->setToolTip(QStringLiteral(
+                "Las cajas nuevas de este proyecto tendrán este color de texto"));
+            font_colour_default_->setVisible(false);
             auto* wrap = new QWidget;
             auto* h = new QHBoxLayout(wrap);
             h->setContentsMargins(0, 0, 0, 0);
+            h->setSpacing(14);
+            font_colour_->setFixedWidth(EDITOR_WIDTH);
             h->addWidget(font_colour_);
+            h->addWidget(font_colour_default_);
             h->addStretch();
             return wrap;
         }
@@ -1016,12 +1063,24 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             font_size_all_->setToolTip(QStringLiteral(
                 "Las demás cajas del esquema tomarán también este tamaño de fuente"));
             font_size_all_->setVisible(false);
+            font_size_default_ = new TickBox(QStringLiteral("Por defecto en el proyecto"));
+            font_size_default_->setToolTip(QStringLiteral(
+                "Las cajas nuevas de este proyecto tendrán este tamaño de fuente"));
+            font_size_default_->setVisible(false);
+            // The size on the left, level with the middle of its two tick boxes,
+            // stacked on its right (in the same column as the colours' ones).
             auto* wrap = new QWidget;
-            auto* v = new QVBoxLayout(wrap);
-            v->setContentsMargins(0, 0, 0, 0);
-            v->setSpacing(6);
-            v->addWidget(font_size_);
-            v->addWidget(font_size_all_, 0, Qt::AlignLeft);
+            auto* h = new QHBoxLayout(wrap);
+            h->setContentsMargins(0, 0, 0, 0);
+            h->setSpacing(14);
+            font_size_->setFixedWidth(EDITOR_WIDTH);
+            h->addWidget(font_size_, 0, Qt::AlignVCenter);
+            auto* ticks = new QVBoxLayout;
+            ticks->setSpacing(6);
+            ticks->addWidget(font_size_all_, 0, Qt::AlignLeft);
+            ticks->addWidget(font_size_default_, 0, Qt::AlignLeft);
+            h->addLayout(ticks);
+            h->addStretch();
             return wrap;
         }
         case Fire: {
@@ -1032,9 +1091,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             auto* h = new QHBoxLayout;
             h->setSpacing(18);
 
-            fire_ = new TickBox(QStringLiteral("Fuego"),
+            fire_ = new TickBox(fireName(FireState::Fire),
                 QIcon(renderNodeIcon(iconAttributes(NodeShape::Rectangle, FireState::Fire), QSize(30, 18), dpr)));
-            ashes_ = new TickBox(QStringLiteral("Fuego con cenizas"),
+            ashes_ = new TickBox(fireName(FireState::FireWithAshes),
                 QIcon(renderNodeIcon(iconAttributes(NodeShape::Rectangle, FireState::FireWithAshes), QSize(30, 18), dpr)));
 
             // Mutually exclusive, but both may be unticked.
@@ -1172,12 +1231,10 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             return;
         }
         if (!current_.isFire() && fire != FireState::None) {
-            // Entering a fire state: remember the colours, then force white/black.
+            // Entering a fire state: remember the colours the state is about to impose on.
             pre_fire_colour_ = current_.colour;
             pre_fire_font_colour_ = current_.font_colour;
             pre_fire_font_auto_ = font_auto_;
-            current_.colour = { 255, 255, 255, 255 };
-            current_.font_colour = { 0, 0, 0, 255 };
         }
         else if (current_.isFire() && fire == FireState::None) {
             // Leaving the fire state: give the user back their colours.
@@ -1186,6 +1243,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             font_auto_ = pre_fire_font_auto_;
         }
         current_.fire = fire;
+        current_.applyFireColours(); // also when switching between the two states
         sync();
         emit attributesChanged();
     }
@@ -1257,7 +1315,10 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         font_colour_->setColour(nv::toQColor(current_.font_colour), font_auto_ && !fire);
         colour_->setEnabled(!fire);
         font_colour_->setEnabled(!fire);
-        const QString locked = QStringLiteral("Bloqueado mientras la caja sea un fuego");
+        // The colours a Capa negra or a Hogar imposes are not the project's choice.
+        colour_default_->setEnabled(!fire);
+        font_colour_default_->setEnabled(!fire);
+        const QString locked = QStringLiteral("Bloqueado mientras la caja sea capa negra u hogar");
         if (fire) {
             colour_->setToolTip(locked);
             font_colour_->setToolTip(locked);
