@@ -140,10 +140,15 @@ namespace hypergraph_logic {
 		// each with the diagrams its boxes came from.
 		//
 		// A diagram is *mixed* when one of its components also holds boxes of
-		// another diagram: a connection was added between them, or boxes of both
-		// were fused. Removing those connections unmixes it again (a fusion can
-		// only be undone). While a diagram is not mixed it can be removed from the
-		// joint or moved to another place.
+		// another diagram: a connection was added between them, boxes of both
+		// were fused, or boxes of both were made equivalent. Removing those
+		// connections and equivalences unmixes it again (a fusion can only be
+		// undone). While a diagram is not mixed it can be moved to another place.
+		//
+		// Equivalences alone do not keep a diagram in the joint: it can be
+		// removed while it is not *bound* to another one, mixed with it by
+		// connections or fusions. Its boxes then leave their chains, and the
+		// other diagrams' boxes stay equivalent among themselves.
 		//
 		// Components and regions are computed from the current structure and
 		// layout on every call (linear in the size of the graph), so they are
@@ -180,10 +185,12 @@ namespace hypergraph_logic {
 
 		// ── removeHypergraph ──────────────────────────────────────────────────────
 		//
-		// Takes a diagram that is not mixed out of the joint: all its boxes and
-		// connections go, layers left empty are closed up, and the diagram can be
-		// added again later. Throws std::invalid_argument if it was never added
-		// and std::logic_error if it is mixed.
+		// Takes a diagram that is not bound to another out of the joint: all its
+		// boxes, connections and equivalences go, layers left empty are closed
+		// up, and the diagram can be added again later. Boxes of other diagrams it
+		// shared a chain with stay equivalent among themselves, and go back up if
+		// the chain was what held them down. Throws std::invalid_argument if it
+		// was never added and std::logic_error if it is bound.
 		//
 		void removeHypergraph(const std::string& id);
 
@@ -211,10 +218,12 @@ namespace hypergraph_logic {
 		// Diagram(s) a box came from (empty for a dummy box).
 		std::set<std::string> graphsOf(const Node* node) const;
 
-		// True when the diagram was added and is not mixed (it can be removed or
-		// moved). False for a diagram that is not in the joint, and for every
-		// diagram while the joint holds boxes of unknown origin.
+		// True when the diagram was added and is not mixed (it can be moved), or
+		// not bound (isRemovable: it can be removed). False for a diagram that is
+		// not in the joint, and for every diagram while the joint holds boxes of
+		// unknown origin.
 		bool isSeparable(const std::string& id) const;
+		bool isRemovable(const std::string& id) const;
 
 		// ── getIncorporatedIds ────────────────────────────────────────────────────
 		//
@@ -305,9 +314,16 @@ namespace hypergraph_logic {
 
 		void pruneOrigins();
 
+		// Components as getComponents, joined only by connections and fusions
+		// unless through_equivalences.
+		std::vector<Component> componentsOf(bool through_equivalences) const;
+
 		// Boxes (dummies included) of the components that belong to diagram id
-		// alone. Throws as removeHypergraph / moveHypergraph document.
-		std::unordered_set<Node*> separableNodesOf(const std::string& id) const;
+		// alone, joined through equivalences (what moveHypergraph moves) or not
+		// (what removeHypergraph removes). Throws as they document.
+		std::unordered_set<Node*> ownNodesOf(const std::string& id, bool through_equivalences) const;
+		std::unordered_set<Node*> separableNodesOf(const std::string& id) const { return ownNodesOf(id, true); }
+		bool ownsItsComponents(const std::string& id, bool through_equivalences) const;
 
 		// Before a block (or diagram) goes: forgets its boxes' origins, and stops
 		// counting as added every diagram that had boxes in it and has none left.

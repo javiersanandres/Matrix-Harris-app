@@ -591,6 +591,45 @@ namespace app_logic {
 			commitSnapshot(std::move(saved));
 		}
 
+		// ── Equivalences ──────────────────────────────────────────────────────────
+		//
+		// addEquivalence / removeEquivalence: clone the graph, attempt the change
+		// + computeLayout(), and commit the snapshot only if both succeed (see
+		// Hypergraph's "Equivalence management").
+		//
+		// setEquivalenceContinuous: the style of the line between neighbours a
+		// and b. Purely cosmetic, so the layout is untouched; but it may restyle
+		// other lines of the chain too (it changes the chain's certainty groups),
+		// so the whole chain's groups are recorded. Local change: undone without
+		// copying the graph. Nothing is recorded if the line already has that style.
+		void addEquivalence(const NodePtr& a, const NodePtr& b, bool continuous = true) {
+			auto saved = derived().takeSnapshot();
+			std::set<int> mip_layers;
+			derived().graph().addEquivalence(a, b, continuous, &mip_layers);
+			derived().graph().computeLayout(mip_layers);
+			commitSnapshot(std::move(saved));
+		}
+
+		void removeEquivalence(const NodePtr& a, const NodePtr& b) {
+			auto saved = derived().takeSnapshot();
+			std::set<int> mip_layers;
+			derived().graph().removeEquivalence(a, b, &mip_layers);
+			derived().graph().computeLayout(mip_layers);
+			commitSnapshot(std::move(saved));
+		}
+
+		void setEquivalenceContinuous(const NodePtr& a, const NodePtr& b, bool continuous) {
+			auto& graph = derived().graph();
+			if (graph.isEquivalenceContinuous(a, b) == continuous) return; // throws if not neighbours
+			const NodeLocator at = locate(graph, a);
+			const std::vector<int> before = graph.getCertaintyGroups(a);
+			graph.setEquivalenceContinuous(a, b, continuous);
+			const std::vector<int> after = graph.getCertaintyGroups(a);
+			commitLocal({
+				[at, before](GraphicalHypergraph& g) { g.setCertaintyGroups(resolve(g, at), before); },
+				[at, after](GraphicalHypergraph& g) { g.setCertaintyGroups(resolve(g, at), after); } });
+		}
+
 		// ── Blocks: moving and removing one ───────────────────────────────────────
 		//
 		// The block (connected component) that contains box, moved sideways to

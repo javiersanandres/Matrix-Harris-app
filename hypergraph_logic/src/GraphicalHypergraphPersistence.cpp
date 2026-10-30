@@ -189,8 +189,11 @@ namespace hypergraph_logic {
 
 		// 6. Equivalence chains.
 		for (const auto& chain : equivalences_) {
-			EquivalenceChain new_chain{ {}, chain.continuous };
-			for (const auto& m : chain.members) new_chain.members.push_back(node_map.at(m.get()));
+			EquivalenceChain new_chain;
+			for (const auto& m : chain.members) {
+				new_chain.members.push_back(node_map.at(m.get()));
+				new_chain.group[new_chain.members.back().get()] = chain.group.at(m.get());
+			}
 			copy.equivalences_.push_back(std::move(new_chain));
 		}
 
@@ -353,6 +356,19 @@ namespace hypergraph_logic {
 			layers_arr.push_back(std::move(layer_entry));
 		}
 		j["layers"] = std::move(layers_arr);
+
+		// ── 3b. Equivalence chains: members left to right, and their groups ──────
+		// (see getCertaintyGroups). Left out when there are none.
+		if (!equivalences_.empty()) {
+			json chains = json::array();
+			for (const auto& chain : equivalences_) {
+				json members = json::array();
+				for (const auto& m : chain.members) members.push_back(node_id.at(m.get()));
+				chains.push_back({ {"members", std::move(members)},
+					{"groups", getCertaintyGroups(chain.members.front())} });
+			}
+			j["equivalences"] = std::move(chains);
+		}
 
 		// ── 4. Layout data ────────────────────────────────────────────────────────
 		json layout;
@@ -550,6 +566,20 @@ namespace hypergraph_logic {
 				ld.nodes.push_back(node_by_id.at(nid));
 			for (int eid : layer_entry.at("outgoing_edges"))
 				ld.outgoing_edges.push_back(edge_by_id.at(eid));
+		}
+
+		// ── Pass 2c': equivalence chains (files saved before they existed have none) ─
+		if (j.contains("equivalences")) {
+			for (const auto& entry : j.at("equivalences")) {
+				EquivalenceChain chain;
+				for (int nid : entry.at("members")) chain.members.push_back(node_by_id.at(nid));
+				const auto& groups = entry.at("groups");
+				if (chain.members.size() < 2 || groups.size() != chain.members.size())
+					throw std::runtime_error("GraphicalHypergraph::fromJSON: malformed equivalence chain");
+				for (size_t k = 0; k < chain.members.size(); ++k)
+					chain.group[chain.members[k].get()] = groups[k].get<int>();
+				g.equivalences_.push_back(std::move(chain));
+			}
 		}
 
 		// ── Pass 2d: reconstruct layout maps ──────────────────────────────────────

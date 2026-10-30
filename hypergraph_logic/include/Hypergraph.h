@@ -40,14 +40,19 @@ namespace hypergraph_logic {
 	//
 	// A set of real nodes the user marked as equivalent. They share a layer and sit next
 	// to each other in it, in this order from left to right, with nothing in between but
-	// dummy nodes. Each two neighbours are joined by a horizontal line: continuous[i] is
-	// the style of the one between members[i] and members[i + 1]. A style belongs to the
-	// gap, not to the nodes: reordering the members leaves every gap's style as it was.
+	// dummy nodes. Each two neighbours are joined by a horizontal line.
+	//
+	// Every two members are equivalent, either for certain or hypothetically. Being certainly
+	// equivalent is itself transitive, so the members fall into certainty groups: group gives
+	// every member the number of its group, and two members are certainly equivalent exactly
+	// when their numbers match. The line between two neighbours is continuous when they are,
+	// dashed otherwise. The groups belong to the nodes, not to their places: reordering the
+	// members may change which lines are dashed. The numbers only matter for being equal.
 	// A chain always has at least two members.
 	// ============================================================================
 	struct EquivalenceChain {
 		std::vector<NodePtr> members;
-		std::vector<bool> continuous;   // members.size() - 1 entries
+		std::unordered_map<const Node*, int> group;   // certainty group of every member
 	};
 
 	// ============================================================================
@@ -511,19 +516,49 @@ namespace hypergraph_logic {
 		// below are then sifted around it (its subgraph following it), with the merged chain's
 		// layer left as placed.
 		//
+		// Both chains keep their certainty groups. A continuous line (continuous) makes a and b
+		// certainly equivalent, which joins their two groups into one; a dashed one keeps every
+		// member of one chain uncertain with every member of the other.
+		//
 		void addEquivalence(const NodePtr& a, const NodePtr& b, bool continuous = true, std::set<int>* out_altered_layers = nullptr);
 
 		// ── removeEquivalence ────────────────────────────────────────────────────────────────────
 		//
 		// Removes the line between a and b, which must be neighbours in a chain, splitting it in
-		// two (a part with a single node is no chain any more). Every part then takes the layer
-		// its own members ask for. Throws std::logic_error if they are not neighbours.
+		// two (a part with a single node is no chain any more), each keeping its members'
+		// certainty groups. Every part then takes the layer its own members ask for. Throws
+		// std::logic_error if they are not neighbours.
 		//
 		void removeEquivalence(const NodePtr& a, const NodePtr& b, std::set<int>* out_altered_layers = nullptr);
 
-		// The style of the line between neighbours a and b (throw std::logic_error otherwise).
+		// ── isEquivalenceContinuous / setEquivalenceContinuous ───────────────────────────────────
+		//
+		// The style of the line between neighbours a and b (throw std::logic_error otherwise):
+		// continuous when they are certainly equivalent (see EquivalenceChain).
+		//
+		// Making it continuous joins a's certainty group and b's into one, which may turn other
+		// lines continuous too (with A and C certain, and B uncertain with both, in A B C, a
+		// continuous B-C makes A-B continuous as well). Making it dashed splits their group at
+		// the line: its members on a's side of it stay with a, those on b's side go with b.
+		// Only this line changes then. Nothing happens if the line already has that style.
+		//
 		bool isEquivalenceContinuous(const NodePtr& a, const NodePtr& b) const;
 		void setEquivalenceContinuous(const NodePtr& a, const NodePtr& b, bool continuous);
+
+		// Whether a and b, members of the same chain (throw std::logic_error otherwise), are
+		// certainly equivalent: in the same certainty group. A node is with itself.
+		bool isEquivalenceCertain(const NodePtr& a, const NodePtr& b) const;
+
+		// ── getCertaintyGroups / setCertaintyGroups ──────────────────────────────────────────────
+		//
+		// The certainty groups of member's chain as one number per member, left to right: the
+		// first member's group is 0, and every group met for the first time takes the next one.
+		// setCertaintyGroups puts groups back in that form (to undo a change of style, or read
+		// them from a file); any numbers do, only which ones are equal matters. Both throw
+		// std::logic_error if member is in no chain; set throws std::invalid_argument if there
+		// is not one number per member.
+		std::vector<int> getCertaintyGroups(const NodePtr& member) const;
+		void setCertaintyGroups(const NodePtr& member, const std::vector<int>& groups);
 
 		// ============================================================================
 		// Operation feasibility queries
@@ -610,8 +645,8 @@ namespace hypergraph_logic {
 
 		// ── leaveEquivalence ─────────────────────────────────────────────────────────────────────
 		//
-		// Takes node out of its chain, closing the gap it leaves: the line that replaces its two
-		// is discontinuous only if both of them were. A chain left with a single node is dropped. Returns
+		// Takes node out of its chain, closing the gap it leaves; the others keep their certainty
+		// groups, which give the new line its style. A chain left with a single node is dropped. Returns
 		// the other members (empty if node had no chain).
 		//
 		std::vector<NodePtr> leaveEquivalence(const NodePtr& node);
@@ -621,8 +656,8 @@ namespace hypergraph_logic {
 		// Used by fuseNodes, before absorbed leaves the graph: the fused node (survivor) belongs to
 		// both nodes' chains. Within a single chain, absorbed just leaves it (leaveEquivalence).
 		// Otherwise the members of both chains form one, ordered by horizontalPosition (the fused
-		// node at survivor's); two members that were neighbours and still are keep their line's
-		// style, and every new line is continuous.
+		// node at survivor's), and keep their certainty groups. The fused node is both nodes at
+		// once, so it joins their two groups into one (in a single chain too).
 		//
 		void fuseEquivalences(const NodePtr& survivor, const NodePtr& absorbed);
 
@@ -653,7 +688,7 @@ namespace hypergraph_logic {
 		std::vector<EquivalenceChain> equivalencesToSift() const;
 
 		// After a minimization that may reorder a chain's members: every chain's members in
-		// their layer's order again (the lines' styles stay with the gaps).
+		// their layer's order again (the certainty groups go with the nodes).
 		void syncEquivalenceOrder();
 
 		// ============================================================================

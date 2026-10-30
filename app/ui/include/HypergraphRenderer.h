@@ -20,6 +20,7 @@
 namespace ui {
     class NodeItem;
     class HyperedgeItem;
+    class EquivalenceItem;
 }
 
 namespace ui {
@@ -109,6 +110,10 @@ namespace ui {
         // "Discontinuous parts" below).
         using EdgeItemFactory = std::function<HyperedgeItem* (Hyperedge*, const QPainterPath& solid,
             const QPainterPath& dashed)>;
+        // The equivalence factory gets the two neighbours a line joins (left
+        // first), its drawing and its style (see "Equivalence lines" below).
+        using EquivalenceItemFactory = std::function<EquivalenceItem* (Node* left, Node* right,
+            const QPainterPath& line, bool continuous)>;
 
         // Pen for drawing (part of) a connection: solid, or dashed when
         // continuous is false. Dashes keep the same length on screen whatever
@@ -128,6 +133,17 @@ namespace ui {
         // in a one-to-one connection that is the whole line. A connection that
         // is not continuous as a whole is drawn discontinuous entirely.
 
+        // ── Equivalence lines ─────────────────────────────────────────────────────
+        //
+        // Every two neighbours of an equivalence chain are joined by a horizontal
+        // line at their layer's y (the middle height of both boxes), from the
+        // side of one to the side of the other: continuous when they are
+        // certainly equivalent, dashed otherwise. Only dummy nodes can stand
+        // between them, and the line hops over each one as a bar hops over a
+        // vertical (HOP_RADIUS, merged into one arch, ARCH_HEIGHT, when too close
+        // together). A connection that turns at the dummy's layer runs along the
+        // line there for a while: the hop covers that whole stretch.
+
         // ── Static overload ───────────────────────────────────────────────────────
         //
         // Clears the scene and rebuilds it using raw Qt items. node_items is
@@ -136,19 +152,22 @@ namespace ui {
         // QGraphicsPathItem* per original hyperedge.
         //
         // Intended for non-interactive rendering (export, static thumbnails that
-        // do not share a scene with the editing view).
+        // do not share a scene with the editing view). Equivalence lines are
+        // drawn too, and listed in equivalence_items when it is given.
         //
         static void render(
             const GraphicalHypergraph& graph,
             QGraphicsScene* scene,
             std::unordered_map<Node*, QGraphicsPathItem*>& node_items,
-            std::unordered_map<Hyperedge*, QGraphicsPathItem*>& edge_items);
+            std::unordered_map<Hyperedge*, QGraphicsPathItem*>& edge_items,
+            std::vector<QGraphicsPathItem*>* equivalence_items = nullptr);
 
         // ── Factory overload ──────────────────────────────────────────────────────
         //
         // Clears the scene and rebuilds it using items produced by the supplied
         // factory lambdas. node_items is populated with NodeItem* per real node;
-        // edge_items with HyperedgeItem* per original hyperedge.
+        // edge_items with HyperedgeItem* per original hyperedge; equivalence_items
+        // with one EquivalenceItem* per line between equivalent neighbours.
         //
         // The factories receive the raw Node*/Hyperedge* pointer and the computed
         // geometry (QRectF for nodes, QPainterPath for edges) and are responsible
@@ -163,8 +182,10 @@ namespace ui {
             QGraphicsScene* scene,
             std::unordered_map<Node*, NodeItem*>& node_items,
             std::unordered_map<Hyperedge*, HyperedgeItem*>& edge_items,
+            std::vector<EquivalenceItem*>& equivalence_items,
             const NodeItemFactory& make_node,
-            const EdgeItemFactory& make_edge);
+            const EdgeItemFactory& make_edge,
+            const EquivalenceItemFactory& make_equivalence);
 
         // ── nodeShapePath ─────────────────────────────────────────────────────────
         //
@@ -217,11 +238,14 @@ namespace ui {
         // place_node(Node*, QRectF) — called once per real node box.
         // commit_edge(Hyperedge*, solid, dashed) — called once per original edge
         //   after all its segments have been processed.
+        // place_equivalence(left, right, line, continuous) — called once per line
+        //   between equivalent neighbours (see "Equivalence lines").
         //
         static void coreSweep(
             const GraphicalHypergraph& graph,
             const std::function<void(Node*, const QRectF&)>& place_node,
-            const std::function<void(Hyperedge*, QPainterPath& solid, QPainterPath& dashed)>& commit_edge);
+            const std::function<void(Hyperedge*, QPainterPath& solid, QPainterPath& dashed)>& commit_edge,
+            const std::function<void(Node*, Node*, const QPainterPath&, bool)>& place_equivalence);
 
         static constexpr double HOP_RADIUS = 5.0;
         static constexpr double ARCH_HEIGHT = 10.0;

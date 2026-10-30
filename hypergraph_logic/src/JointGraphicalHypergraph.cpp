@@ -101,8 +101,12 @@ namespace hypergraph_logic {
 	}
 
 	std::vector<JointGraphicalHypergraph::Component> JointGraphicalHypergraph::getComponents() const {
+		return componentsOf(true);
+	}
+
+	std::vector<JointGraphicalHypergraph::Component> JointGraphicalHypergraph::componentsOf(bool through_equivalences) const {
 		std::vector<Component> components;
-		for (const auto& block : getBlocks()) {
+		for (const auto& block : blocksExcluding({}, through_equivalences)) {
 			Component c;
 			c.nodes = block.nodes;
 			c.left = block.left;
@@ -115,8 +119,16 @@ namespace hypergraph_logic {
 	}
 
 	bool JointGraphicalHypergraph::isSeparable(const std::string& id) const {
+		return ownsItsComponents(id, true);
+	}
+
+	bool JointGraphicalHypergraph::isRemovable(const std::string& id) const {
+		return ownsItsComponents(id, false);
+	}
+
+	bool JointGraphicalHypergraph::ownsItsComponents(const std::string& id, bool through_equivalences) const {
 		if (!incorporated_ids_.count(id)) return false;
-		for (const auto& c : getComponents()) {
+		for (const auto& c : componentsOf(through_equivalences)) {
 			// Boxes of unknown origin (older files) could be this diagram's.
 			if (c.graph_ids.count(std::string())) return false;
 			if (c.graph_ids.count(id) && c.graph_ids.size() > 1) return false;
@@ -124,11 +136,11 @@ namespace hypergraph_logic {
 		return true;
 	}
 
-	std::unordered_set<Node*> JointGraphicalHypergraph::separableNodesOf(const std::string& id) const {
+	std::unordered_set<Node*> JointGraphicalHypergraph::ownNodesOf(const std::string& id, bool through_equivalences) const {
 		if (!incorporated_ids_.count(id))
 			throw std::invalid_argument("Ese esquema no forma parte del esquema conjunto.");
 		std::unordered_set<Node*> nodes;
-		for (const auto& c : getComponents()) {
+		for (const auto& c : componentsOf(through_equivalences)) {
 			if (c.graph_ids.count(std::string()))
 				throw std::logic_error("Este esquema conjunto se guardó con una versión anterior y no se "
 				                       "sabe a qué esquema pertenece cada caja.");
@@ -136,8 +148,11 @@ namespace hypergraph_logic {
 			if (c.graph_ids.size() > 1) {
 				const std::string name = getIncorporatedName(id);
 				throw std::logic_error("El esquema" + (name.empty() ? std::string() : " «" + name + "»")
-					+ " está unido a otros esquemas del conjunto (por conexiones o cajas fusionadas). "
-					  "Quita antes esas conexiones.");
+					+ (through_equivalences
+						? " está unido a otros esquemas del conjunto (por conexiones, cajas fusionadas o "
+						  "equivalencias). Quita antes esas conexiones y equivalencias."
+						: " está unido a otros esquemas del conjunto (por conexiones o cajas fusionadas). "
+						  "Quita antes esas conexiones."));
 			}
 			nodes.insert(c.nodes.begin(), c.nodes.end());
 		}
@@ -201,7 +216,7 @@ namespace hypergraph_logic {
 	// removeHypergraph
 	// ============================================================================
 	void JointGraphicalHypergraph::removeHypergraph(const std::string& id) {
-		const std::unordered_set<Node*> doomed = separableNodesOf(id);
+		const std::unordered_set<Node*> doomed = ownNodesOf(id, false);
 		// Erased explicitly too: a diagram with no box at all is not caught by removeGroup.
 		incorporated_ids_.erase(id);
 		incorporated_names_.erase(id);

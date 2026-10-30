@@ -223,14 +223,18 @@ namespace ui {
         if (piece_move_) endPieceMove();
         node_items_.clear();
         edge_items_.clear();
+        equivalence_items_.clear();
 
         HypergraphRenderer::render(
-            currentGraph(), this, node_items_, edge_items_,
+            currentGraph(), this, node_items_, edge_items_, equivalence_items_,
             [](Node* node, const QRectF& rect) {
                 return new NodeItem(node, rect);
             },
             [](Hyperedge* edge, const QPainterPath& solid, const QPainterPath& dashed) {
                 return new HyperedgeItem(edge, solid, dashed);
+            },
+            [](Node* left, Node* right, const QPainterPath& line, bool continuous) {
+                return new EquivalenceItem(left, right, line, continuous);
             });
 
         // Normalize: set sceneRect to the actual items bounding box,
@@ -327,11 +331,17 @@ namespace ui {
             item->setSelectionRole(touches_origin ? HyperedgeItem::SelectionRole::None
                                                   : HyperedgeItem::SelectionRole::Dimmed);
         }
+        for (EquivalenceItem* item : equivalence_items_) {
+            const bool touches_origin = pending_node_ && item->touches(pending_node_);
+            item->setSelectionRole(touches_origin ? EquivalenceItem::SelectionRole::None
+                                                  : EquivalenceItem::SelectionRole::Dimmed);
+        }
     }
 
     void DiagramScene::clearSelectionMarks() {
         for (auto& [raw, item] : node_items_) item->setSelectionMark(NodeItem::SelectionMark::None);
         for (auto& [raw, item] : edge_items_) item->setSelectionRole(HyperedgeItem::SelectionRole::None);
+        for (EquivalenceItem* item : equivalence_items_) item->setSelectionRole(EquivalenceItem::SelectionRole::None);
     }
 
     QString DiagramScene::hintFor(InteractionState state) const {
@@ -1146,14 +1156,17 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             glides->push_back({ item, offset });
             changed.insert(node);
         }
-        // Connections of what moved are redrawn in their new shape: they fade in.
-        auto redrawn = std::make_shared<std::vector<HyperedgeItem*>>();
+        // Connections and equivalence lines of what moved are redrawn in their
+        // new shape: they fade in.
+        auto redrawn = std::make_shared<std::vector<QGraphicsItem*>>();
         for (const auto& [edge, item] : edge_items_) {
             bool touches = false;
             for (const auto& s : edge->getSources()) touches = touches || changed.count(s.get());
             for (const auto& t : edge->getTargets()) touches = touches || changed.count(t.get());
             if (touches) redrawn->push_back(item);
         }
+        for (EquivalenceItem* item : equivalence_items_)
+            if (changed.count(item->left()) || changed.count(item->right())) redrawn->push_back(item);
         if (glides->empty() && arrivals->empty()) return;
 
         auto apply = [glides, arrivals, redrawn](double raw) {
@@ -1165,7 +1178,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             }
             // The connections come back once the boxes are nearly in place.
             const double edges = std::clamp((raw - 0.35) / 0.65, 0.0, 1.0);
-            for (HyperedgeItem* item : *redrawn) item->setOpacity(edges);
+            for (QGraphicsItem* item : *redrawn) item->setOpacity(edges);
         };
         for (NodeItem* item : *arrivals) item->setTransformOriginPoint(item->rect().center());
         apply(0.0);
@@ -1330,6 +1343,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             for (const auto& t : edge->getTargets()) touches = touches || t.get() == item->node();
             if (touches) drag.edges.push_back(edge_item);
         }
+        for (EquivalenceItem* line : equivalence_items_)
+            if (line->touches(item->node())) drag.edges.push_back(line);
         box_drag_ = drag;
         createGuides();
 
@@ -1355,7 +1370,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             item->setScale(1.0 + 0.06 * t);
             shadow->setBlurRadius(30.0 * t);
             shadow->setOffset(0, 12.0 * t);
-            for (HyperedgeItem* e : edges) e->setOpacity(1.0 - 0.75 * t);
+            for (QGraphicsItem* e : edges) e->setOpacity(1.0 - 0.75 * t);
         });
         lift_->start(QAbstractAnimation::DeleteWhenStopped);
     }
@@ -1696,6 +1711,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         for (const auto& [edge, item] : edge_items_)
             if (!edge->getSources().empty() && doomed.count(edge->getSources().front().get()))
                 items->push_back(item);
+        for (EquivalenceItem* item : equivalence_items_)
+            if (doomed.count(item->left()) || doomed.count(item->right())) items->push_back(item);
 
         stopAnimations();
         fade_ = new QVariantAnimation(this);
@@ -1765,6 +1782,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         for (const auto& [edge, item] : edge_items_) {
             if (!edge->getSources().empty() && move.nodes.count(edge->getSources().front().get()))
                 move.piece->addToGroup(item);
+            else others.push_back(item);
+        }
+        for (EquivalenceItem* item : equivalence_items_) {
+            if (move.nodes.count(item->left())) move.piece->addToGroup(item);
             else others.push_back(item);
         }
         // A grip at its top middle: that is where the mouse holds the piece, so

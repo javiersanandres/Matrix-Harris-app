@@ -524,8 +524,10 @@ namespace hypergraph_logic {
 
 		// ── Blocks: helpers (see "Blocks") ────────────────────────────────────────
 
-		// Blocks of the current graph, ignoring some boxes.
-		std::vector<Block> blocksExcluding(const std::unordered_set<Node*>& excluded) const;
+		// Blocks of the current graph, ignoring some boxes. Without through_equivalences,
+		// only connections join boxes: equivalent boxes may end up in different blocks.
+		std::vector<Block> blocksExcluding(const std::unordered_set<Node*>& excluded,
+			bool through_equivalences = true) const;
 		static std::vector<std::pair<double, double>> mergeSpans(std::vector<std::pair<double, double>> spans);
 
 		// Boxes of the block that contains box (throws if it is not in the graph).
@@ -538,8 +540,10 @@ namespace hypergraph_logic {
 		void moveGroup(const std::unordered_set<Node*>& group,
 			std::optional<double> click_x, std::optional<int> top_layer);
 
-		// Takes a closed group of boxes out of the graph, with every hyperedge
-		// touching it, then closes up empty layers and lays the graph out again.
+		// Takes a group of boxes out of the graph, with every hyperedge touching
+		// it, then closes up empty layers and lays the graph out again. The group
+		// is closed but for equivalences: the boxes left in a chain it shared stay
+		// equivalent among themselves, and go back up if the group held them down.
 		void removeGroup(const std::unordered_set<Node*>& doomed);
 
 		// Called by removeGroup right before the boxes go (they are still alive

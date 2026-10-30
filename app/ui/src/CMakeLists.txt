@@ -18,6 +18,7 @@ target_sources(ui_lib
         HypergraphRenderer.cpp
         NodeItem.cpp
         HyperedgeItem.cpp
+        EquivalenceItem.cpp
         DiagramScene.cpp
         DiagramView.cpp
         DiagramTabWidget.cpp
@@ -49,6 +50,7 @@ target_sources(ui_lib
             ../include/HypergraphRenderer.h
             ../include/NodeItem.h
             ../include/HyperedgeItem.h
+            ../include/EquivalenceItem.h
             ../include/DiagramScene.h
             ../include/DiagramView.h
             ../include/DiagramTabWidget.h

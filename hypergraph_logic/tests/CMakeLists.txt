@@ -39,7 +39,8 @@ target_link_libraries(hypergraph_logic_tests
         highs::highs  # test_highs_outcome.cpp checks the shared HiGHS outcome rule directly
 )
 
-target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST GS_TEST JGH_TEST)
+target_compile_definitions(hypergraph_logic_tests PRIVATE BK_TEST GS_TEST JGH_TEST
+    TEST_DATA_DIR="${CMAKE_CURRENT_SOURCE_DIR}/data")
 
 # Discover and register all tests
 include(GoogleTest)

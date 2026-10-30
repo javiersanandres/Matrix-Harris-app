@@ -6,6 +6,7 @@ add_executable(app_logic_tests
     test_editors.cpp
     test_project.cpp
     test_uncertain_connections.cpp
+    test_equivalence_lines.cpp
     test_history.cpp
     test_gurobi_notice.cpp
     test_first_run.cpp

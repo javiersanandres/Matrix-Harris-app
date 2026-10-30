@@ -252,7 +252,7 @@ namespace sifting_internal {
 		return total;
 	}
 
-	void GlobalSifter::gatherChains() {
+	void GlobalSifter::gatherChains(bool keep_member_order) {
 		if (chains_.empty()) return;
 		orderLayersByBlockOrder();
 
@@ -269,10 +269,23 @@ namespace sifting_internal {
 				auto [it, fresh] = spans.try_emplace(c, i, i);
 				if (!fresh) it->second.second = i;
 			}
+			// Where each member stands in its chain's stored order.
+			auto storedIndex = [&](int i) {
+				const auto& blocks = chains_[chainAt(i)].blocks;
+				return static_cast<int>(std::find(blocks.begin(), blocks.end(), S_.g1_nodes[ids[i]].block_id) - blocks.begin());
+			};
 			bool broken = false;
 			for (const auto& [c, span] : spans)
 				for (int i = span.first + 1; i < span.second && !broken; ++i)
 					broken = isReal(ids[i]) && chainAt(i) != c;
+			if (keep_member_order && !broken) {
+				std::map<int, int> last_index;  // chain -> stored index of its last member seen
+				for (int i = 0; i < static_cast<int>(ids.size()) && !broken; ++i) {
+					if (chainAt(i) < 0) continue;
+					auto [it, fresh] = last_index.try_emplace(chainAt(i), storedIndex(i));
+					if (!fresh) { broken = storedIndex(i) < it->second; it->second = storedIndex(i); }
+				}
+			}
 			if (!broken) continue;
 
 			// As Hypergraph::keepEquivalencesTogether: every chain is one unit at the middle of
@@ -309,8 +322,13 @@ namespace sifting_internal {
 			}
 			for (const auto& [c, positions] : members) {
 				auto& nodes = units[unit_of_chain[c]].nodes;
+				// The members in their stored order when it is kept; the dummies of each gap
+				// stay in that gap whichever members end up around it.
+				std::vector<int> in_order = positions;
+				if (keep_member_order)
+					std::sort(in_order.begin(), in_order.end(), [&](int a, int b) { return storedIndex(a) < storedIndex(b); });
 				for (size_t k = 0; k < positions.size(); ++k) {
-					nodes.push_back(positions[k]);
+					nodes.push_back(in_order[k]);
 					if (k + 1 < positions.size())
 						nodes.insert(nodes.end(), after[positions[k]].begin(), after[positions[k]].end());
 				}
@@ -507,9 +525,10 @@ namespace sifting_internal {
 			upper_pos = std::move(lower_pos);
 		}
 
-		// 2. B from the rows.
+		// 2. B from the rows. The chains keep the order they have: only the global
+		//    minimization reorders their members, and it does so on purpose afterwards.
 		buildBlockListFromRows();
-		gatherChains();
+		gatherChains(true);
 	}
 
 	// ── buildBlockListFromRows ────────────────────────────────────────────────────
@@ -658,9 +677,10 @@ namespace sifting_internal {
 			if (!changed) break;
 		}
 
-		// Rows sorted on their own may disagree about a chain; the merge settles it.
+		// Rows sorted on their own may disagree about a chain; the merge settles it. The
+		// barycenter has just sorted the members on purpose: their row order stays.
 		buildBlockListFromRows();
-		gatherChains();
+		gatherChains(false);
 		if (countCrossings() > original_crossings) {
 			B_ = original;
 			orderLayersByBlockOrder();

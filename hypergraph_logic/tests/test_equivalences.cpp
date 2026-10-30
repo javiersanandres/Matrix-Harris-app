@@ -4,7 +4,9 @@
 #include "ILPCancellationToken.h"
 #include <gtest/gtest.h>
 
+#include <fstream>
 #include <random>
+#include <set>
 #include <stdexcept>
 #include <string>
 #include <vector>
@@ -49,6 +51,12 @@ namespace hypergraph_logic {
             return names;
         }
 
+        NodePtr named(const Graph& g, const std::string& name) {
+            for (const auto& n : g.getAllNodes())
+                if (!n->isDummy() && n->getName() == name) return n;
+            return nullptr;
+        }
+
         std::vector<std::string> chainOf(const Graph& g, const NodePtr& n) {
             std::vector<std::string> names;
             if (const EquivalenceChain* c = g.getEquivalenceChain(n.get()))
@@ -60,7 +68,8 @@ namespace hypergraph_logic {
         void expectChainsTogether(const Graph& g) {
             for (const auto& chain : g.getEquivalences()) {
                 ASSERT_GE(chain.members.size(), 2u);
-                ASSERT_EQ(chain.continuous.size(), chain.members.size() - 1);
+                ASSERT_EQ(chain.group.size(), chain.members.size());
+                for (const auto& m : chain.members) ASSERT_TRUE(chain.group.count(m.get())) << m->getName();
                 const int layer = chain.members.front()->getLayer();
                 const auto nodes = g.getNodesAt(layer);
                 int previous = -1;
@@ -305,7 +314,7 @@ namespace hypergraph_logic {
 
             g.removeNode(b);
             EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "a", "c" }));
-            EXPECT_TRUE(g.isEquivalenceContinuous(a, c)); // only one of the two was dashed
+            EXPECT_FALSE(g.isEquivalenceContinuous(a, c)); // a was uncertain with b, and so with c
             expectChainsTogether(g);
 
             g.setEquivalenceContinuous(a, c, false);
@@ -313,7 +322,7 @@ namespace hypergraph_logic {
             EXPECT_TRUE(g.getEquivalences().empty());
         }
 
-        TEST(Equivalences, TheGapIsDashedOnlyIfBothLinesWere) {
+        TEST(Equivalences, TheGapIsDashedWhenBothLinesWere) {
             Graph g("dashed");
             auto a = boxAtEnd(g, "a", 0);
             auto b = boxAtEnd(g, "b", 0);
@@ -324,6 +333,191 @@ namespace hypergraph_logic {
 
             g.removeNode(b);
             EXPECT_FALSE(g.isEquivalenceContinuous(a, c));
+        }
+
+        // ── Certainty groups ──────────────────────────────────────────────────
+
+        TEST(Equivalences, DashingALineSplitsItsGroupWhereTheLineIs) {
+            Graph g("split");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto c = boxAtEnd(g, "c", 0);
+            auto d = boxAtEnd(g, "d", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b);
+            g.addEquivalence(b, c);
+            g.addEquivalence(c, d);
+            EXPECT_TRUE(g.isEquivalenceCertain(a, d));
+
+            g.setEquivalenceContinuous(c, b, false);
+            EXPECT_TRUE(g.isEquivalenceContinuous(a, b));
+            EXPECT_FALSE(g.isEquivalenceContinuous(b, c));
+            EXPECT_TRUE(g.isEquivalenceContinuous(c, d));
+            // Every pair across the line is uncertain, the ends included.
+            EXPECT_FALSE(g.isEquivalenceCertain(a, c));
+            EXPECT_FALSE(g.isEquivalenceCertain(b, d));
+            EXPECT_FALSE(g.isEquivalenceCertain(a, d));
+            EXPECT_TRUE(g.isEquivalenceCertain(a, a));
+
+            // And back: the two groups are one again.
+            g.setEquivalenceContinuous(b, c, true);
+            EXPECT_TRUE(g.isEquivalenceCertain(a, d));
+        }
+
+        TEST(Equivalences, MakingALineContinuousJoinsBothGroupsWholly) {
+            Graph g("join");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto c = boxAtEnd(g, "c", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b, false);
+            g.addEquivalence(b, c);
+            g.computeLayout();
+            g.relocateNodeInLayer(a, (g.getX(b) + g.getX(c)) / 2.0);
+            ASSERT_EQ(chainOf(g, a), (std::vector<std::string>{ "b", "a", "c" }));
+
+            // a joins the group of b and c, so the line to b turns continuous too.
+            g.setEquivalenceContinuous(a, c, true);
+            EXPECT_TRUE(g.isEquivalenceContinuous(b, a));
+            EXPECT_TRUE(g.isEquivalenceContinuous(a, c));
+        }
+
+        TEST(Equivalences, AddingALineKeepsBothChainsGroups) {
+            Graph g("add");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto c = boxAtEnd(g, "c", 0);
+            auto d = boxAtEnd(g, "d", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b, false);
+            g.addEquivalence(c, d);
+
+            g.addEquivalence(b, c);
+            EXPECT_TRUE(g.isEquivalenceCertain(b, d));
+            EXPECT_FALSE(g.isEquivalenceCertain(a, c));
+            EXPECT_FALSE(g.isEquivalenceCertain(a, d));
+
+            g.removeEquivalence(b, c);
+            g.addEquivalence(b, c, false);
+            EXPECT_FALSE(g.isEquivalenceCertain(b, c));
+            EXPECT_FALSE(g.isEquivalenceCertain(b, d));
+            EXPECT_TRUE(g.isEquivalenceCertain(c, d));
+        }
+
+        TEST(Equivalences, FusingTwoMembersMakesThemCertainlyEquivalent) {
+            Graph g("fuse certain");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto c = boxAtEnd(g, "c", 0);
+            auto d = boxAtEnd(g, "d", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b);
+            g.addEquivalence(b, c, false);
+            g.addEquivalence(c, d);
+            g.computeLayout();
+
+            g.fuseNodes(a, d, NodeAttributes("ad"));
+            ASSERT_EQ(chainOf(g, a), (std::vector<std::string>{ "ad", "b", "c" }));
+            EXPECT_TRUE(g.isEquivalenceContinuous(b, c));
+            expectChainsTogether(g);
+        }
+
+        TEST(Equivalences, CertaintyGroupsAreNumberedInOrderAndCanBePutBack) {
+            Graph g("numbers");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto c = boxAtEnd(g, "c", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b, false);
+            g.addEquivalence(b, c);
+            EXPECT_EQ(g.getCertaintyGroups(c), (std::vector<int>{ 0, 1, 1 }));
+
+            g.setCertaintyGroups(a, { 7, 3, 7 });
+            EXPECT_EQ(g.getCertaintyGroups(a), (std::vector<int>{ 0, 1, 0 }));
+            EXPECT_TRUE(g.isEquivalenceCertain(a, c));
+            EXPECT_FALSE(g.isEquivalenceContinuous(a, b));
+            EXPECT_THROW(g.setCertaintyGroups(a, { 0, 0 }), std::invalid_argument);
+            auto x = boxAtEnd(g, "x", 0);
+            EXPECT_THROW(g.getCertaintyGroups(x), std::logic_error);
+        }
+
+        // ── Saved in the file ─────────────────────────────────────────────────
+
+        TEST(Equivalences, AFileKeepsTheChainsAndTheirGroups) {
+            Graph g("saved");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto c = boxAtEnd(g, "c", 0);
+            auto x = boxAtEnd(g, "x", 0);
+            auto y = boxAtEnd(g, "y", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b, false);
+            g.addEquivalence(b, c);
+            g.addEquivalence(x, y, false);
+            g.setCertaintyGroups(a, { 0, 1, 0 }); // a and c certain, b with neither
+            g.computeLayout();
+
+            nlohmann::json j;
+            g.toJSON(j);
+            Graph loaded = Graph::fromJSON(j);
+            ASSERT_EQ(loaded.getEquivalences().size(), 2u);
+            auto la = named(loaded, "a");
+            EXPECT_EQ(chainOf(loaded, la), (std::vector<std::string>{ "a", "b", "c" }));
+            EXPECT_EQ(loaded.getCertaintyGroups(la), (std::vector<int>{ 0, 1, 0 }));
+            EXPECT_EQ(loaded.getCertaintyGroups(named(loaded, "x")), (std::vector<int>{ 0, 1 }));
+            expectChainsTogether(loaded);
+
+            // Written again, it is the same file.
+            nlohmann::json again;
+            loaded.toJSON(again);
+            EXPECT_EQ(again.at("equivalences"), j.at("equivalences"));
+        }
+
+        TEST(Equivalences, AFileWithoutChainsHasNone) {
+            Graph g("old");
+            auto a = boxAtEnd(g, "a", 0);
+            boxAtEnd(g, "b", 0);
+            g.computeLayout();
+            nlohmann::json j;
+            g.toJSON(j);
+            EXPECT_FALSE(j.contains("equivalences")); // nothing written when there are none
+            EXPECT_TRUE(Graph::fromJSON(j).getEquivalences().empty());
+
+            g.addEquivalence(a, named(g, "b"));
+            g.toJSON(j);
+            j["equivalences"][0]["groups"] = nlohmann::json::array({ 0 });
+            EXPECT_THROW(Graph::fromJSON(j), std::runtime_error);
+        }
+
+        TEST(Equivalences, ABoxPulledSidewaysNeverReordersAnotherChain) {
+            // North DAG g.78.1, as the equivalence benchmark had it just before n45 ≡ n71: n71
+            // is pulled next to n45 and its descendants follow it. Rebuilding the rows below
+            // used to put the chain n24 n63 n34 back together as n34 n24 n63, its stored
+            // order left behind.
+            std::ifstream file(TEST_DATA_DIR "/north_g.78.1_before_n45_n71.json");
+            ASSERT_TRUE(file.is_open());
+            nlohmann::json j;
+            file >> j;
+            Graph g = Graph::fromJSON(j);
+            ASSERT_EQ(chainOf(g, named(g, "n24")), (std::vector<std::string>{ "n24", "n63", "n34" }));
+            expectChainsTogether(g);
+
+            std::set<int> altered;
+            g.addEquivalence(named(g, "n45"), named(g, "n71"), false, &altered);
+            g.computeLayout(altered);
+            EXPECT_EQ(chainOf(g, named(g, "n24")), (std::vector<std::string>{ "n24", "n63", "n34" }));
+            expectChainsTogether(g);
+        }
+
+        TEST(Equivalences, CertaintyIsOnlyAskedOfEquivalentBoxes) {
+            Graph g("ask");
+            auto a = boxAtEnd(g, "a", 0);
+            auto b = boxAtEnd(g, "b", 0);
+            auto x = boxAtEnd(g, "x", 0);
+            g.computeLayout();
+            g.addEquivalence(a, b);
+            EXPECT_THROW(g.isEquivalenceCertain(a, x), std::logic_error);
+            EXPECT_THROW(g.isEquivalenceCertain(x, x), std::logic_error);
         }
 
         TEST(Equivalences, DeletingWhatHeldTheChainDownLetsItGoUp) {
@@ -463,9 +657,10 @@ namespace hypergraph_logic {
             g.relocateNodeInLayer(a, (g.getX(b) + g.getX(c)) / 2.0);
             EXPECT_EQ(row(g, 0), (std::vector<std::string>{ "b", "a", "c" }));
             EXPECT_EQ(chainOf(g, a), (std::vector<std::string>{ "b", "a", "c" }));
-            // Styles stay with the gaps.
+            // The certainty groups go with the nodes: a is still uncertain with both.
             EXPECT_FALSE(g.isEquivalenceContinuous(b, a));
-            EXPECT_TRUE(g.isEquivalenceContinuous(a, c));
+            EXPECT_FALSE(g.isEquivalenceContinuous(a, c));
+            EXPECT_TRUE(g.isEquivalenceCertain(b, c));
             expectChainsTogether(g);
         }
 
@@ -685,7 +880,7 @@ namespace hypergraph_logic {
             const auto& chain = copy.getEquivalences().front();
             EXPECT_EQ(chain.members.front()->getName(), "a");
             EXPECT_NE(chain.members.front(), a);
-            EXPECT_FALSE(chain.continuous.front());
+            EXPECT_FALSE(copy.isEquivalenceContinuous(chain.members[0], chain.members[1]));
 
             g.moveComponent(a.get(), g.getX(x) + 1000.0);
             EXPECT_EQ(row(g, 0), (std::vector<std::string>{ "x", "a", "b" }));
@@ -1088,6 +1283,52 @@ namespace hypergraph_logic {
                 EXPECT_EQ(crossings, g.crossings(true)) << "seed " << seed;
             }
             EXPECT_GT(longer_chains, 0);
+        }
+
+        // The dummies standing between the members of a chain: each one crosses one of its
+        // lines, and is drawn as one hop of that line.
+        int dummiesInsideChains(const Graph& g) {
+            int inside = 0;
+            for (const auto& chain : g.getEquivalences()) {
+                const auto nodes = g.getNodesAt(chain.members.front()->getLayer());
+                const auto first = std::find(nodes.begin(), nodes.end(), chain.members.front());
+                const auto last = std::find(nodes.begin(), nodes.end(), chain.members.back());
+                inside += static_cast<int>(std::count_if(first, last, [](const NodePtr& n) { return n->isDummy(); }));
+            }
+            return inside;
+        }
+
+        TEST(EquivalenceILP, EveryLineCrossingItCountsIsADummyInsideAChain) {
+            // What the solve reports is the connections' crossings plus one per dummy
+            // between the members of a chain: the hops the lines are drawn with.
+            int with_dummies_inside = 0;
+            for (unsigned seed = 1; seed <= 25; ++seed) {
+                std::mt19937 rng(seed);
+                auto pick = [&](const std::vector<NodePtr>& v) { return v[rng() % v.size()]; };
+                Sifted g("lines");
+                std::vector<NodePtr> boxes;
+                for (int i = 0; i < 3; ++i) boxes.push_back(boxAtEnd(g, ("r" + std::to_string(i)).c_str(), 0));
+                for (int i = 0; i < 11; ++i)
+                    boxes.push_back(childAtEnd(g, ("n" + std::to_string(i)).c_str(), pick(boxes)));
+                for (int k = 0; k < 8; ++k) {
+                    auto p = pick(boxes), c = pick(boxes);
+                    if (g.canAddConnection(p, c)) g.addConnection(p, c);
+                }
+                g.computeLayout();
+                for (int k = 0; k < 60; ++k) {
+                    auto a = pick(boxes), b = pick(boxes);
+                    if (!g.canAddEquivalence(a, b)) continue;
+                    g.addEquivalence(a, b);
+                    g.computeLayout();
+                }
+
+                const int crossings = solveExactly(g);
+                ASSERT_GE(crossings, 0) << "seed " << seed;
+                const int inside = dummiesInsideChains(g);
+                if (inside > 0) ++with_dummies_inside;
+                EXPECT_EQ(crossings, g.crossings(false) + inside) << "seed " << seed;
+            }
+            EXPECT_GT(with_dummies_inside, 0); // the lines' cost was really tested
         }
 
         TEST(EquivalenceILP, TwinsKeepTheirOrderWhileTheRestIsSolved) {

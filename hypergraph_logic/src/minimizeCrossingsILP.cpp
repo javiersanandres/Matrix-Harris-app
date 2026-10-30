@@ -270,11 +270,11 @@ namespace sifting_internal {
 		// propagating, so the caller (runCrossingILP) falls back to HiGHS
 		// transparently.
 
-		// Whether Gurobi is installed and licensed here, checked once and cached
+		// Whether Gurobi is installed and licensed here (checked once and cached
 		// for the life of the process: verifying a license can mean a round
-		// trip to a license server.
+		// trip to a license server), and not turned off (setGurobiAllowed).
 		bool gurobiUsable() {
-			return gurobiStatus() == GurobiStatus::Ready;
+			return gurobiInUse();
 		}
 
 		// token == nullptr: "fast" mode, capped at time_budget_seconds.

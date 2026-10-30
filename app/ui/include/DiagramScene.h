@@ -5,6 +5,7 @@
 #include "HypergraphRenderer.h"
 #include "NodeItem.h"
 #include "HyperedgeItem.h"
+#include "EquivalenceItem.h"
 
 #include <QColor>
 #include <QElapsedTimer>
@@ -190,6 +191,7 @@ namespace ui {
         // ── Item maps (rebuilt each time) ─────────────────────────────────────────
         std::unordered_map<hypergraph_logic::Node*, NodeItem*>      node_items_;
         std::unordered_map<hypergraph_logic::Hyperedge*, HyperedgeItem*> edge_items_;
+        std::vector<EquivalenceItem*> equivalence_items_; // one per line between equivalent neighbours
 
         // ── Interaction state ─────────────────────────────────────────────────────
         InteractionState state_ = InteractionState::Idle;
@@ -218,7 +220,7 @@ namespace ui {
         // ── Dragging one box (see NodeItem) ───────────────────────────────────────
         struct BoxDrag {
             NodeItem* item = nullptr;
-            std::vector<HyperedgeItem*> edges; // its connections, faded while it moves
+            std::vector<QGraphicsItem*> edges; // its connections and equivalence lines, faded while it moves
         };
         std::optional<BoxDrag> box_drag_;
 

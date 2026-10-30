@@ -127,9 +127,9 @@ namespace horizontal_overlapping_internal {
         // ── Gurobi backend ─────────────────────────────────────────────────────
 
         // Installed and licensed here (checked once per process, see
-        // GurobiRuntime.h).
+        // GurobiRuntime.h), and not turned off (setGurobiAllowed).
         bool gurobiUsable() {
-            return gurobiStatus() == GurobiStatus::Ready;
+            return gurobiInUse();
         }
 
         MipSolveResult solveWithGurobi(const MipModel& m, int total_mip_layers) {

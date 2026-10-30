@@ -256,8 +256,12 @@ namespace sifting_internal {
 
 		// Puts back together the chains that are not (only after B is rebuilt from rows
 		// that contradict each other): a real node inside a chain goes to its nearer end,
-		// as Hypergraph::keepEquivalencesTogether does in a layer.
-		void gatherChains();
+		// as Hypergraph::keepEquivalencesTogether does in a layer. With keep_member_order,
+		// a chain whose members are out of their stored order counts as broken too, and
+		// every chain put back together takes that order (the rows may have reordered
+		// them, e.g. while a moved node's descendants follow it); otherwise its members
+		// keep the order the rows give them.
+		void gatherChains(bool keep_member_order);
 
 		// The chains that some blocks may end up inside while they move past their members
 		// (the chains of the rows those blocks have nodes in, not their own), with how many

@@ -225,20 +225,27 @@ namespace hypergraph_logic {
 	// Changing the chains
 	// ============================================================================
 
+	namespace {
+		// A number no certainty group of chain has yet.
+		int freshGroup(const EquivalenceChain& chain) {
+			int next = 0;
+			for (const auto& [_, g] : chain.group) next = std::max(next, g + 1);
+			return next;
+		}
+
+		// Every member of group from joins group to.
+		void joinGroups(EquivalenceChain& chain, int from, int to) {
+			for (auto& [_, g] : chain.group)
+				if (g == from) g = to;
+		}
+	}
+
 	std::vector<NodePtr> Hypergraph::leaveEquivalence(const NodePtr& node) {
 		const int c = chainIndexOf(node.get());
 		if (c < 0) return {};
 		EquivalenceChain& chain = equivalences_[c];
-		const size_t k = std::find(chain.members.begin(), chain.members.end(), node) - chain.members.begin();
-
-		// The line closing the gap is discontinuous only if both of the node's were.
-		if (k == 0) chain.continuous.erase(chain.continuous.begin());
-		else if (k + 1 == chain.members.size()) chain.continuous.pop_back();
-		else {
-			chain.continuous[k - 1] = chain.continuous[k - 1] || chain.continuous[k];
-			chain.continuous.erase(chain.continuous.begin() + static_cast<std::ptrdiff_t>(k));
-		}
-		chain.members.erase(chain.members.begin() + static_cast<std::ptrdiff_t>(k));
+		std::erase(chain.members, node);
+		chain.group.erase(node.get());
 
 		std::vector<NodePtr> others = chain.members;
 		if (chain.members.size() < 2) equivalences_.erase(equivalences_.begin() + c);
@@ -248,22 +255,21 @@ namespace hypergraph_logic {
 	void Hypergraph::fuseEquivalences(const NodePtr& survivor, const NodePtr& absorbed) {
 		const int cs = chainIndexOf(survivor.get()), ca = chainIndexOf(absorbed.get());
 		if (ca < 0) return; // survivor's chain, if any, stays as it is
-		if (cs == ca) { leaveEquivalence(absorbed); return; }
+		if (cs == ca) {
+			// The fused node is both of them: they are certainly equivalent.
+			EquivalenceChain& chain = equivalences_[cs];
+			joinGroups(chain, chain.group.at(absorbed.get()), chain.group.at(survivor.get()));
+			leaveEquivalence(absorbed);
+			return;
+		}
 
 		auto fused = [&](const NodePtr& n) { return n == absorbed ? survivor : n; };
 		std::vector<NodePtr> members;
-		std::map<std::pair<Node*, Node*>, bool> styles; // of the lines between former neighbours
 		for (const int c : { cs, ca }) {
 			if (c < 0) continue;
-			const EquivalenceChain& chain = equivalences_[c];
-			for (const auto& m : chain.members)
+			for (const auto& m : equivalences_[c].members)
 				if (std::find(members.begin(), members.end(), fused(m)) == members.end())
 					members.push_back(fused(m));
-			for (size_t k = 0; k < chain.continuous.size(); ++k) {
-				Node* l = fused(chain.members[k]).get();
-				Node* r = fused(chain.members[k + 1]).get();
-				styles[{ l, r }] = styles[{ r, l }] = chain.continuous[k];
-			}
 		}
 
 		std::unordered_map<Node*, double> position;
@@ -272,11 +278,21 @@ namespace hypergraph_logic {
 			return position.at(a.get()) < position.at(b.get());
 		});
 
+		// Each chain keeps its groups, apart from the other's, but the fused node is both nodes
+		// at once: their two groups become one.
 		EquivalenceChain merged{ members, {} };
-		for (size_t k = 0; k + 1 < members.size(); ++k) {
-			auto it = styles.find({ members[k].get(), members[k + 1].get() });
-			merged.continuous.push_back(it == styles.end() || it->second);
+		int offset = 0;
+		if (cs >= 0) {
+			merged.group = equivalences_[cs].group;
+			offset = freshGroup(merged);
 		}
+		const EquivalenceChain& absorbed_chain = equivalences_[ca];
+		const int absorbed_group = offset + absorbed_chain.group.at(absorbed.get());
+		for (const auto& [n, g] : absorbed_chain.group)
+			if (n != absorbed.get()) merged.group[n] = offset + g;
+		if (cs < 0) merged.group[survivor.get()] = absorbed_group;
+		else joinGroups(merged, absorbed_group, merged.group.at(survivor.get()));
+
 		for (const int c : { std::max(cs, ca), std::min(cs, ca) })
 			if (c >= 0) equivalences_.erase(equivalences_.begin() + c);
 		equivalences_.push_back(std::move(merged));
@@ -323,10 +339,16 @@ namespace hypergraph_logic {
 		merged.members = left_chain;
 		merged.members.insert(merged.members.end(), right_chain.begin(), right_chain.end());
 		const int cl = a_left ? ca : cb, cr = a_left ? cb : ca;
-		if (cl >= 0) merged.continuous = equivalences_[cl].continuous;
-		merged.continuous.push_back(continuous);
-		if (cr >= 0) merged.continuous.insert(merged.continuous.end(),
-			equivalences_[cr].continuous.begin(), equivalences_[cr].continuous.end());
+		// Each chain keeps its groups, apart from the other's; a continuous line joins the two
+		// groups it links.
+		if (cl >= 0) merged.group = equivalences_[cl].group;
+		else merged.group[left.get()] = 0;
+		const int offset = freshGroup(merged);
+		if (cr >= 0) {
+			for (const auto& [n, g] : equivalences_[cr].group) merged.group[n] = offset + g;
+		}
+		else merged.group[right.get()] = offset;
+		if (continuous) joinGroups(merged, merged.group.at(right.get()), merged.group.at(left.get()));
 		for (const int c : { std::max(cl, cr), std::min(cl, cr) })
 			if (c >= 0) equivalences_.erase(equivalences_.begin() + c);
 		equivalences_.push_back(merged);
@@ -415,7 +437,7 @@ namespace hypergraph_logic {
 		return ia - ib == 1 || ib - ia == 1;
 	}
 
-	// The gap between neighbours a and b in their chain (index into continuous).
+	// The gap between neighbours a and b in their chain: the one after members[gap].
 	static size_t gapBetween(const EquivalenceChain& chain, const NodePtr& a, const NodePtr& b) {
 		const auto ia = std::find(chain.members.begin(), chain.members.end(), a) - chain.members.begin();
 		const auto ib = std::find(chain.members.begin(), chain.members.end(), b) - chain.members.begin();
@@ -430,11 +452,14 @@ namespace hypergraph_logic {
 		const size_t gap = gapBetween(chain, a, b);
 		equivalences_.erase(equivalences_.begin() + c);
 
-		const auto split = static_cast<std::ptrdiff_t>(gap + 1);
-		EquivalenceChain left_part{ { chain.members.begin(), chain.members.begin() + split },
-			{ chain.continuous.begin(), chain.continuous.begin() + static_cast<std::ptrdiff_t>(gap) } };
-		EquivalenceChain right_part{ { chain.members.begin() + split, chain.members.end() },
-			{ chain.continuous.begin() + split, chain.continuous.end() } };
+		const auto split = chain.members.begin() + static_cast<std::ptrdiff_t>(gap + 1);
+		auto part = [&](std::vector<NodePtr>::const_iterator from, std::vector<NodePtr>::const_iterator to) {
+			EquivalenceChain p{ { from, to }, {} };
+			for (const auto& m : p.members) p.group[m.get()] = chain.group.at(m.get());
+			return p;
+		};
+		EquivalenceChain left_part = part(chain.members.begin(), split);
+		EquivalenceChain right_part = part(split, chain.members.end());
 		if (left_part.members.size() > 1) equivalences_.push_back(std::move(left_part));
 		if (right_part.members.size() > 1) equivalences_.push_back(std::move(right_part));
 
@@ -446,14 +471,57 @@ namespace hypergraph_logic {
 		if (!canRemoveEquivalence(a, b))
 			throw std::logic_error("Estas cajas no están unidas por una equivalencia.");
 		const EquivalenceChain& chain = equivalences_[chainIndexOf(a.get())];
-		return chain.continuous[gapBetween(chain, a, b)];
+		return chain.group.at(a.get()) == chain.group.at(b.get());
 	}
 
 	void Hypergraph::setEquivalenceContinuous(const NodePtr& a, const NodePtr& b, bool continuous) {
 		if (!canRemoveEquivalence(a, b))
 			throw std::logic_error("Estas cajas no están unidas por una equivalencia.");
 		EquivalenceChain& chain = equivalences_[chainIndexOf(a.get())];
-		chain.continuous[gapBetween(chain, a, b)] = continuous;
+		const int ga = chain.group.at(a.get()), gb = chain.group.at(b.get());
+		if (continuous) {
+			if (ga != gb) joinGroups(chain, gb, ga);
+			return;
+		}
+		if (ga != gb) return;
+
+		// The group splits at the line: its members right of it form a group of their own.
+		const size_t gap = gapBetween(chain, a, b);
+		const int fresh = freshGroup(chain);
+		for (size_t k = gap + 1; k < chain.members.size(); ++k) {
+			int& g = chain.group.at(chain.members[k].get());
+			if (g == ga) g = fresh;
+		}
+	}
+
+	bool Hypergraph::isEquivalenceCertain(const NodePtr& a, const NodePtr& b) const {
+		const int c = chainIndexOf(a.get());
+		if (!b || c < 0 || c != chainIndexOf(b.get()))
+			throw std::logic_error("Estas cajas no son equivalentes.");
+		const EquivalenceChain& chain = equivalences_[c];
+		return chain.group.at(a.get()) == chain.group.at(b.get());
+	}
+
+	std::vector<int> Hypergraph::getCertaintyGroups(const NodePtr& member) const {
+		const int c = chainIndexOf(member.get());
+		if (c < 0) throw std::logic_error("Esta caja no es equivalente a ninguna otra.");
+		const EquivalenceChain& chain = equivalences_[c];
+		std::map<int, int> renumbered;
+		std::vector<int> groups;
+		for (const auto& m : chain.members) {
+			const auto [it, _] = renumbered.emplace(chain.group.at(m.get()), static_cast<int>(renumbered.size()));
+			groups.push_back(it->second);
+		}
+		return groups;
+	}
+
+	void Hypergraph::setCertaintyGroups(const NodePtr& member, const std::vector<int>& groups) {
+		const int c = chainIndexOf(member.get());
+		if (c < 0) throw std::logic_error("Esta caja no es equivalente a ninguna otra.");
+		EquivalenceChain& chain = equivalences_[c];
+		if (groups.size() != chain.members.size())
+			throw std::invalid_argument("Hace falta un grupo por cada caja equivalente.");
+		for (size_t k = 0; k < groups.size(); ++k) chain.group[chain.members[k].get()] = groups[k];
 	}
 
 } // namespace hypergraph_logic

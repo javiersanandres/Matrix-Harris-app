@@ -13,9 +13,10 @@
 //
 // Each box knows the diagram(s) it came from; connected components and the
 // regions they occupy are derived from the structure and layout. A diagram
-// that is not mixed with another (no connection or fusion between them) can be
-// removed or moved; new and moved diagrams are placed by the clicked x among
-// the occupied regions.
+// that is not mixed with another (no connection, fusion or equivalence between
+// them) can be moved, and one not bound to another (no connection or fusion)
+// can be removed; new and moved diagrams are placed by the clicked x among the
+// occupied regions.
 // ============================================================================
 
 namespace hypergraph_logic {
@@ -153,6 +154,77 @@ namespace hypergraph_logic {
             j->computeLayout();
             EXPECT_TRUE(j->isSeparable(a.getId()));
             EXPECT_TRUE(j->isSeparable(b.getId()));
+        }
+
+        TEST(JointDiagrams, AnEquivalenceMixesTwoDiagramsButDoesNotBindThem) {
+            auto j = JointGraphicalHypergraph::create("j");
+            auto a = chain("a"), b = chain("b");
+            j->addHypergraph(a, kFarLeft);
+            j->addHypergraph(b, kFarRight);
+
+            j->addEquivalence(named(*j, "a1"), named(*j, "b1"));
+            j->computeLayout();
+            EXPECT_EQ(j->getComponents().size(), 1u);
+            EXPECT_FALSE(j->isSeparable(a.getId()));
+            EXPECT_TRUE(j->isRemovable(a.getId()));
+            EXPECT_TRUE(j->isRemovable(b.getId()));
+            EXPECT_THROW(j->moveHypergraph(b.getId(), kFarLeft), std::logic_error);
+
+            j->removeHypergraph(a.getId());
+            EXPECT_TRUE(j->getEquivalences().empty());
+            EXPECT_EQ(layerNames(*j, 0), (std::vector<std::string>{ "b1" }));
+            EXPECT_EQ(layerNames(*j, 1), (std::vector<std::string>{ "b2" }));
+            EXPECT_TRUE(j->isSeparable(b.getId()));
+            EXPECT_FALSE(j->getIncorporatedIds().count(a.getId()));
+        }
+
+        TEST(JointDiagrams, ADiagramBoundByAConnectionCannotBeRemovedDespiteEquivalences) {
+            auto j = JointGraphicalHypergraph::create("j");
+            auto a = chain("a"), b = chain("b");
+            j->addHypergraph(a, kFarLeft);
+            j->addHypergraph(b, kFarRight);
+
+            j->addEquivalence(named(*j, "a1"), named(*j, "b1"));
+            j->addConnection(named(*j, "a1"), named(*j, "b2"));
+            j->computeLayout();
+            EXPECT_FALSE(j->isRemovable(a.getId()));
+            EXPECT_THROW(j->removeHypergraph(a.getId()), std::logic_error);
+        }
+
+        TEST(JointDiagrams, RemovingADiagramKeepsTheRestOfItsChainsEquivalent) {
+            auto j = JointGraphicalHypergraph::create("j");
+            auto a = chain("a"), b = chain("b"), c = chain("c");
+            j->addHypergraph(a, kFarLeft);
+            j->addHypergraph(b, kFarRight);
+            j->addHypergraph(c, kFarRight);
+            j->addEquivalence(named(*j, "a1"), named(*j, "b1"), false);
+            j->addEquivalence(named(*j, "b1"), named(*j, "c1"));
+            j->computeLayout();
+
+            j->removeHypergraph(b.getId());
+            ASSERT_EQ(j->getEquivalences().size(), 1u);
+            EXPECT_EQ(j->getEquivalences().front().members.size(), 2u);
+            // a1 was uncertain with b1, b1 certain with c1: a1 is uncertain with c1.
+            EXPECT_FALSE(j->isEquivalenceContinuous(named(*j, "a1"), named(*j, "c1")));
+            EXPECT_EQ(layerNames(*j, 0), (std::vector<std::string>{ "a1", "c1" }));
+        }
+
+        TEST(JointDiagrams, RemovingTheDiagramThatHeldABoxDownLetsItGoBackUp) {
+            auto j = JointGraphicalHypergraph::create("j");
+            auto a = chain("a");
+            GraphicalHypergraph lone("l");
+            lone.createNode("l1", 0, 0, nullptr);
+            lone.computeLayout();
+            j->addHypergraph(a, kFarLeft);
+            j->addHypergraph(lone, kFarRight);
+
+            j->addEquivalence(named(*j, "a2"), named(*j, "l1"));
+            j->computeLayout();
+            ASSERT_EQ(named(*j, "l1")->getLayer(), 1);
+
+            j->removeHypergraph(a.getId());
+            EXPECT_EQ(named(*j, "l1")->getLayer(), 0);
+            EXPECT_EQ(j->getLayerCount(), 1);
         }
 
         TEST(JointDiagrams, AFusedBoxBelongsToBothDiagrams) {

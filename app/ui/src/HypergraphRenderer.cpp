@@ -1,6 +1,7 @@
 #include "HypergraphRenderer.h"
 #include "NodeItem.h"
 #include "HyperedgeItem.h"
+#include "EquivalenceItem.h"
 #include "NodeVisuals.h"
 
 #include <QPainter>
@@ -258,6 +259,23 @@ namespace ui {
             return path;
         }
 
+        // Hops of an equivalence line over the dummies it passes: each dummy is
+        // the stretch [lo, hi] its connection takes along the line (a single x
+        // when it goes straight through). As for bars, a hop reaches hop_radius
+        // beyond what it covers, and stretches closer than 3 * hop_radius share
+        // one arch.
+        std::vector<HopGroup> dummyHops(std::vector<std::pair<double, double>> spans, double hop_radius) {
+            std::sort(spans.begin(), spans.end());
+            std::vector<HopGroup> groups;
+            for (size_t i = 0; i < spans.size();) {
+                double lo = spans[i].first, hi = spans[i].second;
+                for (++i; i < spans.size() && spans[i].first - hi <= 3.0 * hop_radius; ++i)
+                    hi = std::max(hi, spans[i].second);
+                groups.push_back({ lo - hop_radius, hi + hop_radius, lo == hi });
+            }
+            return groups;
+        }
+
         QPainterPath verticalLine(double x, double y_from, double y_to) {
             QPainterPath path;
             path.moveTo(x, -y_from);
@@ -277,7 +295,8 @@ namespace ui {
     void HypergraphRenderer::coreSweep(
         const GraphicalHypergraph& graph,
         const std::function<void(Node*, const QRectF&)>& place_node,
-        const std::function<void(Hyperedge*, QPainterPath& solid, QPainterPath& dashed)>& commit_edge)
+        const std::function<void(Hyperedge*, QPainterPath& solid, QPainterPath& dashed)>& commit_edge,
+        const std::function<void(Node*, Node*, const QPainterPath&, bool)>& place_equivalence)
     {
         if (graph.getLayers().empty()) return;
 
@@ -423,6 +442,34 @@ namespace ui {
             tree.split(raw->allEndsUncertain(), solid, dashed);
             commit_edge(raw, solid, dashed);
         }
+
+        // ── Step 7: equivalence lines, hopping over the dummies between ──────
+        for (const auto& chain : graph.getEquivalences()) {
+            const int layer = chain.members.front()->getLayer();
+            const auto& nodes = graph.getLayerData(layer).nodes;
+            const double layer_y = layer_layout.at(layer);
+            for (size_t k = 0; k + 1 < chain.members.size(); ++k) {
+                const NodePtr& left = chain.members[k];
+                const NodePtr& right = chain.members[k + 1];
+                const double from = node_layout.at(left.get()).x + left->getWidth() / 2.0;
+                const double to = node_layout.at(right.get()).x - right->getWidth() / 2.0;
+
+                std::vector<std::pair<double, double>> spans;
+                auto it = std::find(nodes.begin(), nodes.end(), left);
+                const auto end = std::find(nodes.begin(), nodes.end(), right);
+                for (it = it == nodes.end() ? it : std::next(it); it < end; ++it) {
+                    if (!(*it)->isDummy()) continue;
+                    const NodeLayout& dl = node_layout.at(it->get());
+                    double lo = dl.x, hi = dl.x;
+                    for (const auto& port : dl.source_ports) { lo = std::min(lo, port.x); hi = std::max(hi, port.x); }
+                    for (const auto& port : dl.target_ports) { lo = std::min(lo, port.x); hi = std::max(hi, port.x); }
+                    spans.emplace_back(lo, hi);
+                }
+
+                const QPainterPath line = barStretch(from, to, true, layer_y, dummyHops(spans, HOP_RADIUS), ARCH_HEIGHT);
+                place_equivalence(left.get(), right.get(), line, graph.isEquivalenceContinuous(left, right));
+            }
+        }
     }
 
     // ============================================================================
@@ -432,11 +479,13 @@ namespace ui {
         const GraphicalHypergraph& graph,
         QGraphicsScene* scene,
         std::unordered_map<Node*, QGraphicsPathItem*>& node_items,
-        std::unordered_map<Hyperedge*, QGraphicsPathItem*>& edge_items)
+        std::unordered_map<Hyperedge*, QGraphicsPathItem*>& edge_items,
+        std::vector<QGraphicsPathItem*>* equivalence_items)
     {
         scene->clear();
         node_items.clear();
         edge_items.clear();
+        if (equivalence_items) equivalence_items->clear();
 
         coreSweep(graph,
             // place_node
@@ -454,6 +503,11 @@ namespace ui {
                     dashes->setPen(connectionPen(false));
                 }
                 edge_items[orig] = item;
+            },
+            // place_equivalence
+            [&](Node*, Node*, const QPainterPath& line, bool continuous) {
+                QGraphicsPathItem* item = scene->addPath(line, connectionPen(continuous));
+                if (equivalence_items) equivalence_items->push_back(item);
             });
     }
 
@@ -480,12 +534,15 @@ namespace ui {
         QGraphicsScene* scene,
         std::unordered_map<Node*, NodeItem*>& node_items,
         std::unordered_map<Hyperedge*, HyperedgeItem*>& edge_items,
+        std::vector<EquivalenceItem*>& equivalence_items,
         const NodeItemFactory& make_node,
-        const EdgeItemFactory& make_edge)
+        const EdgeItemFactory& make_edge,
+        const EquivalenceItemFactory& make_equivalence)
     {
         scene->clear();
         node_items.clear();
         edge_items.clear();
+        equivalence_items.clear();
 
         coreSweep(graph,
             // place_node
@@ -499,6 +556,12 @@ namespace ui {
                 HyperedgeItem* ei = make_edge(orig, solid, dashed);
                 scene->addItem(ei);
                 edge_items[orig] = ei;
+            },
+            // place_equivalence
+            [&](Node* left, Node* right, const QPainterPath& line, bool continuous) {
+                EquivalenceItem* item = make_equivalence(left, right, line, continuous);
+                scene->addItem(item);
+                equivalence_items.push_back(item);
             });
     }
 

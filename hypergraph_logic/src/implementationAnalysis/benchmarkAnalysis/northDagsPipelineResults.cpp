@@ -42,11 +42,29 @@
 //   --limit=N                  stop after N instances
 //   --no-gui                   skip the viewer (usable on headless machines)
 //   --verbose                  print every rejected builder call
+//   --generate-equivalences[=N]  picks the N densest graphs (default 100; most
+//                              edges per vertex among those with at least
+//                              MIN_EQUIVALENCE_NODES vertices), generates random
+//                              equivalences on each and stores them in
+//                              ./north_equivalences (see EquivalenceBenchmark.h),
+//                              then stops. Done once: the files stay, so every
+//                              run measures the same.
+//   --equivalences             runs only the graphs with stored equivalences,
+//                              replaying them on each, counting the crossings of
+//                              their lines with dummies too and checking the
+//                              chains' rules after each layout. Results go to
+//                              results_north_benchmark_equivalences.csv.
+//   --highs                    solve every MIP with HiGHS, even when Gurobi is
+//                              installed and licensed (both the exact crossing
+//                              solve and the bar ordering of every layout). The
+//                              CSV then ends in _highs, next to the Gurobi one.
 // ============================================================================
 
 #include "GraphicalHypergraph.h"
 #include "LayoutTypes.h"
 #include "HypergraphRenderer.h"
+#include "EquivalenceBenchmark.h"
+#include "GurobiRuntime.h"
 
 #include <QApplication>
 #include <QComboBox>
@@ -97,6 +115,13 @@ using namespace ui;   // HypergraphRenderer lives in namespace ui
 // binary is run from (same convention as fullPipelineResults.cpp).
 static const fs::path SOURCE_DIR = fs::path(__FILE__).parent_path();
 static const char* CSV_NAME = "results_north_benchmark.csv";
+static const char* EQUIVALENCES_CSV_NAME = "results_north_benchmark_equivalences.csv";
+static const fs::path EQUIVALENCES_DIR = SOURCE_DIR / "north_equivalences";
+
+// Graphs smaller than this have layers too narrow to hold chains worth testing.
+static constexpr int MIN_EQUIVALENCE_NODES = 20;
+
+namespace eqb = equivalence_benchmark;
 
 // ============================================================================
 // Command-line options
@@ -110,7 +135,28 @@ struct Options {
     int      limit = 0;   // 0 = run everything
     bool     gui = true;
     bool     verbose = false;
+    bool     equivalences = false;
+    int      generate_equivalences = 0;   // 0 = do not generate; otherwise how many graphs
+    bool     highs = false;               // HiGHS for every MIP, even with Gurobi there
 };
+
+// The CSV for these options: the equivalences' or the plain one, with _highs
+// when HiGHS was forced.
+static fs::path csvPath(const Options& o) {
+    std::string name = o.equivalences ? EQUIVALENCES_CSV_NAME : CSV_NAME;
+    if (o.highs) name.insert(name.size() - 4, "_highs");
+    return SOURCE_DIR / name;
+}
+
+// Which solver the MIPs will use, for the header.
+static std::string solverInUse() {
+    if (gurobiInUse()) return "Gurobi " + gurobiVersion();
+    switch (gurobiStatus()) {
+    case GurobiStatus::Ready:     return "HiGHS (Gurobi turned off by --highs)";
+    case GurobiStatus::NoLicense: return "HiGHS (Gurobi installed, no license)";
+    default:                      return "HiGHS (Gurobi not installed)";
+    }
+}
 
 static Options parseOptions(int argc, char* argv[])
 {
@@ -126,6 +172,11 @@ static Options parseOptions(int argc, char* argv[])
         else if (a.rfind("--limit=", 0) == 0)     o.limit = intValue(a, "--limit=");
         else if (a == "--no-gui")                 o.gui = false;
         else if (a == "--verbose")                o.verbose = true;
+        else if (a == "--equivalences")           o.equivalences = true;
+        else if (a == "--highs")                  o.highs = true;
+        else if (a == "--generate-equivalences")  o.generate_equivalences = 100;
+        else if (a.rfind("--generate-equivalences=", 0) == 0)
+            o.generate_equivalences = std::max(1, intValue(a, "--generate-equivalences="));
         else if (a.rfind("--", 0) == 0)
             throw std::runtime_error("Unknown option: " + a);
         else
@@ -629,7 +680,15 @@ struct BenchmarkResult {
     double mh_time_sec = 0.0;
     int    mh_crossings = 0;
     double mh_gs_time_sec = 0.0;
-    int    mh_gs_crossings = 0;
+    int    mh_gs_crossings = 0;   // connections' crossings plus the lines' (below)
+
+    // With --equivalences only.
+    eqb::ChainStats chains;          // as replayed, before either layout
+    int    replay_refused = 0;       // stored calls the current code refused
+    int    mh_line_crossings = 0;    // dummies inside chains
+    int    mh_gs_line_crossings = 0;
+    int    mh_violations = 0;        // broken chain rules (see eqb::checkChains)
+    int    mh_gs_violations = 0;
 };
 
 struct BenchmarkRun {
@@ -642,28 +701,49 @@ struct BenchmarkRun {
 // Run one benchmark instance
 // ============================================================================
 
-static BenchmarkRun runBenchmark(const PreparedInstance& inst, bool verbose)
+// With equivalences (ops not null), each graph is built, laid out, and the
+// stored equivalences are replayed on it as the editor would make them; only
+// then does the timed part start.
+static BenchmarkRun runBenchmark(const PreparedInstance& inst, bool verbose,
+    const std::vector<eqb::Operation>* ops = nullptr)
 {
+    BenchmarkResult r;
+    auto build = [&](BuildStats& stats, bool report) {
+        GraphicalHypergraph g = buildHypergraph(inst, stats, report);
+        if (ops) {
+            g.computeLayout();
+            r.replay_refused = eqb::replay(g, *ops);
+            r.chains = eqb::stats(g);
+        }
+        return g;
+    };
+    std::vector<std::string> problems;
+
     // ── MH: layout only, no explicit (global) sifting ─────────────────────────
     BuildStats stats_mh;
-    GraphicalHypergraph g_mh = buildHypergraph(inst, stats_mh, verbose);
+    GraphicalHypergraph g_mh = build(stats_mh, verbose);
     auto t0 = std::chrono::high_resolution_clock::now();
     g_mh.computeLayout();
     auto t1 = std::chrono::high_resolution_clock::now();
     double mh_sec = std::chrono::duration<double>(t1 - t0).count();
-    int    mh_cross = countLayoutCrossings(g_mh);
+    r.mh_line_crossings = eqb::lineCrossings(g_mh);
+    int    mh_cross = countLayoutCrossings(g_mh) + r.mh_line_crossings;
+    r.mh_violations = eqb::checkChains(g_mh, &problems);
 
     // ── MH + GS: Global Sifting, then the same layout pipeline ────────────────
     BuildStats stats_gs;
-    GraphicalHypergraph g_mh_gs = buildHypergraph(inst, stats_gs, false);
+    GraphicalHypergraph g_mh_gs = build(stats_gs, false);
     auto t2 = std::chrono::high_resolution_clock::now();
     g_mh_gs.minimizeCrossings();
     g_mh_gs.computeLayout();
     auto t3 = std::chrono::high_resolution_clock::now();
     double mh_gs_sec = std::chrono::duration<double>(t3 - t2).count();
-    int    mh_gs_cross = countLayoutCrossings(g_mh_gs);
+    r.mh_gs_line_crossings = eqb::lineCrossings(g_mh_gs);
+    int    mh_gs_cross = countLayoutCrossings(g_mh_gs) + r.mh_gs_line_crossings;
+    r.mh_gs_violations = eqb::checkChains(g_mh_gs, &problems);
 
-    BenchmarkResult r;
+    for (const auto& p : problems) std::cerr << "  [RULE BROKEN] " << inst.name << ": " << p << "\n";
+
     r.instance = inst.name;
     r.nodes = inst.nodes;
     r.input_edges = inst.input_edges;
@@ -685,9 +765,11 @@ static BenchmarkRun runBenchmark(const PreparedInstance& inst, bool verbose)
 // ============================================================================
 
 static const int TABLE_WIDTH = 112;
+static const int EQUIVALENCES_TABLE_WIDTH = TABLE_WIDTH + 48;
 
-static void printTableHeader() {
-    std::cout << "\n" << std::string(TABLE_WIDTH, '=') << "\n"
+static void printTableHeader(bool equivalences) {
+    const int width = equivalences ? EQUIVALENCES_TABLE_WIDTH : TABLE_WIDTH;
+    std::cout << "\n" << std::string(width, '=') << "\n"
         << std::left << std::setw(22) << "Instance"
         << std::right << std::setw(6) << "|V|"
         << std::right << std::setw(7) << "|E|"
@@ -698,11 +780,17 @@ static void printTableHeader() {
         << std::right << std::setw(11) << "MH+GS (s)"
         << std::right << std::setw(12) << "Cross (MH)"
         << std::right << std::setw(15) << "Cross (MH+GS)"
-        << std::right << std::setw(8) << "Fails"
-        << "\n" << std::string(TABLE_WIDTH, '-') << "\n";
+        << std::right << std::setw(8) << "Fails";
+    if (equivalences)
+        std::cout << std::right << std::setw(8) << "Chains"
+            << std::right << std::setw(9) << "Members"
+            << std::right << std::setw(10) << "Line MH"
+            << std::right << std::setw(10) << "Line GS"
+            << std::right << std::setw(11) << "Rules ok";
+    std::cout << "\n" << std::string(width, '-') << "\n";
 }
 
-static void printRow(const BenchmarkResult& r) {
+static void printRow(const BenchmarkResult& r, bool equivalences) {
     std::cout
         << std::left << std::setw(22) << r.instance
         << std::right << std::setw(6) << r.nodes
@@ -714,12 +802,20 @@ static void printRow(const BenchmarkResult& r) {
         << std::right << std::setw(11) << std::fixed << std::setprecision(3) << r.mh_gs_time_sec
         << std::right << std::setw(12) << r.mh_crossings
         << std::right << std::setw(15) << r.mh_gs_crossings
-        << std::right << std::setw(8) << r.build_failures
-        << "\n";
+        << std::right << std::setw(8) << r.build_failures;
+    if (equivalences)
+        std::cout << std::right << std::setw(8) << r.chains.chains
+            << std::right << std::setw(9) << r.chains.members
+            << std::right << std::setw(10) << r.mh_line_crossings
+            << std::right << std::setw(10) << r.mh_gs_line_crossings
+            << std::right << std::setw(11)
+            << (r.mh_violations + r.mh_gs_violations + r.replay_refused == 0 ? "yes" : "NO");
+    std::cout << "\n";
 }
 
-static void printSummary(const std::vector<BenchmarkResult>& results) {
-    std::cout << std::string(TABLE_WIDTH, '=') << "\n";
+static void printSummary(const std::vector<BenchmarkResult>& results, bool equivalences) {
+    const int width = equivalences ? EQUIVALENCES_TABLE_WIDTH : TABLE_WIDTH;
+    std::cout << std::string(width, '=') << "\n";
     if (results.empty()) { std::cout << "No instances were run.\n"; return; }
 
     double total_mh = 0, total_gs = 0;
@@ -751,7 +847,7 @@ static void printSummary(const std::vector<BenchmarkResult>& results) {
         std::ostringstream ss; ss << std::fixed << std::setprecision(prec) << v; return ss.str();
         };
 
-    std::cout << "SUMMARY\n" << std::string(TABLE_WIDTH, '-') << "\n";
+    std::cout << "SUMMARY\n" << std::string(width, '-') << "\n";
     line("Instances run", std::to_string(n));
     line("Transitive edges removed (total)", std::to_string(transitive_removed));
     line("Instances with builder rejections", std::to_string(with_failures));
@@ -766,23 +862,59 @@ static void printSummary(const std::vector<BenchmarkResult>& results) {
     if (sum_mh > 0)
         line("Total crossing reduction by GS (%)",
             fmt(100.0 * static_cast<double>(sum_mh - sum_gs) / static_cast<double>(sum_mh), 1));
-    std::cout << std::string(TABLE_WIDTH, '=') << "\n";
+    if (equivalences) {
+        int chains = 0, members = 0, longest = 0, dashed = 0, refused = 0, violations = 0;
+        int line_mh = 0, line_gs = 0, broken_instances = 0;
+        for (const auto& r : results) {
+            chains += r.chains.chains;
+            members += r.chains.members;
+            longest = std::max(longest, r.chains.longest);
+            dashed += r.chains.dashed_lines;
+            refused += r.replay_refused;
+            violations += r.mh_violations + r.mh_gs_violations;
+            line_mh += r.mh_line_crossings;
+            line_gs += r.mh_gs_line_crossings;
+            if (r.mh_violations + r.mh_gs_violations > 0) ++broken_instances;
+        }
+        line("Chains (total)", std::to_string(chains));
+        line("Chain members (total)", std::to_string(members));
+        line("Longest chain", std::to_string(longest));
+        line("Dashed lines (total)", std::to_string(dashed));
+        line("Line crossings (MH, total)", std::to_string(line_mh));
+        line("Line crossings (MH+GS, total)", std::to_string(line_gs));
+        line("Stored calls refused on replay", std::to_string(refused));
+        line("Broken chain rules (total)", std::to_string(violations));
+        line("Instances with broken rules", std::to_string(broken_instances));
+    }
+    std::cout << std::string(width, '=') << "\n";
 }
 
-static void writeCsv(const std::vector<BenchmarkResult>& results) {
-    fs::path out = SOURCE_DIR / CSV_NAME;
+static void writeCsv(const std::vector<BenchmarkResult>& results, const Options& opt) {
+    const bool equivalences = opt.equivalences;
+    fs::path out = csvPath(opt);
     std::ofstream f(out);
     if (!f) {
         std::cerr << "WARNING: could not write CSV to " << out << "\n";
         return;
     }
     f << "instance;nodes;input_edges;reduced_edges;hyperedges;multi_source_hyperedges;"
-        "layers;build_failures;mh_time_sec;mh_crossings;mh_gs_time_sec;mh_gs_crossings\n";
-    for (const auto& r : results)
+        "layers;build_failures;mh_time_sec;mh_crossings;mh_gs_time_sec;mh_gs_crossings";
+    if (equivalences)
+        f << ";chains;chain_members;longest_chain;dashed_lines;replay_refused;"
+             "mh_line_crossings;mh_gs_line_crossings;mh_rule_violations;mh_gs_rule_violations";
+    f << "\n";
+    for (const auto& r : results) {
         f << r.instance << ";" << r.nodes << ";" << r.input_edges << ";" << r.reduced_edges << ";"
-        << r.hyperedges << ";" << r.multi_source << ";" << r.layers << ";" << r.build_failures << ";"
-        << std::fixed << std::setprecision(6) << r.mh_time_sec << ";" << r.mh_crossings << ";"
-        << std::fixed << std::setprecision(6) << r.mh_gs_time_sec << ";" << r.mh_gs_crossings << "\n";
+            << r.hyperedges << ";" << r.multi_source << ";" << r.layers << ";" << r.build_failures << ";"
+            << std::fixed << std::setprecision(6) << r.mh_time_sec << ";" << r.mh_crossings << ";"
+            << std::fixed << std::setprecision(6) << r.mh_gs_time_sec << ";" << r.mh_gs_crossings;
+        if (equivalences)
+            f << ";" << r.chains.chains << ";" << r.chains.members << ";" << r.chains.longest << ";"
+                << r.chains.dashed_lines << ";" << r.replay_refused << ";"
+                << r.mh_line_crossings << ";" << r.mh_gs_line_crossings << ";"
+                << r.mh_violations << ";" << r.mh_gs_violations;
+        f << "\n";
+    }
     std::cout << "\nCSV written to " << fs::absolute(out) << "\n";
 }
 
@@ -832,6 +964,67 @@ static std::vector<fs::path> findGraphFiles(const fs::path& dir)
 
 // Instance name: file name without the .graphml extension ("g.10.0").
 static std::string instanceName(const fs::path& p) { return p.stem().string(); }
+
+// ============================================================================
+// --generate-equivalences
+//
+// The `count` densest graphs (most edges per vertex, ties to the larger one),
+// among those with at least MIN_EQUIVALENCE_NODES vertices, get equivalences.
+// ============================================================================
+
+static int generateEquivalences(const std::vector<fs::path>& files, int count)
+{
+    struct Candidate { fs::path path; PreparedInstance inst; double density; };
+    std::vector<Candidate> candidates;
+    for (const auto& path : files) {
+        try {
+            PreparedInstance inst = prepareInstance(instanceName(path), parseGraphML(path));
+            if (inst.nodes < MIN_EQUIVALENCE_NODES) continue;
+            const double density = static_cast<double>(inst.input_edges) / inst.nodes;
+            candidates.push_back({ path, std::move(inst), density });
+        }
+        catch (const std::exception& ex) {
+            std::cerr << "  [SKIP] " << instanceName(path) << ": " << ex.what() << "\n";
+        }
+    }
+    std::sort(candidates.begin(), candidates.end(), [](const Candidate& a, const Candidate& b) {
+        if (a.density != b.density) return a.density > b.density;
+        if (a.inst.nodes != b.inst.nodes) return a.inst.nodes > b.inst.nodes;
+        return naturalLess(a.inst.name, b.inst.name);
+        });
+    if (static_cast<int>(candidates.size()) > count) candidates.resize(count);
+
+    std::cout << "Generating equivalences for the " << candidates.size() << " densest graphs into "
+        << fs::absolute(EQUIVALENCES_DIR) << "\n\n";
+    int broken = 0;
+    for (const auto& c : candidates) {
+        try {
+            BuildStats stats;
+            GraphicalHypergraph g = buildHypergraph(c.inst, stats, false);
+            g.computeLayout();
+            const auto ops = eqb::generate(g, c.inst.name);
+            eqb::write(eqb::fileFor(EQUIVALENCES_DIR, c.inst.name), ops);
+            const eqb::ChainStats st = eqb::stats(g);
+            std::vector<std::string> problems;
+            broken += eqb::checkChains(g, &problems);
+            for (const auto& p : problems) std::cerr << "  [RULE BROKEN] " << c.inst.name << ": " << p << "\n";
+            std::cout << std::left << std::setw(14) << c.inst.name
+                << " |V| " << std::setw(4) << c.inst.nodes
+                << " |E|/|V| " << std::fixed << std::setprecision(2) << std::setw(6) << c.density
+                << " calls " << std::setw(4) << ops.size()
+                << " chains " << std::setw(4) << st.chains
+                << " members " << std::setw(4) << st.members
+                << " longest " << std::setw(3) << st.longest
+                << " dashed " << std::setw(4) << st.dashed_lines
+                << " dummies inside " << eqb::lineCrossings(g) << "\n";
+        }
+        catch (const std::exception& ex) {
+            std::cerr << "  [SKIP] " << c.inst.name << ": " << ex.what() << "\n";
+        }
+    }
+    std::cout << "\nBroken chain rules: " << broken << "\n";
+    return broken == 0 ? 0 : 2;
+}
 
 // ============================================================================
 // Post-run viewer (same layout as fullPipelineResults.cpp)
@@ -1061,8 +1254,13 @@ int main(int argc, char* argv[])
     }
 
     std::cout << "North DAGs Benchmark — Crossing Minimisation & Layout Pipeline\n";
+    if (opt.highs) setGurobiAllowed(false);
     std::cout << "Benchmark directory: " << fs::absolute(opt.dir) << "\n";
-    std::cout << "CSV output:          " << fs::absolute(SOURCE_DIR / CSV_NAME) << "\n";
+    std::cout << "Solver:              " << solverInUse() << "\n";
+    if (opt.generate_equivalences == 0)
+        std::cout << "CSV output:          " << fs::absolute(csvPath(opt)) << "\n";
+    if (opt.equivalences)
+        std::cout << "Equivalences:        " << fs::absolute(EQUIVALENCES_DIR) << "\n";
     if (opt.min_nodes > 0 || opt.max_nodes > 0)
         std::cout << "Vertex range:        [" << opt.min_nodes << ", "
         << (opt.max_nodes > 0 ? std::to_string(opt.max_nodes) : "inf") << "]\n";
@@ -1083,7 +1281,9 @@ int main(int argc, char* argv[])
     }
     std::cout << "Graph files found:   " << files.size() << "\n";
 
-    printTableHeader();
+    if (opt.generate_equivalences > 0) return generateEquivalences(files, opt.generate_equivalences);
+
+    printTableHeader(opt.equivalences);
     std::vector<BenchmarkResult> results;
     std::vector<BenchmarkRun>    runs;
     int eligible = 0;
@@ -1092,15 +1292,21 @@ int main(int argc, char* argv[])
         if (opt.limit > 0 && static_cast<int>(results.size()) >= opt.limit) break;
         const std::string name = instanceName(path);
         try {
+            std::vector<eqb::Operation> ops;
+            if (opt.equivalences) {
+                const fs::path file = eqb::fileFor(EQUIVALENCES_DIR, name);
+                if (!fs::exists(file)) continue; // not one of the graphs with equivalences
+                ops = eqb::read(file);
+            }
             PreparedInstance inst = prepareInstance(name, parseGraphML(path));
 
             if (opt.min_nodes > 0 && inst.nodes < opt.min_nodes) continue;
             if (opt.max_nodes > 0 && inst.nodes > opt.max_nodes) continue;
             if (eligible++ % opt.stride != 0) continue;
 
-            BenchmarkRun run = runBenchmark(inst, opt.verbose);
+            BenchmarkRun run = runBenchmark(inst, opt.verbose, opt.equivalences ? &ops : nullptr);
             results.push_back(run.result);
-            printRow(run.result);
+            printRow(run.result, opt.equivalences);
             if (opt.gui) runs.push_back(std::move(run));
         }
         catch (const std::exception& ex) {
@@ -1108,8 +1314,8 @@ int main(int argc, char* argv[])
         }
     }
 
-    printSummary(results);
-    writeCsv(results);
+    printSummary(results, opt.equivalences);
+    writeCsv(results, opt);
 
     if (!opt.gui) return 0;
     if (runs.empty()) {

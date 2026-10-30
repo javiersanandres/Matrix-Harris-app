@@ -362,8 +362,8 @@ namespace hypergraph_logic {
 		auto hasChildren = [](const NodePtr& n) { return !n->getChildren().empty(); };
 
 		if (lo < new_x && new_x < hi) {
-			// Within the chain: the node takes its place among the other members, and every
-			// line keeps its style where it is.
+			// Within the chain: the node takes its place among the other members, taking its
+			// certainty group along.
 			std::vector<NodePtr> order = chain.members;
 			std::stable_sort(order.begin(), order.end(), [&](const NodePtr& a, const NodePtr& b) {
 				return (a == node ? new_x : xOf(a)) < (b == node ? new_x : xOf(b));

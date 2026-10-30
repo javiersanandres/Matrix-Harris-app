@@ -40,6 +40,16 @@ namespace hypergraph_logic {
 	// was found.
 	std::string gurobiVersion();
 
+	// ── Turning Gurobi off ───────────────────────────────────────────────────
+	//
+	// setGurobiAllowed(false) makes every solve in this process use HiGHS from
+	// then on, even with Gurobi Ready (the benchmarks' --highs, to compare the
+	// solvers on the same instances); true allows it again. gurobiStatus()
+	// still reports what is installed. gurobiInUse() is what the solvers ask:
+	// Gurobi is allowed and Ready.
+	void setGurobiAllowed(bool allowed);
+	bool gurobiInUse();
+
 	// One constraint lower <= sum(value[k] * x[index[k]]) <= upper. The arrays
 	// belong to the caller and must outlive the solve.
 	struct GurobiRow {
@@ -69,8 +79,8 @@ namespace hypergraph_logic {
 		double objective = 0.0;
 	};
 
-	// Solves `mip` with Gurobi. Fails (success == false) when Gurobi is not
-	// Ready or anything goes wrong on its side; never throws.
+	// Solves `mip` with Gurobi. Fails (success == false) when Gurobi is not in
+	// use (see gurobiInUse) or anything goes wrong on its side; never throws.
 	GurobiSolution solveMipWithGurobi(const GurobiMip& mip);
 
 } // namespace hypergraph_logic

@@ -14,7 +14,8 @@
 namespace hypergraph_logic {
 
 	std::vector<GraphicalHypergraph::Block>
-		GraphicalHypergraph::blocksExcluding(const std::unordered_set<Node*>& excluded) const
+		GraphicalHypergraph::blocksExcluding(const std::unordered_set<Node*>& excluded,
+			bool through_equivalences) const
 	{
 		// Union-find over the boxes, joining every box of each hyperedge
 		// (originals and their segments, so dummies too).
@@ -47,7 +48,7 @@ namespace hypergraph_logic {
 			for (const auto& seg : segs) join(*seg);
 		}
 		// Equivalences link boxes too.
-		for (const auto& chain : equivalences_) {
+		for (const auto& chain : through_equivalences ? equivalences_ : std::vector<EquivalenceChain>{}) {
 			auto first = index.find(chain.members.front().get());
 			for (const auto& m : chain.members) {
 				auto it = index.find(m.get());
@@ -252,14 +253,24 @@ namespace hypergraph_logic {
 			std::erase_if(data.outgoing_edges, [&](const HyperedgePtr& e) { return doomed_edges.count(e.get()) > 0; });
 		}
 		// Every chain it touches is normally wholly in it; any other member stays in its chain.
-		for (Node* n : doomed)
-			if (chainIndexOf(n) >= 0) leaveEquivalence(n->shared_from_this());
+		std::vector<NodePtr> former_equivalents;
+		for (Node* n : doomed) {
+			if (chainIndexOf(n) < 0) continue;
+			for (const auto& m : leaveEquivalence(n->shared_from_this()))
+				if (!doomed.count(m.get()) && std::find(former_equivalents.begin(), former_equivalents.end(), m) == former_equivalents.end())
+					former_equivalents.push_back(m);
+		}
 		for (Node* n : doomed) node_layout_.erase(n);
 		for (Hyperedge* e : doomed_edges) edge_layout_.erase(e);
 		for (const auto& e : doomed_originals) all_hyperedges_.erase(e);
 		std::erase_if(all_nodes_, [&](const NodePtr& n) { return doomed.count(n.get()) > 0; });
 
 		cleanUp(); // layers left empty are closed up
+		// They may go back up to the layer their own members ask for.
+		if (!former_equivalents.empty()) {
+			relocateAndMinimize(former_equivalents, nullptr);
+			keepEquivalencesTogether();
+		}
 		computeLayout({});
 	}
 

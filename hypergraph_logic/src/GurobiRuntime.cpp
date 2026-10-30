@@ -1,6 +1,7 @@
 #include "GurobiRuntime.h"
 
 #include <algorithm>
+#include <atomic>
 #include <cctype>
 #include <cmath>
 #include <filesystem>
@@ -304,6 +305,18 @@ namespace hypergraph_logic {
 		return status;
 	}
 
+	namespace {
+		std::atomic<bool> gurobi_allowed{ true };
+	}
+
+	void setGurobiAllowed(bool allowed) {
+		gurobi_allowed = allowed;
+	}
+
+	bool gurobiInUse() {
+		return gurobi_allowed && gurobiStatus() == GurobiStatus::Ready;
+	}
+
 	std::string gurobiVersion() {
 		const Loaded* g = gurobi();
 		if (!g) return {};
@@ -312,7 +325,7 @@ namespace hypergraph_logic {
 
 	GurobiSolution solveMipWithGurobi(const GurobiMip& mip) {
 		GurobiSolution result;
-		if (gurobiStatus() != GurobiStatus::Ready) return result;
+		if (!gurobiInUse()) return result;
 		const Loaded& g = *gurobi();
 		const Api& api = g.api;
 
