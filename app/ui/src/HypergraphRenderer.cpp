@@ -231,8 +231,10 @@ namespace ui {
 
         // The stretch of bar from `from` to `to`, drawing the hops whose centre
         // lies in it (the last stretch of a bar also takes a hop centred on its end).
+        // An arch reaches arch_lead further out than its group on each side, as
+        // far as the stretch and the hop before it allow.
         QPainterPath barStretch(double from, double to, bool is_last, double bar_y,
-            const std::vector<HopGroup>& groups, double arch_height)
+            const std::vector<HopGroup>& groups, double arch_height, double arch_lead)
         {
             QPainterPath path;
             if (to <= from) return path;
@@ -242,18 +244,31 @@ namespace ui {
             for (const auto& g : groups) {
                 const double c = g.centre();
                 if (c < from || c > to || (c == to && !is_last)) continue;
-                if (g.start > cur_x) path.lineTo(g.start, qt_y);
                 if (g.single) {
+                    if (g.start > cur_x) path.lineTo(g.start, qt_y);
                     // Full circle of diameter end-start centred on the bar: sweeping
                     // from its left point over the top lands on its right point.
                     const double r = (g.end - g.start) / 2.0;
                     path.arcTo(QRectF(g.start, qt_y - r, 2.0 * r, 2.0 * r), 180.0, -180.0);
+                    cur_x = g.end;
                 }
                 else {
-                    const double ctrl_y = qt_y - arch_height;
-                    path.cubicTo(c, ctrl_y, c, ctrl_y, g.end, qt_y);
+                    // A bridge: it leaves the bar straight up, as a single hop
+                    // does, rounding over (a quarter of a circle of radius
+                    // arch_height) into a flat top arch_height above the bar, and
+                    // comes down the same way. Starting arch_lead before its group,
+                    // it is all the way up by the first vertical it skips, and
+                    // still up over the last one.
+                    const double start = std::max(g.start - arch_lead, cur_x);
+                    const double end = std::min(g.end + arch_lead, to);
+                    if (start > cur_x) path.lineTo(start, qt_y);
+                    const double rise = std::min(arch_height, (end - start) / 2.0);
+                    const double top = qt_y - arch_height;
+                    path.arcTo(QRectF(start, top, 2.0 * rise, 2.0 * arch_height), 180.0, -90.0);
+                    if (end - rise > start + rise) path.lineTo(end - rise, top);
+                    path.arcTo(QRectF(end - 2.0 * rise, top, 2.0 * rise, 2.0 * arch_height), 90.0, -90.0);
+                    cur_x = end;
                 }
-                cur_x = g.end;
             }
             if (cur_x < to) path.lineTo(to, qt_y);
             return path;
@@ -428,7 +443,7 @@ namespace ui {
 
                 for (size_t i = 0; i + 1 < stops.size(); ++i) {
                     tree.add(tree.barPoint(edge.get(), stops[i]), tree.barPoint(edge.get(), stops[i + 1]),
-                        barStretch(cuts[i], cuts[i + 1], i + 2 == stops.size(), bar_y, groups, ARCH_HEIGHT));
+                        barStretch(cuts[i], cuts[i + 1], i + 2 == stops.size(), bar_y, groups, ARCH_HEIGHT, ARCH_HEIGHT - HOP_RADIUS));
                 }
             }
 
@@ -466,7 +481,7 @@ namespace ui {
                     spans.emplace_back(lo, hi);
                 }
 
-                const QPainterPath line = barStretch(from, to, true, layer_y, dummyHops(spans, HOP_RADIUS), ARCH_HEIGHT);
+                const QPainterPath line = barStretch(from, to, true, layer_y, dummyHops(spans, HOP_RADIUS), ARCH_HEIGHT, ARCH_HEIGHT - HOP_RADIUS);
                 place_equivalence(left.get(), right.get(), line, graph.isEquivalenceContinuous(left, right));
             }
         }

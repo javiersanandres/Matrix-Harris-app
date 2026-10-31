@@ -28,6 +28,8 @@ target_sources(ui_lib
         NodeEditorWidgets.cpp
         NodeDialogs.cpp
         ProjectSettingsDialog.cpp
+        LayoutPreview.cpp
+        SettingsWidgets.cpp
         BusySpinner.cpp
         MinimizingProgressDialog.cpp
         HelpButton.cpp
@@ -58,6 +60,8 @@ target_sources(ui_lib
             ../include/DiagramTabBar.h
             ../include/NodeDialogs.h
             ../include/ProjectSettingsDialog.h
+            ../include/LayoutPreview.h
+            ../include/SettingsWidgets.h
             ../include/NodeVisuals.h
             ../include/NodeEditorWidgets.h
             ../include/AddHypergraphDialog.h

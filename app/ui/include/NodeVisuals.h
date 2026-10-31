@@ -96,6 +96,8 @@ namespace ui::node_visuals {
 
     // The size of a box that measured `start` once its `edges` are dragged by
     // `delta` (box units), within the limits of LayoutTypes.h, in whole pixels.
+    // A side changes only its own dimension; a corner keeps the box's
+    // proportions (as far as those limits allow).
     QSizeF resizedBox(const QSizeF& start, int edges, const QPointF& delta);
 
     // The box's frame with a handle on each corner and edge; the handle of

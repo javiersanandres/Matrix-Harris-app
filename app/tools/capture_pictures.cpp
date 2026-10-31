@@ -20,6 +20,8 @@
 #include "DiagramScene.h"
 #include "EquivalenceItem.h"
 #include "HypergraphEditor.h"
+#include "LayoutPreview.h"
+#include "SettingsWidgets.h"
 #include "NodeDialogs.h"
 #include "NodeEditorWidgets.h"
 #include "ProjectSettingsDialog.h"
@@ -41,7 +43,9 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QImage>
 #include <QKeyEvent>
+#include <QLabel>
 #include <QMenu>
+#include <QMouseEvent>
 #include <QPainter>
 #include <QScrollArea>
 #include <QScrollBar>
@@ -734,6 +738,37 @@ int main(int argc, char* argv[]) {
             }
         }
         save(dialog.grab().toImage(), "information/projectSettings/01.png");
+
+        // The distances with their sample, the one between stacked lines marked
+        // (as when the mouse is over its field).
+        auto* preview = dialog.findChild<LayoutPreview*>();
+        if (!preview) throw std::runtime_error("No sample in the settings");
+        preview->setActive(LayoutPreview::Distance::HorizontalSep);
+        settle(200);
+        QLabel* title = nullptr;
+        for (auto* label : dialog.findChildren<QLabel*>(QStringLiteral("sectionTitle")))
+            if (label->text() == QStringLiteral("DISTANCIAS")) title = label;
+        if (!title) throw std::runtime_error("No distances in the settings");
+        auto* card = preview->parentWidget();
+        const QRect distances(QPoint(0, title->mapTo(card, QPoint(0, 0)).y() - 4),
+            QPoint(card->width() - 1, preview->mapTo(card, QPoint(0, preview->height())).y() + 14));
+        const QImage part = card->grab(distances).toImage();
+        save(part, "information/projectSettings/03.png");
+        save(part, "tutorial/project_settings.png");
+
+        // The shapes compared, the mouse on the circle's right edge (found by
+        // moving along their line until it can resize something).
+        auto* sizes = dialog.findChild<ShapeSizesPreview*>();
+        if (!sizes) throw std::runtime_error("No shape sizes in the settings");
+        const double line_y = 26.0 + (sizes->height() - 26.0 - 48.0) / 2.0;
+        for (int x = sizes->width() / 2; x < sizes->width(); ++x) {
+            const QPointF at(x, line_y);
+            QMouseEvent move(QEvent::MouseMove, at, sizes->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(sizes, &move);
+            if (sizes->cursor().shape() != Qt::ArrowCursor) break;
+        }
+        settle(200);
+        save(sizes->grab().toImage(), "information/projectSettings/04.png");
         dialog.close();
 
         // The question when a new default size reaches existing boxes.

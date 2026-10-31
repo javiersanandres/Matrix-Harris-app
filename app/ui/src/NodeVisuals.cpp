@@ -267,6 +267,23 @@ namespace ui::node_visuals {
     QSizeF resizedBox(const QSizeF& start, int edges, const QPointF& delta) {
         double w = start.width();
         double h = start.height();
+        const bool across = edges & (ResizeLeft | ResizeRight);
+        const bool down = edges & (ResizeTop | ResizeBottom);
+        if (across && down && w > 0.0 && h > 0.0) {
+            // A corner: the box grows or shrinks as a whole, by the factor that
+            // brings its corner closest to the mouse along its diagonal.
+            const QPointF corner(w / 2.0, h / 2.0);
+            const QPointF to_mouse(corner.x() + (edges & ResizeRight ? delta.x() : -delta.x()),
+                                   corner.y() + (edges & ResizeBottom ? delta.y() : -delta.y()));
+            double f = QPointF::dotProduct(to_mouse, corner) / QPointF::dotProduct(corner, corner);
+            const double lowest = std::max(MIN_NODE_WIDTH / w, MIN_NODE_HEIGHT / h);
+            const double highest = std::min(MAX_NODE_WIDTH / w, MAX_NODE_HEIGHT / h);
+            if (lowest <= highest) f = std::clamp(f, lowest, highest);
+            w *= f;
+            h *= f;
+            return QSizeF(std::round(std::clamp(w, MIN_NODE_WIDTH, MAX_NODE_WIDTH)),
+                          std::round(std::clamp(h, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT)));
+        }
         if (edges & ResizeRight)  w += 2.0 * delta.x();
         if (edges & ResizeLeft)   w -= 2.0 * delta.x();
         if (edges & ResizeBottom) h += 2.0 * delta.y();

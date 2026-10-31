@@ -81,8 +81,9 @@ namespace hypergraph_logic {
 
     // On the same topic, when consecutive hops are necessary but there is not
 	// enough horizontal space to draw them separately, they are merged into a
-	// single smooth Bézier arch. This constant controls the height of such arches.
-    static constexpr double ARCH_HEIGHT = 10.0; // Height of merged-hop Bézier arches.
+	// single arch: it rises steeply, runs flat over them and comes down, like a
+	// bridge. This constant controls the height of such arches.
+    static constexpr double ARCH_HEIGHT = 7.0; // Height of merged-hop arches.
 
     // -------------------------------------------------------------------------
     // LayoutSettings

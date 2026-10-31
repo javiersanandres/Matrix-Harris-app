@@ -7,16 +7,23 @@
 #include <QDialog>
 #include <QList>
 
+#include <functional>
 #include <optional>
+#include <utility>
+#include <vector>
 
 class QListWidget;
 class QSettings;
 class QSpinBox;
+class QToolButton;
 
 namespace ui {
 
 class ColorPickerButton;
+class DistanceSlider;
+class ShapeSizesPreview;
 class FontSizeSelector;
+class LayoutPreview;
 class NodePreview;
 class StyledDialog;
 class TickBox;
@@ -43,13 +50,19 @@ namespace app_defaults {
 // "Ajustes del proyecto": everything a project decides for all its diagrams
 // (see ProjectSettings), laid out like the node dialogs:
 //
-//   - Cajas nuevas         : shape, background and text colour, font size, with
-//                            a preview of a new box. Only for boxes created
-//                            from now on.
-//   - Equivalencias nuevas : continuous or dashed line.
+//   - Valores iniciales de las cajas nuevas: shape, background and text
+//                            colour, font size, with a preview of a new box.
+//                            Only where boxes created from now on start.
+//   - Valor inicial de las equivalencias nuevas: continuous or dashed line.
 //   - Distancias           : between neighbouring boxes, between the boxes and
-//                            their connections, between stacked horizontal lines.
-//   - Tamaño por defecto   : width and height of each shape's boxes.
+//                            their connections, between stacked horizontal lines,
+//                            each with a slider (DistanceSlider) and a field, and
+//                            a sample diagram drawn with them (LayoutPreview) that
+//                            marks the distance whose slider or field is under
+//                            the mouse or being edited.
+//   - Tamaño por defecto   : width and height of each shape's boxes, the three
+//                            drawn side by side to compare and resize them by
+//                            their edges (ShapeSizesPreview), and their fields.
 //
 // Under them, a tick box to also make these the application's defaults for new
 // projects, and buttons to fill the form with the application's defaults or the
@@ -74,10 +87,16 @@ public:
     // Fills the form with these settings.
     void setSettings(const app_logic::ProjectSettings& settings);
 
+protected:
+    bool eventFilter(QObject* watched, QEvent* event) override;
+
 private:
     void sync();
+    // Marks on the sample the distance whose field is under the mouse or has the focus.
+    void showActiveDistance();
 
     app_logic::ProjectSettings settings_;
+    app_logic::ProjectSettings original_;     // the project's, as the window opened
     app_logic::ProjectSettings app_defaults_;
     bool font_auto_ = true; // the text colour follows the background (as "Automático" does)
     bool syncing_ = false;
@@ -92,9 +111,21 @@ private:
     QSpinBox* block_sep_ = nullptr;
     QSpinBox* layer_gap_ = nullptr;
     QSpinBox* horizontal_sep_ = nullptr;
+    DistanceSlider* block_slider_ = nullptr;
+    DistanceSlider* layer_slider_ = nullptr;
+    DistanceSlider* horizontal_slider_ = nullptr;
+    LayoutPreview* layout_preview_ = nullptr;
+    ShapeSizesPreview* sizes_preview_ = nullptr;
     struct SizeFields { QSpinBox* width = nullptr; QSpinBox* height = nullptr; };
     SizeFields rectangle_, circle_, rhombus_;
     TickBox* as_app_defaults_ = nullptr;
+    // The "↺" of each distance and size: whether its value differs from the
+    // project's, and the project's, as text.
+    struct Revert {
+        QToolButton* button;
+        std::function<std::pair<bool, QString>()> state;
+    };
+    std::vector<Revert> reverts_;
 };
 
 // "¿Y las cajas que ya existen?": asked when new default sizes would change

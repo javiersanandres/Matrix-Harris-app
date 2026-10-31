@@ -352,6 +352,7 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         case T::ZoomLabel:         return area(zoom_label_);
         case T::FileMenu:          return menuTitle(QStringLiteral("Archivo"));
         case T::EditMenu:          return menuTitle(QStringLiteral("Editar"));
+        case T::ProjectMenu:       return menuTitle(QStringLiteral("Proyecto"));
         case T::HelpMenu:          return menuTitle(QStringLiteral("Ayuda"));
         }
         return QRect();

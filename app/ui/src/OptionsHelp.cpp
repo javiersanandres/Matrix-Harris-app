@@ -277,7 +277,9 @@ namespace ui::help {
                 {
                     heading(HOW),
                     text(QStringLiteral("Pasa el ratón por encima de una caja: aparece su marco, con un tirador en cada "
-                                        "esquina y en el centro de cada lado. Arrastra uno de ellos. Los dos lados se "
+                                        "esquina y en el centro de cada lado. Arrastra uno de ellos: el de un lado cambia "
+                                        "solo el ancho o el alto, y el de una esquina agranda o encoge la caja entera sin "
+                                        "cambiar sus proporciones. Los dos lados se "
                                         "mueven a la vez, así que la caja crece o encoge sin moverse de su sitio, y una "
                                         "etiqueta encima de ella indica su tamaño en píxeles. Al soltar, el resto del "
                                         "esquema se recoloca para dejarle sitio.")),
@@ -709,7 +711,7 @@ namespace ui::help {
 
             // ── Project ─────────────────────────────────────────────────────
             t.push_back({ "projectSettings", PROJECT, QStringLiteral("Ajustes del proyecto"), I::Settings,
-                QStringLiteral("Decide cómo son las cajas y equivalencias nuevas, las distancias del dibujo y el "
+                QStringLiteral("Decide cómo empiezan las cajas y equivalencias nuevas, las distancias del dibujo y el "
                                "tamaño por defecto de cada forma."),
                 {
                     heading(HOW),
@@ -719,15 +721,34 @@ namespace ui::help {
                     picture(pic("projectSettings", 1), QStringLiteral("Los ajustes de un proyecto.")),
                     heading(QStringLiteral("Qué se puede ajustar")),
                     text(QStringLiteral("<ul style=\"margin-left:-18px\">"
-                                        "<li><b>Cajas nuevas</b>: su forma, sus colores y su tamaño de fuente. Solo para "
-                                        "las que se creen a partir de ahora; las que ya existen no cambian. La vista "
-                                        "previa muestra cómo serán.</li>"
-                                        "<li><b>Equivalencias nuevas</b>: si se dibujan con línea continua o discontinua.</li>"
+                                        "<li><b>Valores iniciales de las cajas nuevas</b>: la forma, los colores y el "
+                                        "tamaño de fuente con los que empieza cada caja que crees a partir de ahora. "
+                                        "Son solo el punto de partida: después puedes cambiar cada caja desde sus "
+                                        "propiedades, y las que ya existen no cambian. La vista previa muestra cómo "
+                                        "empiezan.</li>"
+                                        "<li><b>Valor inicial de las equivalencias nuevas</b>: si empiezan con línea "
+                                        "continua o discontinua.</li>"
                                         "<li><b>Distancias</b>: entre cajas vecinas de un mismo nivel, entre las cajas y "
                                         "sus conexiones, y entre las líneas horizontales que se apilan entre dos niveles. "
-                                        "Todos los esquemas se redibujan con ellas.</li>"
+                                        "Todos los esquemas se redibujan con ellas, y el ejemplo de debajo te las "
+                                        "muestra mientras las cambias.</li>"
                                         "<li><b>Tamaño por defecto</b> de cada forma: el de las cajas que no tienen un "
                                         "tamaño propio (ver <b>Cambiar el tamaño de una caja</b>).</li></ul>")),
+                    heading(QStringLiteral("Cambiar las distancias")),
+                    text(QStringLiteral("Arrastra el punto de cada distancia a lo largo de su barra, o escribe el valor en "
+                                        "su campo. Debajo hay un pequeño esquema dibujado con ellas que se redibuja mientras "
+                                        "arrastras: la distancia que cambias aparece marcada, con lo que mide. Pasa el ratón "
+                                        "por una de las medidas del dibujo para ver cuál es, y haz clic en ella para ir a "
+                                        "su campo. Al pulsar <b>Intro</b> en un campo se queda el valor escrito, y el botón "
+                                        "<b>↺</b> de su fila lo devuelve al que tenía el proyecto.")),
+                    picture(pic("projectSettings", 3), QStringLiteral("La distancia entre líneas horizontales, marcada en el ejemplo.")),
+                    heading(QStringLiteral("Cambiar el tamaño por defecto")),
+                    text(QStringLiteral("Las tres formas aparecen una al lado de otra, a la misma escala, para compararlas. "
+                                        "Arrastra los bordes o las esquinas de una de ellas, como en <b>Propiedades</b>, o "
+                                        "escribe su ancho y su alto en los campos de debajo. Desde una esquina la forma "
+                                        "conserva sus proporciones; desde un lado, solo cambia el ancho o el alto. El "
+                                        "botón <b>↺</b> de cada fila le devuelve el tamaño que tenía el proyecto.")),
+                    picture(pic("projectSettings", 4), QStringLiteral("El círculo, a punto de cambiar de tamaño.")),
                     heading(QStringLiteral("Las cajas que ya existen")),
                     text(QStringLiteral("Si cambias el tamaño por defecto de una forma y hay cajas que lo usan, al aceptar "
                                         "se te pregunta qué hacer con ellas: con <b>Solo las cajas nuevas</b> se quedan "
@@ -744,7 +765,7 @@ namespace ui::help {
                                         "para volver atrás, abre de nuevo los ajustes y deja los valores como estaban.")),
                 },
                 QStringLiteral("ajustes configuración preferencias predeterminados defecto distancias separación "
-                               "tamaño forma color fuente equivalencias nuevo proyecto ctrl+,") });
+                               "tamaño forma color fuente equivalencias nuevo proyecto ejemplo vista previa inicial ctrl+,") });
 
             return t;
         }

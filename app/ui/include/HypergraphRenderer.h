@@ -247,8 +247,8 @@ namespace ui {
             const std::function<void(Hyperedge*, QPainterPath& solid, QPainterPath& dashed)>& commit_edge,
             const std::function<void(Node*, Node*, const QPainterPath&, bool)>& place_equivalence);
 
-        static constexpr double HOP_RADIUS = 5.0;
-        static constexpr double ARCH_HEIGHT = 10.0;
+        // HOP_RADIUS and ARCH_HEIGHT are the layout's (LayoutTypes.h): the
+        // distances it keeps between stacked bars rely on them.
     };
 
 } // namespace ui

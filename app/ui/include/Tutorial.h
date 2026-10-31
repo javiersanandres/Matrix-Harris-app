@@ -61,6 +61,7 @@ namespace ui::tutorial {
         ZoomLabel,         // the zoom shown in the status bar
         FileMenu,          // menu bar titles
         EditMenu,
+        ProjectMenu,
         HelpMenu,
     };
 

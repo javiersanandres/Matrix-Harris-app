@@ -160,6 +160,15 @@ namespace ui::tutorial {
                       key(QStringLiteral("Ctrl+S")), key(QStringLiteral("Ctrl+E"))),
               {}, { T::FileMenu, T::EditMenu } },
 
+            { QStringLiteral("Ajusta tu proyecto"),
+              QStringLiteral("En <b>Proyecto › Ajustes del proyecto…</b> (%1) eliges cómo empiezan las cajas y las "
+                             "equivalencias nuevas, el tamaño por defecto de cada forma y las distancias del dibujo. "
+                             "Arrastra el punto de cada distancia y un pequeño ejemplo se redibuja con ella; "
+                             "las formas se comparan una al lado de otra y se ajustan arrastrando sus bordes. "
+                             "Puedes guardarlos también como los predeterminados de tus proyectos nuevos.")
+                  .arg(key(QStringLiteral("Ctrl+,"))),
+              picture("project_settings"), { T::ProjectMenu } },
+
             { QStringLiteral("¡Listo para empezar!"),
               QStringLiteral("En <b>Ayuda</b> tienes todos los atajos de teclado y puedes repetir este recorrido "
                              "cuando quieras. Al terminar se cierra el proyecto de ejemplo y vuelves a tu proyecto "
