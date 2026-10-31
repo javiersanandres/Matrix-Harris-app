@@ -186,6 +186,16 @@ namespace ui {
         void onAjustesProyecto();
         void onAplicarPredeterminados();
 
+        // "Deshacer" / "Rehacer" of the Proyecto menu: the project's own history
+        // (adding, duplicating and removing diagrams, changing the settings).
+        // The menu names the step, and greys the entry out when there is none.
+        void onProjectHistory(bool undo);
+        void updateProjectHistoryActions();
+
+        // Makes the tabs match the project's diagrams again (after a project
+        // undo or redo): the diagrams still there keep their scene and zoom.
+        void syncDiagramTabs();
+
         // Gives the project these settings, which reach every diagram: if a new
         // default size would change boxes that use it, first asks whether they
         // should take it. Then every scene is redrawn (the active one gliding).
@@ -296,6 +306,8 @@ namespace ui {
         QAction* action_renombrar_;
         QAction* action_eliminar_esquema_;
         QAction* action_duplicar_esquema_ = nullptr;
+        QAction* action_deshacer_proyecto_ = nullptr;
+        QAction* action_rehacer_proyecto_ = nullptr;
         QAction* action_pegar_ = nullptr;
         QAction* action_menu_fast_ = nullptr;
         QAction* action_menu_slow_ = nullptr;

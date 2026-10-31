@@ -29,9 +29,8 @@ namespace app_logic {
 		// Create one initial empty diagram.
 		addDiagram();
 
-		// addDiagram() sets unsaved_changes_ = true via markUnsaved(), but a
-		// brand-new project with one empty diagram is considered clean.
-		unsaved_changes_ = false;
+		// A brand-new project with one empty diagram is clean, with nothing to undo.
+		forgetHistory();
 	}
 
 	// ============================================================================
@@ -47,7 +46,9 @@ namespace app_logic {
 			std::make_unique<HypergraphEditor>(GraphicalHypergraph(diagram_name)));
 		follow(*editors_.back());
 		active_index_ = static_cast<int>(editors_.size()) - 1;
-		markUnsaved();
+		ProjectStep step{ ProjectStep::Kind::AddDiagram, "añadir" };
+		step.index = active_index_;
+		record(std::move(step));
 		return active_index_;
 	}
 
@@ -68,7 +69,9 @@ namespace app_logic {
 		editors_.push_back(std::make_unique<HypergraphEditor>(std::move(copy), InitialLayout::Keep));
 		follow(*editors_.back());
 		active_index_ = static_cast<int>(editors_.size()) - 1;
-		markUnsaved();
+		ProjectStep step{ ProjectStep::Kind::AddDiagram, "duplicar" };
+		step.index = active_index_;
+		record(std::move(step));
 		return active_index_;
 	}
 
@@ -76,6 +79,24 @@ namespace app_logic {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::removeDiagram: index out of bounds.");
 
+		ProjectStep step{ ProjectStep::Kind::RemoveDiagram, "eliminar" };
+		step.index = index;
+		step.held = takeEditor(index);
+		record(std::move(step));
+	}
+
+	// ============================================================================
+	// Project history
+	// ============================================================================
+
+	void Project::insertEditor(int index, std::unique_ptr<HypergraphEditor> editor) {
+		editors_.insert(editors_.begin() + index, std::move(editor));
+		follow(*editors_[index]); // the settings may have changed while it was out
+		active_index_ = index;
+	}
+
+	std::unique_ptr<HypergraphEditor> Project::takeEditor(int index) {
+		std::unique_ptr<HypergraphEditor> editor = std::move(editors_[index]);
 		editors_.erase(editors_.begin() + index);
 
 		// Adjust active index.
@@ -88,8 +109,108 @@ namespace app_logic {
 		else if (active_index_ > index) {
 			--active_index_;
 		}
+		return editor;
+	}
 
-		markUnsaved();
+	void Project::record(ProjectStep step) {
+		step.id = next_step_++;
+		future_.clear();
+		past_.push_back(std::move(step));
+		if (static_cast<int>(past_.size()) > HypergraphEditor::MAX_HISTORY) {
+			floor_step_ = past_.front().id;
+			past_.pop_front();
+		}
+	}
+
+	void Project::forgetHistory() {
+		past_.clear();
+		future_.clear();
+		floor_step_ = 0;
+		saved_step_ = 0;
+		unsaved_changes_ = false;
+	}
+
+	void Project::undoProjectChange() {
+		if (past_.empty()) return;
+		ProjectStep step = std::move(past_.back());
+		past_.pop_back();
+		undo(step);
+		future_.push_back(std::move(step));
+	}
+
+	void Project::redoProjectChange() {
+		if (future_.empty()) return;
+		ProjectStep step = std::move(future_.back());
+		future_.pop_back();
+		redo(step);
+		past_.push_back(std::move(step));
+	}
+
+	void Project::undo(ProjectStep& step) {
+		switch (step.kind) {
+		case ProjectStep::Kind::AddDiagram:
+			step.held = takeEditor(step.index);
+			if (!editors_.empty()) active_index_ = std::min(step.index, static_cast<int>(editors_.size()) - 1);
+			break;
+		case ProjectStep::Kind::RemoveDiagram:
+			insertEditor(step.index, std::move(step.held));
+			break;
+		case ProjectStep::Kind::Settings: {
+			const BoxSizes old_sizes = step.before.layout.box_sizes;
+			const BoxSizes new_sizes = step.after.layout.box_sizes;
+			if (step.existing == ExistingBoxes::KeepTheirSize && old_sizes != new_sizes) {
+				// The sizes the change gave as their own to the boxes using an old
+				// default go: with that default back, they follow it again.
+				auto follow_again = [old_sizes, new_sizes](GraphicalHypergraph& g) {
+					for (const auto& node : g.getAllNodes()) {
+						if (node->isDummy()) continue;
+						NodeAttributes a = node->getAttributes();
+						const double old_w = NodeAttributes::defaultWidth(a.shape, &old_sizes);
+						const double old_h = NodeAttributes::defaultHeight(a.shape, &old_sizes);
+						if (a.width && *a.width == old_w && old_w != NodeAttributes::defaultWidth(a.shape, &new_sizes))
+							a.width.reset();
+						if (a.height && *a.height == old_h && old_h != NodeAttributes::defaultHeight(a.shape, &new_sizes))
+							a.height.reset();
+						if (a != node->getAttributes()) node->setAttributes(a);
+					}
+				};
+				for (const auto& editor : editors_) editor->applyEverywhere(follow_again);
+				joint_editor_->applyEverywhere(follow_again);
+			}
+			applySettings(step.before, ExistingBoxes::TakeNewSize);
+			break;
+		}
+		}
+	}
+
+	void Project::redo(ProjectStep& step) {
+		switch (step.kind) {
+		case ProjectStep::Kind::AddDiagram:
+			insertEditor(step.index, std::move(step.held));
+			break;
+		case ProjectStep::Kind::RemoveDiagram:
+			step.held = takeEditor(step.index);
+			break;
+		case ProjectStep::Kind::Settings:
+			applySettings(step.after, step.existing);
+			break;
+		}
+	}
+
+	std::string Project::label(const ProjectStep& step, bool undone) const {
+		if (step.kind == ProjectStep::Kind::Settings) return "cambiar los ajustes del proyecto";
+		// The diagram as it is called now: in the project, or held by the step.
+		const bool in_project = (step.kind == ProjectStep::Kind::AddDiagram) != undone;
+		const HypergraphEditor* editor = in_project ? editors_[step.index].get() : step.held.get();
+		return step.verb + " «" + (editor ? editor->getName() : std::string()) + "»";
+	}
+
+	std::string Project::projectUndoLabel() const {
+		return past_.empty() ? std::string() : label(past_.back(), false);
+	}
+
+	std::string Project::projectRedoLabel() const {
+		return future_.empty() ? std::string() : label(future_.back(), true);
 	}
 
 	void Project::syncJointNames() {
@@ -185,7 +306,7 @@ namespace app_logic {
 	}
 
 	bool Project::hasUnsavedChanges() const {
-		if (unsaved_changes_) return true;
+		if (unsaved_changes_ || currentStep() != saved_step_) return true;
 		for (const auto& editor : editors_)
 			if (!editor->isAtSavedState()) return true;
 		return !joint_editor_->isAtSavedState();
@@ -209,7 +330,15 @@ namespace app_logic {
 	void Project::setSettings(const ProjectSettings& settings, ExistingBoxes existing) {
 		const ProjectSettings clamped = settings.clamped();
 		if (clamped == *settings_) return;
+		ProjectStep step{ ProjectStep::Kind::Settings };
+		step.before = *settings_;
+		step.after = clamped;
+		step.existing = existing;
+		applySettings(clamped, existing);
+		record(std::move(step));
+	}
 
+	void Project::applySettings(const ProjectSettings& clamped, ExistingBoxes existing) {
 		const BoxSizes before = settings_->layout.box_sizes;
 		const BoxSizes after = clamped.layout.box_sizes;
 		if (existing == ExistingBoxes::KeepTheirSize && before != after) {
@@ -231,7 +360,6 @@ namespace app_logic {
 
 		*settings_ = clamped;
 		conformAll();
-		markUnsaved();
 	}
 
 	bool Project::usesDefaultSizesChangedBy(const BoxSizes& sizes) const {
@@ -332,6 +460,7 @@ namespace app_logic {
 
 		file_path_ = path;
 		unsaved_changes_ = false;
+		saved_step_ = currentStep();
 		for (const auto& editor : editors_) editor->markSaved();
 		joint_editor_->markSaved();
 	}
@@ -394,7 +523,7 @@ namespace app_logic {
 
 		p->active_index_ = j.at("active_index").get<int>();
 		p->file_path_ = path;
-		p->unsaved_changes_ = false;
+		p->forgetHistory();
 
 		return p;
 	}

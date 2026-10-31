@@ -1,5 +1,6 @@
 #include "OptionsHelp.h"
 #include "AppDialogs.h"
+#include "HypergraphEditor.h"
 #include "PictureViewer.h"
 #include "UiStyle.h"
 
@@ -716,7 +717,7 @@ namespace ui::help {
                 {
                     heading(HOW),
                     text(QStringLiteral("Abre el menú <b>Proyecto</b> y elige <b>Ajustes del proyecto…</b> (o pulsa "
-                                        "<b>Ctrl+,</b>). Cambia lo que quieras y pulsa <b>Aceptar</b>: se aplica a todos "
+                                        "<b>Ctrl+Alt+S</b>). Cambia lo que quieras y pulsa <b>Aceptar</b>: se aplica a todos "
                                         "los esquemas del proyecto, también al esquema conjunto.")),
                     picture(pic("projectSettings", 1), QStringLiteral("Los ajustes de un proyecto.")),
                     heading(QStringLiteral("Qué se puede ajustar")),
@@ -761,11 +762,36 @@ namespace ui::help {
                     text(QStringLiteral("Para que un proyecto que ya tienes adopte los predeterminados de la aplicación de "
                                         "una vez, elige <b>Proyecto › Aplicar los ajustes predeterminados de la "
                                         "aplicación</b>.")),
-                    note(QStringLiteral("Los ajustes se guardan con el proyecto. Cambiarlos no se deshace con <b>Ctrl+Z</b>: "
-                                        "para volver atrás, abre de nuevo los ajustes y deja los valores como estaban.")),
+                    note(QStringLiteral("Los ajustes se guardan con el proyecto. Un cambio de ajustes se deshace con "
+                                        "<b>Proyecto › Deshacer</b> (<b>Ctrl+Alt+Z</b>), no con <b>Ctrl+Z</b>: ver "
+                                        "<b>Deshacer cambios del proyecto</b>.")),
                 },
                 QStringLiteral("ajustes configuración preferencias predeterminados defecto distancias separación "
-                               "tamaño forma color fuente equivalencias nuevo proyecto ejemplo vista previa inicial ctrl+,") });
+                               "tamaño forma color fuente equivalencias nuevo proyecto ejemplo vista previa inicial ctrl+alt+s") });
+
+            t.push_back({ "projectHistory", PROJECT, QStringLiteral("Deshacer cambios del proyecto"), I::ProjectUndo,
+                QStringLiteral("Añadir, duplicar o eliminar un esquema y cambiar los ajustes también se deshacen."),
+                {
+                    heading(HOW),
+                    text(QStringLiteral("Abre el menú <b>Proyecto</b> y elige <b>Deshacer</b> (o pulsa <b>Ctrl+Alt+Z</b>); "
+                                        "<b>Rehacer</b> (<b>Ctrl+Alt+Y</b>) lo vuelve a hacer. El menú dice qué se va a "
+                                        "deshacer, por ejemplo <i>Deshacer: eliminar «Esquema 2»</i>, y aparece en gris "
+                                        "cuando no hay nada.")),
+                    picture(pic("projectHistory", 1), QStringLiteral("Tras eliminar el «Esquema 2», el menú ofrece recuperarlo.")),
+                    heading(QStringLiteral("Qué se deshace")),
+                    text(QStringLiteral("<ul style=\"margin-left:-18px\">"
+                                        "<li><b>Eliminar un esquema</b>: vuelve a su pestaña, con todo lo que tenía y "
+                                        "con su propio <b>Ctrl+Z</b>.</li>"
+                                        "<li><b>Añadir o duplicar un esquema</b>: el esquema se va, tal como esté (aunque "
+                                        "lo hayas cambiado después), y <b>Rehacer</b> lo trae de vuelta igual.</li>"
+                                        "<li><b>Cambiar los ajustes del proyecto</b>: vuelven los anteriores, y todos los "
+                                        "esquemas se redibujan con ellos.</li></ul>")),
+                    note(QStringLiteral("Son dos historiales distintos: <b>Ctrl+Z</b> deshace los cambios dentro del "
+                                        "esquema abierto, y <b>Ctrl+Alt+Z</b>, los del proyecto. Cada uno guarda los "
+                                        "últimos %1 pasos.").arg(app_logic::HypergraphEditor::MAX_HISTORY)),
+                },
+                QStringLiteral("deshacer rehacer proyecto eliminar esquema recuperar añadir duplicar ajustes "
+                               "ctrl+alt+z ctrl+alt+y historial") });
 
             return t;
         }

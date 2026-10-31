@@ -4,6 +4,7 @@
 #include "JointHypergraphEditor.h"
 #include "ProjectSettings.h"
 
+#include <deque>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -82,7 +83,8 @@ namespace app_logic {
 		// Removes the diagram at the given index. If the removed diagram was active,
 		// the active index is adjusted to the preceding diagram (or to 0 if none
 		// precede it, or to -1 if the list becomes empty).
-		// The joint diagram is not modified. This operation cannot be undone.
+		// The joint diagram is not modified. It is a step of the project's history
+		// (see undoProjectChange), as adding and duplicating a diagram are.
 		// Throws std::out_of_range if index is out of bounds.
 		//
 		void removeDiagram(int index);
@@ -235,9 +237,38 @@ namespace app_logic {
 		//static Project load(const std::filesystem::path& path);
 		static std::unique_ptr<Project> load(const std::filesystem::path& path);
 
-		// Records a change outside every diagram's undo history, so it counts as
-		// unsaved until the next save.
+		// Records a change outside every history, so it counts as unsaved until
+		// the next save.
 		void markUnsaved() { unsaved_changes_ = true; }
+
+		// ── Project history ───────────────────────────────────────────────────────
+		//
+		// The changes to the project itself, outside every diagram's history:
+		// adding, duplicating and removing a diagram, and changing the settings.
+		// They are undone and redone here, apart from the diagrams' own Ctrl+Z,
+		// up to MAX_HISTORY steps back as a diagram's history.
+		//
+		//   - Undoing an addition (or a duplication) takes the diagram out as it
+		//     is now, with its own history; redoing it puts it back as it was.
+		//   - Undoing a removal puts the diagram back where it was, with its
+		//     history; redoing it removes it again.
+		//   - Undoing a change of settings brings back the previous ones. When
+		//     existing boxes kept their size as their own (KeepTheirSize), the
+		//     sizes it gave them are taken away again: those boxes follow the
+		//     default once more (a size typed later that happens to equal it is
+		//     taken for one of those).
+		//
+		// A new step forgets the ones undone. Undoing or redoing makes the
+		// diagram concerned the active one (for a settings change, the active
+		// one stays). The labels describe the step ("eliminar «Esquema 2»"), for
+		// the menu.
+		//
+		bool canUndoProjectChange() const { return !past_.empty(); }
+		bool canRedoProjectChange() const { return !future_.empty(); }
+		std::string projectUndoLabel() const;
+		std::string projectRedoLabel() const;
+		void undoProjectChange();
+		void redoProjectChange();
 
 		// ── Recent colours ────────────────────────────────────────────────────────
 		//
@@ -264,7 +295,7 @@ namespace app_logic {
 		// and the joint at once: everything is drawn again with the new distances
 		// and default sizes. The defaults for new boxes and equivalences only
 		// apply to those created afterwards. That is not a step of any diagram's
-		// history (it cannot be undone), but it counts as an unsaved change.
+		// history, but of the project's.
 		//
 		// A new default size of a shape reaches the boxes that use its default
 		// (no size of their own) only with ExistingBoxes::TakeNewSize; with
@@ -272,7 +303,8 @@ namespace app_logic {
 		// also in what undo and redo bring back.
 		//
 		// Every diagram keeps matching the settings, also after an undo or redo
-		// (see HypergraphEditorBase::setConformer).
+		// (see HypergraphEditorBase::setConformer). A change of settings is a
+		// step of the project's history (see undoProjectChange).
 		//
 		enum class ExistingBoxes { KeepTheirSize, TakeNewSize };
 		const ProjectSettings& getSettings() const { return *settings_; }
@@ -302,10 +334,37 @@ namespace app_logic {
 		void follow(Editor& editor);
 		void conformAll();
 
+		// A step of the project's history. The diagram it adds or removes is
+		// held by the step while it is out of the project.
+		struct ProjectStep {
+			enum class Kind { AddDiagram, RemoveDiagram, Settings } kind;
+			std::string verb;                          // "añadir", "duplicar", "eliminar"
+			int index = -1;                            // where the diagram is (or was)
+			std::unique_ptr<HypergraphEditor> held;
+			ProjectSettings before, after;
+			ExistingBoxes existing = ExistingBoxes::KeepTheirSize;
+			int id = 0;                                // tells saved states apart
+		};
+		void record(ProjectStep step);
+		void undo(ProjectStep& step);
+		void redo(ProjectStep& step);
+		std::string label(const ProjectStep& step, bool undone) const;
+		void forgetHistory();
+		int currentStep() const { return past_.empty() ? floor_step_ : past_.back().id; }
+
+		void insertEditor(int index, std::unique_ptr<HypergraphEditor> editor);
+		std::unique_ptr<HypergraphEditor> takeEditor(int index);
+		void applySettings(const ProjectSettings& settings, ExistingBoxes existing);
+
 		std::string name_;
 		std::filesystem::path file_path_;
 		int active_index_ = 0;
-		bool unsaved_changes_ = false; // changes outside the diagrams' histories
+		bool unsaved_changes_ = false; // changes outside every history
+
+		std::deque<ProjectStep> past_, future_;
+		int next_step_ = 1;
+		int floor_step_ = 0;  // the step below the oldest one kept (0: none)
+		int saved_step_ = 0;  // currentStep() when last saved
 
 		std::vector<std::unique_ptr<HypergraphEditor>> editors_;
 		std::unique_ptr<JointHypergraphEditor> joint_editor_;

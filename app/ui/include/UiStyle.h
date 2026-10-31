@@ -71,6 +71,7 @@ namespace ui::style {
         RemoveEquivalence, // two boxes side by side whose line is cut
         Resize,            // a box grown out of its old size, with a corner knob
         Settings,          // a gear: the project's settings
+        ProjectUndo,       // an arrow curling back to the left: undoing a project change
     };
 
     QIcon icon(Icon which);

@@ -97,6 +97,9 @@ namespace ui {
         explicit DiagramScene(app_logic::HypergraphEditor* editor,
             QObject* parent = nullptr);
 
+        // The regular diagram's editor (null for the joint's scene).
+        app_logic::HypergraphEditor* regularEditor() const { return regular_editor_; }
+
         // Construct for the joint diagram editor.
         explicit DiagramScene(app_logic::JointHypergraphEditor* editor,
             QObject* parent = nullptr);

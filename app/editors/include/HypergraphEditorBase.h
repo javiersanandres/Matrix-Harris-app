@@ -102,9 +102,9 @@ namespace app_logic {
 
 		// This is the maximum number of steps that the undo and redo stacks can
 		// hold. When the cap is exceeded, the oldest step is discarded. It is
-		// unlikely that the user will want to undo more than 25 steps, and keeping
+		// unlikely that the user will want to undo more than 50 steps, and keeping
 		// more snapshots in memory would be wasteful.
-		static constexpr int MAX_HISTORY = 25;
+		static constexpr int MAX_HISTORY = 50;
 
 		// ── Undo / Redo ───────────────────────────────────────────────────────────
 

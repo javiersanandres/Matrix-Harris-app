@@ -702,6 +702,131 @@ namespace app_logic {
                 fs::remove(tmp);
             }
 
+
+            // ── The project's history ───────────────────────────────────────────
+
+            TEST(ProjectHistory, ARemovedDiagramComesBackWithItsHistory) {
+                Project p("P");
+                p.getEditor(0).setName("A");
+                p.getEditor(0).createNode(NodeAttributes("1"), 0, -1, nullptr);
+                p.addDiagram();
+                p.getEditor(1).setName("B");
+                p.removeDiagram(0);
+                ASSERT_EQ(p.getDiagramCount(), 1);
+                EXPECT_EQ(p.projectUndoLabel(), "eliminar «A»");
+
+                p.undoProjectChange();
+                ASSERT_EQ(p.getDiagramCount(), 2);
+                EXPECT_EQ(p.getDiagramName(0), "A");
+                EXPECT_EQ(p.getActiveIndex(), 0);
+                EXPECT_EQ(p.getEditor(0).getAllNodes().size(), 1u);
+                p.getEditor(0).undo(); // its own history came back too
+                EXPECT_TRUE(p.getEditor(0).getAllNodes().empty());
+
+                EXPECT_EQ(p.projectRedoLabel(), "eliminar «A»");
+                p.redoProjectChange();
+                ASSERT_EQ(p.getDiagramCount(), 1);
+                EXPECT_EQ(p.getDiagramName(0), "B");
+            }
+
+            TEST(ProjectHistory, AnAddedDiagramLeavesAndComesBackAsItWas) {
+                Project p("P");
+                p.addDiagram();
+                p.getEditor(1).setName("Nuevo");
+                p.getEditor(1).createNode(NodeAttributes("1"), 0, -1, nullptr);
+                EXPECT_EQ(p.projectUndoLabel(), "añadir «Nuevo»"); // its name now
+
+                p.undoProjectChange();
+                EXPECT_EQ(p.getDiagramCount(), 1);
+                EXPECT_EQ(p.getActiveIndex(), 0);
+                p.redoProjectChange();
+                ASSERT_EQ(p.getDiagramCount(), 2);
+                EXPECT_EQ(p.getDiagramName(1), "Nuevo");
+                EXPECT_EQ(p.getEditor(1).getAllNodes().size(), 1u);
+                EXPECT_EQ(p.getActiveIndex(), 1);
+            }
+
+            TEST(ProjectHistory, ADuplicateIsAStepToo) {
+                Project p("P");
+                p.getEditor(0).setName("A");
+                p.duplicateDiagram(0);
+                EXPECT_EQ(p.projectUndoLabel(), "duplicar «A (copia)»");
+                p.undoProjectChange();
+                EXPECT_EQ(p.getDiagramCount(), 1);
+            }
+
+            TEST(ProjectHistory, SettingsComeBack) {
+                Project p("P");
+                threeBoxes(p);
+                const ProjectSettings before = p.getSettings();
+                ProjectSettings s = before;
+                s.layout.block_sep = 150.0;
+                s.layout.box_sizes.rectangle = BoxSize{ 160.0, NODE_HEIGHT };
+                p.setSettings(s, Project::ExistingBoxes::KeepTheirSize);
+                EXPECT_EQ(p.projectUndoLabel(), "cambiar los ajustes del proyecto");
+
+                p.undoProjectChange();
+                EXPECT_EQ(p.getSettings(), before);
+                const auto& g = p.getEditor(0).getGraph();
+                EXPECT_EQ(g.getLayoutSettings(), before.layout);
+                // The size the change gave A as its own is gone: it follows the default again.
+                EXPECT_FALSE(boxNamed(g, "A")->getAttributes().width.has_value());
+
+                p.redoProjectChange();
+                EXPECT_EQ(p.getSettings(), s);
+                EXPECT_EQ(boxNamed(p.getEditor(0).getGraph(), "A")->getAttributes().width, NODE_WIDTH);
+            }
+
+            TEST(ProjectHistory, UndoingBackToTheSavedStateLeavesNothingUnsaved) {
+                namespace fs = std::filesystem;
+                fs::path tmp = fs::temp_directory_path() / "test_project_history_saved.json";
+                Project p("P");
+                p.addDiagram();
+                p.save(tmp);
+                p.removeDiagram(1);
+                EXPECT_TRUE(p.hasUnsavedChanges());
+                p.undoProjectChange();
+                EXPECT_FALSE(p.hasUnsavedChanges());
+                p.undoProjectChange(); // before the save: unsaved again
+                EXPECT_TRUE(p.hasUnsavedChanges());
+                p.redoProjectChange();
+                EXPECT_FALSE(p.hasUnsavedChanges());
+                fs::remove(tmp);
+            }
+
+            TEST(ProjectHistory, ANewStepForgetsWhatWasUndone) {
+                Project p("P");
+                p.addDiagram();
+                p.undoProjectChange();
+                EXPECT_TRUE(p.canRedoProjectChange());
+                p.duplicateDiagram(0);
+                EXPECT_FALSE(p.canRedoProjectChange());
+            }
+
+            TEST(ProjectHistory, KeepsAsManyStepsAsADiagram) {
+                Project p("P");
+                for (int i = 0; i < HypergraphEditor::MAX_HISTORY + 5; ++i) p.addDiagram();
+                int undone = 0;
+                while (p.canUndoProjectChange()) { p.undoProjectChange(); ++undone; }
+                EXPECT_EQ(undone, HypergraphEditor::MAX_HISTORY);
+                EXPECT_TRUE(p.hasUnsavedChanges()); // the oldest steps are still there
+            }
+
+            TEST(ProjectHistory, ANewOrLoadedProjectHasNothingToUndo) {
+                namespace fs = std::filesystem;
+                fs::path tmp = fs::temp_directory_path() / "test_project_history_load.json";
+                {
+                    Project p("P");
+                    EXPECT_FALSE(p.canUndoProjectChange());
+                    p.addDiagram();
+                    p.save(tmp);
+                } // only one project at a time
+                auto loaded = Project::load(tmp);
+                EXPECT_FALSE(loaded->canUndoProjectChange());
+                EXPECT_FALSE(loaded->hasUnsavedChanges());
+                fs::remove(tmp);
+            }
+
         } // namespace project_tests
     } // namespace editors
 } // namespace app_logic

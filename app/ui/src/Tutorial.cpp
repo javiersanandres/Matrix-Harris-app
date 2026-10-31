@@ -154,11 +154,14 @@ namespace ui::tutorial {
               {}, { T::MinimizePanel } },
 
             { QStringLiteral("Deshaz, guarda y comparte"),
-              QStringLiteral("Cualquier cambio se deshace con %1 y se rehace con %2 (menú <b>Editar</b>). Guarda el "
-                             "proyecto con %3 y exporta tus esquemas como PDF o imágenes con %4 (menú <b>Archivo</b>).")
+              QStringLiteral("Cualquier cambio en un esquema se deshace con %1 y se rehace con %2 (menú <b>Editar</b>). "
+                             "Los cambios del proyecto (añadir, duplicar o eliminar un esquema, cambiar los ajustes) "
+                             "tienen su propio %5 y %6, en el menú <b>Proyecto</b>. Guarda el proyecto con %3 y "
+                             "exporta tus esquemas como PDF o imágenes con %4 (menú <b>Archivo</b>).")
                   .arg(key(QStringLiteral("Ctrl+Z")), key(QStringLiteral("Ctrl+Y")),
-                      key(QStringLiteral("Ctrl+S")), key(QStringLiteral("Ctrl+E"))),
-              {}, { T::FileMenu, T::EditMenu } },
+                      key(QStringLiteral("Ctrl+S")), key(QStringLiteral("Ctrl+E")),
+                      key(QStringLiteral("Ctrl+Alt+Z")), key(QStringLiteral("Ctrl+Alt+Y"))),
+              {}, { T::FileMenu, T::EditMenu, T::ProjectMenu } },
 
             { QStringLiteral("Ajusta tu proyecto"),
               QStringLiteral("En <b>Proyecto › Ajustes del proyecto…</b> (%1) eliges cómo empiezan las cajas y las "
@@ -166,7 +169,7 @@ namespace ui::tutorial {
                              "Arrastra el punto de cada distancia y un pequeño ejemplo se redibuja con ella; "
                              "las formas se comparan una al lado de otra y se ajustan arrastrando sus bordes. "
                              "Puedes guardarlos también como los predeterminados de tus proyectos nuevos.")
-                  .arg(key(QStringLiteral("Ctrl+,"))),
+                  .arg(key(QStringLiteral("Ctrl+Alt+S"))),
               picture("project_settings"), { T::ProjectMenu } },
 
             { QStringLiteral("¡Listo para empezar!"),

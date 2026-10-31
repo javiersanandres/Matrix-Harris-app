@@ -405,6 +405,18 @@ namespace ui::style {
                 p.drawPath(gear.subtracted(hole));
                 break;
             }
+            case Icon::ProjectUndo: {
+                // An arrow curling back to the left, its head on the left.
+                QPainterPath arrow;
+                arrow.moveTo(15.5, 16.0);
+                arrow.cubicTo(18.5, 9.0, 12.5, 4.0, 5.0, 7.5);
+                p.setPen(c.pen(palette::accent, 1.6));
+                p.setBrush(Qt::NoBrush);
+                p.drawPath(arrow);
+                p.setBrush(palette::accent);
+                p.drawPolygon(QPolygonF({ QPointF(2.5, 8.5), QPointF(6.5, 4.0), QPointF(7.5, 10.0) }));
+                break;
+            }
             case Icon::TakeOut: {
                 // The joint's dashed frame, and a piece leaving it up and to the right.
                 p.setPen(c.pen(palette::faint, 1.2, Qt::DashLine));

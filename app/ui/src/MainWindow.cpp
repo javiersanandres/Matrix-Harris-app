@@ -178,7 +178,7 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         nuevo->setIcon(style::icon(style::Icon::NewBox));
         action_renombrar_ = add(esquema, QStringLiteral("Renombrar esquema"), QKeySequence(QStringLiteral("F2")),
             this, &MainWindow::onRenombrarEsquema);
-        action_eliminar_esquema_ = add(esquema, QStringLiteral("Eliminar esquema…"), QKeySequence(),
+        action_eliminar_esquema_ = add(esquema, QStringLiteral("Eliminar esquema"), QKeySequence(),
             this, &MainWindow::onEliminarEsquemaActivo);
         action_eliminar_esquema_->setIcon(style::icon(style::Icon::RemoveBox));
         action_duplicar_esquema_ = add(esquema, QStringLiteral("Duplicar esquema"), QKeySequence(QStringLiteral("Ctrl+D")),
@@ -209,7 +209,18 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
 
         // ── Proyecto ──────────────────────────────────────────────────────────────
         QMenu* proyecto = addMenu(QStringLiteral("Proyecto"));
-        QAction* ajustes = add(proyecto, QStringLiteral("Ajustes del proyecto…"), QKeySequence(QStringLiteral("Ctrl+,")),
+        action_deshacer_proyecto_ = add(proyecto, QStringLiteral("Deshacer"), QKeySequence(QStringLiteral("Ctrl+Alt+Z")),
+            this, [this] { onProjectHistory(true); });
+        action_deshacer_proyecto_->setIcon(style::icon(style::Icon::ProjectUndo));
+        action_deshacer_proyecto_->setToolTip(QStringLiteral(
+            "Deshace el último cambio del proyecto: añadir, duplicar o eliminar un esquema, o cambiar los ajustes"));
+        action_rehacer_proyecto_ = add(proyecto, QStringLiteral("Rehacer"), QKeySequence(QStringLiteral("Ctrl+Alt+Y")),
+            this, [this] { onProjectHistory(false); });
+        action_rehacer_proyecto_->setToolTip(QStringLiteral("Rehace el último cambio del proyecto deshecho"));
+        action_deshacer_proyecto_->setEnabled(false);
+        action_rehacer_proyecto_->setEnabled(false);
+        proyecto->addSeparator();
+        QAction* ajustes = add(proyecto, QStringLiteral("Ajustes del proyecto…"), QKeySequence(QStringLiteral("Ctrl+Alt+S")),
             this, &MainWindow::onAjustesProyecto);
         ajustes->setIcon(style::icon(style::Icon::Settings));
         ajustes->setToolTip(QStringLiteral("Lo que este proyecto decide para todos sus esquemas: cajas nuevas, "
@@ -812,6 +823,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     }
 
     void MainWindow::updateWindowTitle() {
+        updateProjectHistoryActions(); // every change of the project ends up here
         QString title = QString::fromStdString(project_->getName());
         if (project_->hasUnsavedChanges()) title += QStringLiteral(" *");
         setWindowTitle(title + QStringLiteral(" — Taller Matrix Harris"));
@@ -1311,7 +1323,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         menu->addAction(style::icon(style::Icon::Duplicate), QStringLiteral("Duplicar esquema"),
             this, [this, index] { duplicateDiagram(index); });
         menu->addSeparator();
-        menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar esquema…"),
+        menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar esquema"),
             this, [this, index] { onRemoveDiagram(index); });
         help::addHelpButtons(menu, this);
         menu->popup(global_pos);
@@ -1402,12 +1414,8 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
     void MainWindow::onRemoveDiagram(int index) {
         if (index < 0 || index >= static_cast<int>(scenes_.size())) return;
 
+        // No need to ask: Proyecto › Deshacer brings it back.
         const QString name = QString::fromStdString(project_->getDiagramName(index));
-        if (!dialogs::confirm(this, QStringLiteral("¿Eliminar «%1»?").arg(name),
-                QStringLiteral("Se eliminará el esquema con todas sus cajas y conexiones. "
-                               "Esta acción no se puede deshacer."),
-                QStringLiteral("Eliminar"), true))
-            return;
 
         // Remove scene and zoom level.
         if (central_view_->scene() == scenes_[index]) central_view_->setScene(nullptr);
@@ -1431,7 +1439,86 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             updateUndoRedoActions();
         }
         updateWindowTitle();
-        statusBar()->showMessage(QStringLiteral("Esquema «%1» eliminado").arg(name), 3000);
+        statusBar()->showMessage(QStringLiteral("Esquema «%1» eliminado (Ctrl+Alt+Z lo recupera)").arg(name), 5000);
+    }
+
+    // ============================================================================
+    // The project's history
+    // ============================================================================
+
+    void MainWindow::updateProjectHistoryActions() {
+        if (!action_deshacer_proyecto_ || !project_) return;
+        const bool can_undo = project_->canUndoProjectChange();
+        const bool can_redo = project_->canRedoProjectChange();
+        action_deshacer_proyecto_->setEnabled(can_undo);
+        action_rehacer_proyecto_->setEnabled(can_redo);
+        action_deshacer_proyecto_->setText(can_undo
+            ? QStringLiteral("Deshacer: %1").arg(QString::fromStdString(project_->projectUndoLabel()))
+            : QStringLiteral("Deshacer"));
+        action_rehacer_proyecto_->setText(can_redo
+            ? QStringLiteral("Rehacer: %1").arg(QString::fromStdString(project_->projectRedoLabel()))
+            : QStringLiteral("Rehacer"));
+    }
+
+    void MainWindow::onProjectHistory(bool undo) {
+        if (undo ? !project_->canUndoProjectChange() : !project_->canRedoProjectChange()) return;
+        const QString what = QString::fromStdString(undo ? project_->projectUndoLabel() : project_->projectRedoLabel());
+        if (auto* scene = activeScene()) scene->cancelInteraction();
+
+        const app_logic::ProjectSettings settings_before = project_->getSettings();
+        if (undo) project_->undoProjectChange();
+        else      project_->redoProjectChange();
+
+        syncDiagramTabs();
+        if (project_->getSettings() != settings_before) {
+            // Every diagram and the joint are drawn again with the settings back.
+            for (DiagramScene* scene : scenes_) scene->rebuild();
+            if (joint_scene_) joint_scene_->rebuild();
+        }
+        updateWindowTitle();
+        updateStatusBar();
+        statusBar()->showMessage((undo ? QStringLiteral("Deshecho: %1") : QStringLiteral("Rehecho: %1")).arg(what), 5000);
+    }
+
+    void MainWindow::syncDiagramTabs() {
+        // What each diagram on show had: its scene and its zoom.
+        std::unordered_map<const app_logic::HypergraphEditor*, std::pair<DiagramScene*, double>> had;
+        DiagramScene* shown = activeScene();
+        for (size_t i = 0; i < scenes_.size(); ++i) {
+            const double zoom = scenes_[i] == shown ? central_view_->currentZoom()
+                : (i < zoom_levels_.size() ? zoom_levels_[i] : 0.0);
+            had[scenes_[i]->regularEditor()] = { scenes_[i], zoom };
+        }
+        if (shown == joint_scene_ && shown) joint_zoom_ = central_view_->currentZoom();
+        hint_banner_->setHint(QString());
+        central_view_->setScene(nullptr);
+        while (tab_bar_->tabCount() > 0) tab_bar_->removeTab(0);
+        scenes_.clear();
+        zoom_levels_.clear();
+
+        for (int i = 0; i < project_->getDiagramCount(); ++i) {
+            app_logic::HypergraphEditor* editor = &project_->getEditor(i);
+            DiagramScene* scene = nullptr;
+            double zoom = 0.0;
+            if (auto it = had.find(editor); it != had.end()) {
+                std::tie(scene, zoom) = it->second;
+                had.erase(it);
+            }
+            else {
+                // A diagram back in the project: a scene for it again.
+                editor->setOnMutated([this] { onEditorMutated(); });
+                scene = createSceneForEditor(i);
+            }
+            scenes_.push_back(scene);
+            zoom_levels_.push_back(zoom);
+            tab_bar_->addTab(scene, QString::fromStdString(project_->getDiagramName(i)));
+        }
+        // The scenes of the diagrams that left (the project keeps their editors).
+        for (auto& [editor, scene_zoom] : had) delete scene_zoom.first;
+
+        int active = project_->getActiveIndex();
+        if (active >= project_->getDiagramCount()) active = project_->getDiagramCount() - 1;
+        switchToTab(active);
     }
 
     // ============================================================================
@@ -1485,7 +1572,10 @@ QLabel#what { color: #3A4050; }
                 { QStringLiteral("Ctrl+S"), QStringLiteral("Guardar") },
                 { QStringLiteral("Ctrl+Mayús+S"), QStringLiteral("Guardar como") },
                 { QStringLiteral("Ctrl+E"), QStringLiteral("Exportar el esquema") },
-                { QStringLiteral("Ctrl+Mayús+E"), QStringLiteral("Exportar el proyecto") } } },
+                { QStringLiteral("Ctrl+Mayús+E"), QStringLiteral("Exportar el proyecto") },
+                { QStringLiteral("Ctrl+Alt+Z"), QStringLiteral("Deshacer un cambio del proyecto") },
+                { QStringLiteral("Ctrl+Alt+Y"), QStringLiteral("Rehacerlo") },
+                { QStringLiteral("Ctrl+Alt+S"), QStringLiteral("Ajustes del proyecto") } } },
             { QStringLiteral("Edición"), {
                 { QStringLiteral("Ctrl+Z"), QStringLiteral("Deshacer") },
                 { QStringLiteral("Ctrl+Y"), QStringLiteral("Rehacer") },

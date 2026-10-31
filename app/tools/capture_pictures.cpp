@@ -45,6 +45,7 @@
 #include <QKeyEvent>
 #include <QLabel>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMouseEvent>
 #include <QPainter>
 #include <QScrollArea>
@@ -1058,6 +1059,29 @@ int main(int argc, char* argv[]) {
         duplicate->trigger(); // before the menu (deleted on close) takes its actions along
         settle(1200); // the new tab slides in
         save(composeOver(strip(), {}), "information/duplicateDiagram/02.png");
+        window.close();
+    });
+
+    // ── The project's history ────────────────────────────────────────────────
+    run("project history", [] {
+        // Esquema 2 just removed: the Proyecto menu offers to bring it back.
+        Project project("Proyecto");
+        project.getEditor(0).setName("Esquema 1");
+        project.addDiagram();
+        project.getEditor(1).setName("Esquema 2");
+        project.removeDiagram(1);
+        MainWindow window(std::move(project));
+        window.resize(900, 600);
+        window.show();
+        settle(400);
+        QMenu* menu = nullptr;
+        for (QAction* a : window.menuBar()->actions())
+            if (a->text() == QStringLiteral("Proyecto")) menu = a->menu();
+        if (!menu) throw std::runtime_error("No Proyecto menu");
+        menu->popup(window.mapToGlobal(QPoint(40, 40)));
+        settle(400);
+        save(menu->grab().toImage(), "information/projectHistory/01.png");
+        menu->close();
         window.close();
     });
 

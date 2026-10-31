@@ -439,7 +439,7 @@ namespace ui {
         buttons->addWidget(accept);
         buttons->addWidget(cancel);
         buttons->addSpacing(8);
-        buttons->addWidget(hint(QStringLiteral("Se aplican a todo el proyecto y no se pueden deshacer.")), 1);
+        buttons->addWidget(hint(QStringLiteral("Se aplican a todo el proyecto. Proyecto › Deshacer (Ctrl+Alt+Z) los devuelve.")), 1);
         root->addWidget(footer);
         auto divider = [footer, scroll] {
             footer->setProperty("divided", scroll->verticalScrollBar()->maximum() > 0);
