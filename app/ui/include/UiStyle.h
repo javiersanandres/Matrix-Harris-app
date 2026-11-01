@@ -72,6 +72,8 @@ namespace ui::style {
         Resize,            // a box grown out of its old size, with a corner knob
         Settings,          // a gear: the project's settings
         ProjectUndo,       // an arrow curling back to the left: undoing a project change
+        ZoomIn,            // a magnifier with a plus
+        ZoomOut,           // a magnifier with a minus
     };
 
     QIcon icon(Icon which);

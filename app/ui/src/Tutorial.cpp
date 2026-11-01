@@ -106,7 +106,7 @@ namespace ui::tutorial {
             { Tr::tr("Muévete por el esquema"),
               Tr::tr("%1 para desplazarte y usa %2 para acercar o alejar. %3 ajusta todo el esquema a la "
                              "ventana. Abajo a la derecha ves el zoom actual.")
-                  .arg(key(Tr::tr("Arrastra el fondo")), key(Tr::tr("Ctrl + rueda")),
+                  .arg(key(Tr::tr("Arrastra el fondo")), key(Tr::tr("rueda")),
                       key(QStringLiteral("Ctrl+0"))),
               {}, { T::Canvas, T::ZoomLabel }, View::FirstDiagram },
 
@@ -119,7 +119,7 @@ namespace ui::tutorial {
 
             { Tr::tr("Las miniaturas también se exploran"),
               Tr::tr("Sobre una miniatura, %1 la acerca o la aleja y %2 la desplaza, sin cambiar de esquema.")
-                  .arg(key(Tr::tr("Ctrl + rueda")), key(Tr::tr("arrastrar"))),
+                  .arg(key(Tr::tr("rueda")), key(Tr::tr("arrastrar"))),
               {}, { T::FirstTabMiniature } },
 
             { Tr::tr("Renombra, duplica o elimina un esquema"),

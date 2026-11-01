@@ -12,6 +12,8 @@
 #include <QPainter>
 #include <QStyle>
 #include <QVBoxLayout>
+#include <QWheelEvent>
+#include <QCoreApplication>
 
 #include <algorithm>
 
@@ -37,13 +39,17 @@ QLineEdit#tabNameEdit {
 }
 QToolButton#tabTrash { border: none; border-radius: 6px; background: transparent; }
 QToolButton#tabTrash:hover { background: #FDECEC; }
+QToolButton#miniatureZoom {
+    border: 1px solid #E3E6EE; border-radius: 6px; background: rgba(255, 255, 255, 230);
+}
+QToolButton#miniatureZoom:hover { background: #EEF0FF; border-color: #C7C9F9; }
 )"));
 
         auto* outer = new QVBoxLayout(this);
         outer->setContentsMargins(8, 8, 8, 6);
         outer->setSpacing(5);
 
-        // Miniature: zoom (Ctrl+wheel), scroll (wheel) and pan (drag) right
+        // Miniature: zoom (wheel) and pan (drag) right
         // here, without selecting the tab; clicks on the rest of the card select it.
         miniature_view_ = new DiagramView(shared_scene, this);
         miniature_view_->setObjectName("miniature");
@@ -109,6 +115,31 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         connect(trash_btn_, &QToolButton::clicked, this, &DiagramTabWidget::removeRequested);
 
         outer->addLayout(bottom);
+
+        // The magnifiers float over the miniature; the wheel over them is still
+        // the miniature's.
+        zoom_box_ = new QWidget(this);
+        auto* zooms = new QHBoxLayout(zoom_box_);
+        zooms->setContentsMargins(0, 0, 0, 0);
+        zooms->setSpacing(3);
+        const QString wheel_tip = Tr::tr("También con la rueda del ratón sobre la miniatura, "
+                                         "justo en el punto donde está el puntero.");
+        for (const bool in : { true, false }) {
+            auto* btn = new QToolButton(zoom_box_);
+            btn->setObjectName("miniatureZoom");
+            btn->setIcon(style::icon(in ? style::Icon::ZoomIn : style::Icon::ZoomOut));
+            btn->setIconSize(QSize(14, 14));
+            btn->setFixedSize(22, 22);
+            btn->setAutoRepeat(true);
+            btn->setToolTip((in ? Tr::tr("Acercar") : Tr::tr("Alejar")) + "\n" + wheel_tip);
+            btn->installEventFilter(this);
+            zooms->addWidget(btn);
+            connect(btn, &QToolButton::clicked, this, [this, in] { miniature_view_->zoomAtCentre(in); });
+            (in ? zoom_in_btn_ : zoom_out_btn_) = btn;
+        }
+        zoom_box_->adjustSize();
+        zoom_box_->hide();
+
         refreshName();
     }
 
@@ -127,6 +158,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         if (scene)
             connect(scene, &QGraphicsScene::sceneRectChanged, this, &DiagramTabWidget::refitMiniature);
         refitMiniature();
+        updateZoomButtons();
     }
 
     void DiagramTabWidget::setActive(bool active) {
@@ -158,6 +190,25 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         QGraphicsScene* scene = miniature_view_->scene();
         if (scene && !scene->sceneRect().isEmpty())
             miniature_view_->fitWithMargin(scene->sceneRect(), 6.0);
+        updateZoomButtons();
+    }
+
+    bool DiagramTabWidget::miniatureEmpty() const {
+        const QGraphicsScene* scene = miniature_view_->scene();
+        const QList<QGraphicsItem*> items = scene ? scene->items() : QList<QGraphicsItem*>();
+        return std::none_of(items.begin(), items.end(),
+            [](const QGraphicsItem* item) { return item->isVisible(); });
+    }
+
+    void DiagramTabWidget::updateZoomButtons() {
+        if (!hovered_ || miniatureEmpty()) {
+            zoom_box_->hide();
+            return;
+        }
+        const QRect mini = miniature_view_->geometry();
+        zoom_box_->move(mini.right() - zoom_box_->width() - 4, mini.top() + 4);
+        zoom_box_->show();
+        zoom_box_->raise();
     }
 
     void DiagramTabWidget::resizeEvent(QResizeEvent* event) {
@@ -210,6 +261,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         QWidget::enterEvent(event);
         hovered_ = true;
         if (!is_joint_ && name_edit_->isHidden()) trash_btn_->show();
+        updateZoomButtons();
         refreshName();
         update();
     }
@@ -218,6 +270,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         QWidget::leaveEvent(event);
         hovered_ = false;
         trash_btn_->hide();
+        updateZoomButtons();
         refreshName();
         update();
     }
@@ -230,10 +283,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         if (watched == miniature_view_->viewport()) {
             // An empty diagram has nothing to pan or zoom: there the miniature
             // is one more part of the card, and a click on it selects the tab.
-            const QGraphicsScene* scene = miniature_view_->scene();
-            const QList<QGraphicsItem*> items = scene ? scene->items() : QList<QGraphicsItem*>();
-            const bool empty = std::none_of(items.begin(), items.end(),
-                [](const QGraphicsItem* item) { return item->isVisible(); });
+            const bool empty = miniatureEmpty();
             // (Not while dragging: the view shows a closed hand then.)
             const bool hovering = event->type() == QEvent::Enter || (event->type() == QEvent::MouseMove
                 && static_cast<QMouseEvent*>(event)->buttons() == Qt::NoButton);
@@ -244,6 +294,15 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
                 emit clicked();
                 return true;
             }
+        }
+        if ((watched == zoom_in_btn_ || watched == zoom_out_btn_) && event->type() == QEvent::Wheel) {
+            auto* wheel = static_cast<QWheelEvent*>(event);
+            QWidget* viewport = miniature_view_->viewport();
+            QWheelEvent forwarded(viewport->mapFromGlobal(wheel->globalPosition()), wheel->globalPosition(),
+                wheel->pixelDelta(), wheel->angleDelta(), wheel->buttons(), wheel->modifiers(),
+                wheel->phase(), wheel->inverted(), wheel->source(), wheel->pointingDevice());
+            QCoreApplication::sendEvent(viewport, &forwarded);
+            return true;
         }
         if (watched == name_label_ && event->type() == QEvent::MouseButtonDblClick && !is_joint_) {
             startRename();

@@ -12,9 +12,12 @@ namespace ui {
     //
     // QGraphicsView subclass used for both the central editing area and the
     // miniature tab thumbnails. Supports:
-    //   - Zoom via Ctrl+scroll wheel, centred on the mouse cursor position.
+    //   - Zoom via the scroll wheel (with or without Ctrl), centred on the
+    //     mouse cursor position. A box whose long name can still scroll takes
+    //     the plain wheel first.
     //   - Zoom via zoomIn() / zoomOut() from the Edit menu (centres on viewport).
     //   - Pan by pressing and dragging (left button on background or middle button).
+    //     No scrollbars are shown.
     //   - fitWithMargin(): fits the scene with a fixed pixel margin on all sides,
     //     used when switching tabs to avoid filling the whole viewport with a
     //     single node.
@@ -32,6 +35,9 @@ namespace ui {
         // Zoom in / out by a fixed factor, centred on the current cursor position.
         void zoomIn();
         void zoomOut();
+        // The same step, centred on the viewport wherever the cursor is (a
+        // button sitting over the view must not become the zoom's centre).
+        void zoomAtCentre(bool in);
 
         // Reset zoom to 100%.
         void resetZoom();
@@ -54,9 +60,9 @@ namespace ui {
         }
 
         // Thumbnail mode (tab miniatures): the scene cannot be edited, any left
-        // or middle drag pans (even over nodes), the wheel works as in the
-        // editing view (Ctrl+wheel zooms, wheel scrolls) and is never passed on
-        // to the parent, and the idle cursor is an open hand.
+        // or middle drag pans (even over nodes), the wheel zooms as in the
+        // editing view and is never passed on to the parent, and the idle
+        // cursor is an open hand.
         void setThumbnailMode(bool on);
 
     signals:

@@ -18,8 +18,10 @@ namespace ui {
     // top and its name underneath.
     //
     //   - Clicking the card outside the miniature selects it (clicked()).
-    //   - The miniature is a small live view of its own: Ctrl+wheel zooms,
-    //     the wheel scrolls and dragging pans, without selecting the tab.
+    //   - The miniature is a small live view of its own: the wheel zooms and
+    //     dragging pans, without selecting the tab.
+    //     Hovering a non-empty one reveals two magnifiers in its corner that
+    //     zoom it too, and whose tips tell about the wheel.
     //   - Double-clicking the name edits it in place: Enter or leaving the field
     //     commits (renamed()), Esc restores the previous name.
     //   - The name is centred under the miniature.
@@ -84,6 +86,8 @@ namespace ui {
         void finishRename(bool commit);
         void refreshName();
         void refitMiniature();
+        bool miniatureEmpty() const;   // nothing visible to zoom or pan
+        void updateZoomButtons();      // shown while hovered, if not empty
 
         bool is_joint_;
         bool active_ = false;
@@ -96,6 +100,9 @@ namespace ui {
         QLabel* name_label_;
         QLineEdit* name_edit_;
         QToolButton* trash_btn_;    // regular tabs only, shown on hover
+        QWidget* zoom_box_;         // the magnifiers, over the miniature's corner
+        QToolButton* zoom_in_btn_;
+        QToolButton* zoom_out_btn_;
 
         static constexpr int NAME_HEIGHT = 24;
     };

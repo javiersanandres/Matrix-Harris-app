@@ -787,6 +787,10 @@ You can also use “Take Out Block” on one of its boxes.</translation>
         <translation>Delete Diagram</translation>
     </message>
     <message>
+        <source>También con la rueda del ratón sobre la miniatura, justo en el punto donde está el puntero.</source>
+        <translation>Also with the mouse wheel over the miniature, right at the point where the pointer is.</translation>
+    </message>
+    <message>
         <source>
 Doble clic para renombrar</source>
         <translation>
@@ -1629,8 +1633,8 @@ Double-click to rename</translation>
         <translation>Drag the background</translation>
     </message>
     <message>
-        <source>Ctrl + rueda</source>
-        <translation>Ctrl + wheel</translation>
+        <source>rueda</source>
+        <translation>wheel</translation>
     </message>
     <message>
         <source>Un proyecto, varios esquemas</source>
@@ -3069,8 +3073,8 @@ Double-click to rename</translation>
         <translation>Finish or skip the tutorial to change project</translation>
     </message>
     <message>
-        <source>Zoom (Ctrl+rueda para cambiarlo, Ctrl+0 para ajustar)</source>
-        <translation>Zoom (Ctrl+wheel to change it, Ctrl+0 to fit)</translation>
+        <source>Zoom (rueda para cambiarlo, Ctrl+0 para ajustar)</source>
+        <translation>Zoom (wheel to change it, Ctrl+0 to fit)</translation>
     </message>
     <message>
         <source>Rápido: el mejor dibujo en 5 segundos como máximo</source>
@@ -3453,8 +3457,8 @@ No image because they are empty: %1.</translation>
         <translation>View</translation>
     </message>
     <message>
-        <source>Ctrl+rueda</source>
-        <translation>Ctrl+wheel</translation>
+        <source>Rueda</source>
+        <translation>Wheel</translation>
     </message>
     <message>
         <source>Acercar / alejar</source>

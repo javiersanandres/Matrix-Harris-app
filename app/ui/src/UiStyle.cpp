@@ -492,6 +492,21 @@ namespace ui::style {
                 p.drawLine(QPointF(6, 10), QPointF(14, 10));
                 break;
             }
+            case Icon::ZoomIn:
+            case Icon::ZoomOut: {
+                // A magnifier: a lens with its handle, a plus or a minus inside.
+                const QPointF lens(8.5, 8.5);
+                p.setPen(c.pen(palette::accent, 1.6));
+                p.setBrush(palette::accent_soft);
+                p.drawEllipse(lens, 6.0, 6.0);
+                p.setPen(c.pen(palette::accent, 2.4));
+                p.drawLine(QPointF(13.0, 13.0), QPointF(17.5, 17.5));
+                p.setPen(c.pen(palette::accent, 1.6));
+                p.drawLine(QPointF(5.8, 8.5), QPointF(11.2, 8.5));
+                if (which == Icon::ZoomIn)
+                    p.drawLine(QPointF(8.5, 5.8), QPointF(8.5, 11.2));
+                break;
+            }
             case Icon::Pause: {
                 p.setPen(Qt::NoPen);
                 p.setBrush(palette::ink_soft);

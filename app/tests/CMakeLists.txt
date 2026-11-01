@@ -18,6 +18,7 @@ add_executable(app_logic_tests
     test_project_history_window.cpp
     test_fuse_dialog.cpp
     test_translation.cpp
+    test_diagram_view.cpp
 )
 
 target_include_directories(app_logic_tests

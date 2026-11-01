@@ -4,6 +4,11 @@
 #include <QScrollBar>
 #include <QMouseEvent>
 
+#include <QCoreApplication>
+#include <QGraphicsSceneWheelEvent>
+
+#include <cmath>
+
 namespace ui {
 
     DiagramView::DiagramView(QGraphicsScene* scene, QWidget* parent)
@@ -14,8 +19,9 @@ namespace ui {
         // AnchorUnderMouse makes zoom centre on the cursor position.
         setTransformationAnchor(QGraphicsView::AnchorUnderMouse);
         setResizeAnchor(QGraphicsView::AnchorUnderMouse);
-        setHorizontalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-        setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+        // Dragging pans; scrollbars would only clutter the view.
+        setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     }
 
     void DiagramView::zoomIn() {
@@ -24,6 +30,13 @@ namespace ui {
 
     void DiagramView::zoomOut() {
         applyZoom(1.0 / ZOOM_STEP);
+    }
+
+    void DiagramView::zoomAtCentre(bool in) {
+        const ViewportAnchor anchor = transformationAnchor();
+        setTransformationAnchor(QGraphicsView::AnchorViewCenter);
+        applyZoom(in ? ZOOM_STEP : 1.0 / ZOOM_STEP);
+        setTransformationAnchor(anchor);
     }
 
     void DiagramView::resetZoom() {
@@ -110,17 +123,36 @@ namespace ui {
     }
 
     void DiagramView::wheelEvent(QWheelEvent* event) {
-        if (event->modifiers() & Qt::ControlModifier) {
-            double factor = (event->angleDelta().y() > 0) ? ZOOM_STEP : 1.0 / ZOOM_STEP;
-            applyZoom(factor);
-            event->accept();
+        // The scene first: a box whose long name can still scroll takes the
+        // plain wheel (thumbnails do not edit, so there it always zooms).
+        // Sent by hand: QGraphicsView's own handler would scroll when the
+        // scene leaves it, hidden scrollbars or not.
+        if (scene() && !thumbnail_ && !(event->modifiers() & Qt::ControlModifier)) {
+            QGraphicsSceneWheelEvent wheel(QEvent::GraphicsSceneWheel);
+            wheel.setWidget(viewport());
+            wheel.setScenePos(mapToScene(event->position().toPoint()));
+            wheel.setScreenPos(event->globalPosition().toPoint());
+            wheel.setButtons(event->buttons());
+            wheel.setModifiers(event->modifiers());
+            wheel.setDelta(event->angleDelta().y());
+            wheel.setOrientation(Qt::Vertical);
+            wheel.setPixelDelta(event->pixelDelta());
+            wheel.setPhase(event->phase());
+            wheel.setInverted(event->isInverted());
+            wheel.setAccepted(false);
+            QCoreApplication::sendEvent(scene(), &wheel);
+            if (wheel.isAccepted()) {
+                event->accept();
+                return;
+            }
         }
-        else {
-            QGraphicsView::wheelEvent(event);
-        }
-        // Over a thumbnail the wheel belongs to it, even with nothing to
-        // scroll: it must not slide the whole tab strip instead.
-        if (thumbnail_) event->accept();
+        // One step per notch; finer wheels and touchpads zoom in proportion.
+        const int notches = event->angleDelta().y();
+        if (notches != 0)
+            applyZoom(std::pow(ZOOM_STEP, notches / 120.0));
+        // Over a thumbnail the wheel belongs to it, even at the zoom's limit:
+        // it must not slide the whole tab strip instead.
+        event->accept();
     }
 
     void DiagramView::applyZoom(double factor) {

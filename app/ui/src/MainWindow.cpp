@@ -473,7 +473,7 @@ QStatusBar QLabel { color: #4B5068; padding: 1px 10px; }
         statusBar()->setSizeGripEnabled(false);
         stats_label_ = new QLabel(statusBar());
         zoom_label_ = new QLabel(statusBar());
-        zoom_label_->setToolTip(Tr::tr("Zoom (Ctrl+rueda para cambiarlo, Ctrl+0 para ajustar)"));
+        zoom_label_->setToolTip(Tr::tr("Zoom (rueda para cambiarlo, Ctrl+0 para ajustar)"));
         statusBar()->addWidget(stats_label_, 1);
         statusBar()->addPermanentWidget(zoom_label_);
     }
@@ -1636,7 +1636,7 @@ QLabel#what { color: #3A4050; }
         });
         column({
             { Tr::tr("Vista"), {
-                { Tr::tr("Ctrl+rueda"), Tr::tr("Acercar / alejar") },
+                { Tr::tr("Rueda"), Tr::tr("Acercar / alejar") },
                 { QStringLiteral("Ctrl+0"), Tr::tr("Ajustar a la ventana") },
                 { QStringLiteral("Ctrl+1"), Tr::tr("Tamaño real") },
                 { Tr::tr("Arrastrar fondo"), Tr::tr("Desplazar la vista") },
@@ -1650,7 +1650,7 @@ QLabel#what { color: #3A4050; }
             { Tr::tr("Pestañas"), {
                 { Tr::tr("Doble clic"), Tr::tr("Renombrar (sobre el nombre)") },
                 { Tr::tr("Clic derecho"), Tr::tr("Renombrar, duplicar o eliminar") },
-                { Tr::tr("Ctrl+rueda"), Tr::tr("Zoom en la miniatura") } } },
+                { Tr::tr("Rueda"), Tr::tr("Zoom en la miniatura") } } },
         });
 
         dlg.setBody(body);
