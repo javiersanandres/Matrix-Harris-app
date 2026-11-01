@@ -109,7 +109,7 @@ namespace ui::node_visuals {
         return path;
     }
 
-    QRectF labelRect(const NodeAttributes& attributes, const QRectF& box) {
+    QRectF labelRect(const NodeAttributes& attributes, const QRectF& box, const BoxSizes* sizes) {
         QRectF inner;
         switch (attributes.shape) {
         case NodeShape::Circle: {
@@ -137,9 +137,12 @@ namespace ui::node_visuals {
         }
 
         if (attributes.hasAshes()) {
-            // Keep the text entirely inside the white top part.
-            const double white_bottom = box.top() + box.height() * ASHES_WHITE_FRACTION - LABEL_PAD_Y;
-            inner.setBottom(std::min(inner.bottom(), white_bottom));
+            // Keep the text entirely inside the larger part: the white one on
+            // top, or the ashes when they take more than half of the box.
+            const double share = attributes.ashesShare(sizes);
+            const double line = ashesLineY(box, share);
+            if (share > 0.5) inner.setTop(std::max(inner.top(), line + LABEL_PAD_Y));
+            else             inner.setBottom(std::min(inner.bottom(), line - LABEL_PAD_Y));
         }
         return inner;
     }
@@ -150,8 +153,8 @@ namespace ui::node_visuals {
         return font;
     }
 
-    double maxLabelScroll(const NodeAttributes& attributes, const QRectF& box) {
-        const QRectF area = labelRect(attributes, box);
+    double maxLabelScroll(const NodeAttributes& attributes, const QRectF& box, const BoxSizes* sizes) {
+        const QRectF area = labelRect(attributes, box, sizes);
         if (area.width() <= 0.0 || area.height() <= 0.0) return 0.0;
         QTextLayout layout(QString::fromStdString(attributes.name), labelFont(attributes));
         const double content = layoutLabel(layout, area.width());
@@ -184,13 +187,14 @@ namespace ui::node_visuals {
         else if (attributes.hasAshes()) {
             painter->setBrush(Qt::white);
             painter->drawPath(outline);
+            const double share = attributes.ashesShare(options.sizes);
             QRectF ashes = box;
-            ashes.setTop(box.top() + box.height() * ASHES_WHITE_FRACTION);
+            ashes.setTop(ashesLineY(box, share));
             QPainterPath ashes_path;
             ashes_path.addRect(ashes);
             painter->setBrush(Qt::black);
             painter->drawPath(outline.intersected(ashes_path));
-            text_colour = Qt::black;
+            text_colour = share > 0.5 ? Qt::white : Qt::black; // the label sits on the larger part
         }
         else {
             painter->setBrush(toQColor(shown.colour));
@@ -203,7 +207,7 @@ namespace ui::node_visuals {
         painter->drawPath(outline);
 
         // ── Label (wrapped, clipped to its area, scrollable) ─────────────────────
-        const QRectF area = labelRect(attributes, box);
+        const QRectF area = labelRect(attributes, box, options.sizes);
         const QString text = QString::fromStdString(attributes.name);
         if (!text.isEmpty() && area.width() > 0.0 && area.height() > 0.0) {
             QTextLayout layout(text, labelFont(attributes));
@@ -365,6 +369,98 @@ namespace ui::node_visuals {
         painter->translate(anchor);
         painter->scale(unit, unit);
         const QRectF chip(-chip_size.width() / 2.0, -chip_size.height(), chip_size.width(), chip_size.height());
+        const double radius = chip.height() / 2.0;
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(31, 35, 48, 40));
+        painter->drawRoundedRect(chip.translated(0.0, 1.5), radius, radius);
+        QLinearGradient fill(chip.topLeft(), chip.topRight());
+        fill.setColorAt(0.0, style::palette::accent);
+        fill.setColorAt(1.0, style::palette::violet);
+        painter->setBrush(fill);
+        painter->drawRoundedRect(chip, radius, radius);
+        painter->setFont(font);
+        painter->setPen(Qt::white);
+        painter->drawText(chip, Qt::AlignCenter, text);
+        painter->restore();
+    }
+
+    // ============================================================================
+    // The ashes of a Hogar
+    // ============================================================================
+
+    namespace {
+        constexpr double ASHES_HANDLE_LENGTH = 22.0; // screen pixels, as the edges' pills
+        constexpr double ASHES_HANDLE_THICKNESS = 7.0;
+    }
+
+    double ashesLineY(const QRectF& box, double share) {
+        return box.bottom() - box.height() * share;
+    }
+
+    double ashesShareAt(const QRectF& box, double y) {
+        if (box.height() <= 0.0) return ASHES_SHARE;
+        const double share = std::round((box.bottom() - y) / box.height() * 100.0) / 100.0;
+        return std::clamp(share, MIN_ASHES_SHARE, MAX_ASHES_SHARE);
+    }
+
+    bool onAshesLine(const QRectF& box, double share, const QPointF& pos, double reach) {
+        return std::abs(pos.y() - ashesLineY(box, share)) <= reach
+            && pos.x() > box.left() + reach && pos.x() < box.right() - reach;
+    }
+
+    void paintAshesHandle(QPainter* painter, NodeShape shape, const QRectF& box,
+        double share, bool active, double unit)
+    {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        const double y = ashesLineY(box, share);
+
+        // The line, across the shape only.
+        painter->save();
+        painter->setClipPath(shapePath(shape, box));
+        QColor line = style::palette::accent;
+        line.setAlphaF(active ? 0.95f : 0.6f);
+        painter->setPen(QPen(line, (active ? 2.0 : 1.4) * unit, Qt::DashLine, Qt::FlatCap));
+        painter->drawLine(QPointF(box.left(), y), QPointF(box.right(), y));
+        painter->restore();
+
+        // A pill in its middle, as the ones on the edges.
+        const double grow = active ? 1.25 : 1.0;
+        const QSizeF s(ASHES_HANDLE_LENGTH * grow * unit, ASHES_HANDLE_THICKNESS * grow * unit);
+        QPainterPath pill;
+        pill.addRoundedRect(QRectF(QPointF(box.center().x(), y) - QPointF(s.width(), s.height()) / 2.0, s),
+            s.height() / 2.0, s.height() / 2.0);
+        painter->setPen(Qt::NoPen);
+        painter->setBrush(QColor(31, 35, 48, 45));
+        painter->drawPath(pill.translated(0.0, 1.0 * unit));
+        if (active) {
+            QLinearGradient fill(pill.boundingRect().topLeft(), pill.boundingRect().bottomRight());
+            fill.setColorAt(0.0, style::palette::accent);
+            fill.setColorAt(1.0, style::palette::violet);
+            painter->setBrush(fill);
+            painter->setPen(QPen(Qt::white, 1.4 * unit));
+        }
+        else {
+            painter->setBrush(Qt::white);
+            painter->setPen(QPen(style::palette::accent, 1.4 * unit));
+        }
+        painter->drawPath(pill);
+        painter->restore();
+    }
+
+    void paintAshesChip(QPainter* painter, const QRectF& box, double share, double unit) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing);
+        const QString text = QStringLiteral("Negro %1 %").arg(qRound(share * 100.0));
+        QFont font = QApplication::font();
+        font.setPointSizeF(8.0);
+        font.setBold(true);
+        // Measured and drawn in screen pixels, then scaled back into the painter's units.
+        const QSizeF text_size = QFontMetricsF(font).size(Qt::TextSingleLine, text);
+        const QSizeF chip_size(text_size.width() + 18.0, text_size.height() + 6.0);
+        painter->translate(QPointF(box.right() + 10.0 * unit, ashesLineY(box, share)));
+        painter->scale(unit, unit);
+        const QRectF chip(0.0, -chip_size.height() / 2.0, chip_size.width(), chip_size.height());
         const double radius = chip.height() / 2.0;
         painter->setPen(Qt::NoPen);
         painter->setBrush(QColor(31, 35, 48, 40));

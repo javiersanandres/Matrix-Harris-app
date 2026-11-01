@@ -103,11 +103,23 @@ namespace hypergraph_logic {
     // (NodeAttributes::width / height) follows the one of its shape. Rounded
     // rectangles use the rectangle's. Each graph hands its own to its boxes
     // (Node::setBoxSizes), as part of its LayoutSettings.
+    //
+    // Each shape also has the default ashes of a "Hogar" (a fire with ashes):
+    // the box is painted white with a black band along its bottom, the ashes,
+    // whose share of the box's height is `ashes`. A box may have its own
+    // (NodeAttributes::ashes). The label goes in the larger of the two parts.
     // -------------------------------------------------------------------------
+    static constexpr double ASHES_SHARE = 0.25;     // built-in default, every shape
+    static constexpr double MIN_ASHES_SHARE = 0.1;
+    static constexpr double MAX_ASHES_SHARE = 0.9;
+
     struct BoxSize {
         double width = 0.0;
         double height = 0.0;
-        bool operator==(const BoxSize& other) const noexcept { return width == other.width && height == other.height; }
+        double ashes = ASHES_SHARE; // share of the height the ashes take in a Hogar
+        bool operator==(const BoxSize& other) const noexcept {
+            return width == other.width && height == other.height && ashes == other.ashes;
+        }
         bool operator!=(const BoxSize& other) const noexcept { return !(*this == other); }
     };
 
@@ -157,7 +169,8 @@ namespace hypergraph_logic {
             s.layer_gap = clamp(layer_gap, MIN_LAYER_GAP_SETTING, MAX_LAYER_GAP_SETTING);
             s.horizontal_sep = clamp(horizontal_sep, MIN_HORIZONTAL_SEP_SETTING, MAX_HORIZONTAL_SEP_SETTING);
             auto clampBox = [&](const BoxSize& b) {
-                return BoxSize{ clamp(b.width, MIN_NODE_WIDTH, MAX_NODE_WIDTH), clamp(b.height, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT) };
+                return BoxSize{ clamp(b.width, MIN_NODE_WIDTH, MAX_NODE_WIDTH), clamp(b.height, MIN_NODE_HEIGHT, MAX_NODE_HEIGHT),
+                                clamp(b.ashes, MIN_ASHES_SHARE, MAX_ASHES_SHARE) };
             };
             s.box_sizes.rectangle = clampBox(box_sizes.rectangle);
             s.box_sizes.circle = clampBox(box_sizes.circle);

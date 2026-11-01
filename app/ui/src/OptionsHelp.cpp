@@ -246,8 +246,9 @@ namespace ui::help {
                 {
                     heading(HOW),
                     text(QStringLiteral("Haz clic derecho en una caja, elige <b>Fusionar</b> y haz clic en la otra. Se abre "
-                                        "un diálogo para decidir el nombre y el aspecto de la caja resultante: puedes "
-                                        "tomar cada dato de una u otra, o escribirlo.")),
+                                        "un diálogo con las dos cajas a los lados y la resultante en medio. Para cada dato, "
+                                        "haz clic en el valor de una u otra para quedártelo (la flecha del elegido se rellena), o "
+                                        "escríbelo en medio; <b>Conservar todo</b> toma todos los de una caja.")),
                     text(QStringLiteral("Útil cuando descubres que dos cajas representan lo mismo: todo lo que estaba por "
                                         "encima o por debajo de cualquiera de ellas queda unido a la caja fusionada.")),
                     triple(pic("fuse", 1), QStringLiteral("Clic derecho en la caja 2 › Fusionar."),
@@ -298,11 +299,21 @@ namespace ui::help {
                                         "tamaño de su forma, lo sigue: si le cambias la forma, cambia con ella. Si solo "
                                         "arrastras un lado (el ancho o el alto), el otro sigue siendo el de la forma; en "
                                         "la vista previa se ve en gris.")),
+                    heading(QStringLiteral("La banda negra de un hogar")),
+                    text(QStringLiteral("Si la caja es un <b>Hogar</b>, en la vista previa también puedes arrastrar hacia "
+                                        "arriba o hacia abajo la línea entre la parte blanca y la banda negra, o escribir "
+                                        "su altura en <b>Banda negra</b>, en porcentaje de la caja (de 10 a 90). El texto va en "
+                                        "la parte más grande: en blanco sobre la banda negra cuando esta ocupa más de la "
+                                        "mitad. Sin una propia, la caja sigue la banda negra por defecto de su forma (ver "
+                                        "<b>Ajustes del proyecto</b>); <b>↺</b> junto a ella la devuelve a esa. Solo se "
+                                        "cambian aquí, no en el esquema.")),
+                    picture(pic("resizeBox", 4), QStringLiteral("Un hogar con la línea de su banda negra bajo el ratón.")),
                     note(QStringLiteral("El ancho va de 40 a 400 píxeles y el alto de 30 a 300. La caja no crece sola con "
                                         "el texto: si no cabe, se desplaza con la rueda del ratón. Al fusionar dos cajas "
                                         "puedes quedarte con el tamaño de cualquiera de ellas. Con <b>Ctrl+Z</b> se deshace.")),
                 },
-                QStringLiteral("tamaño redimensionar ancho alto agrandar ampliar estrechar encoger bordes tiradores píxeles") });
+                QStringLiteral("tamaño redimensionar ancho alto agrandar ampliar estrechar encoger bordes tiradores píxeles "
+                               "hogar banda negra blanca proporción cenizas") });
 
             t.push_back({ "copyPiece", BOX_MENU, QStringLiteral("Copiar bloque o esquema"), I::Copy,
                 QStringLiteral("Copia el bloque de esta caja, o el esquema entero, para pegarlo en cualquier esquema."),
@@ -726,7 +737,9 @@ namespace ui::help {
                                         "tamaño de fuente con los que empieza cada caja que crees a partir de ahora. "
                                         "Son solo el punto de partida: después puedes cambiar cada caja desde sus "
                                         "propiedades, y las que ya existen no cambian. La vista previa muestra cómo "
-                                        "empiezan.</li>"
+                                        "empiezan. Un esquema puede tener sus propios colores y tamaño de fuente para "
+                                        "sus cajas nuevas, que se eligen en las propiedades de una caja con "
+                                        "<b>Establecer por defecto en el esquema</b>.</li>"
                                         "<li><b>Valor inicial de las equivalencias nuevas</b>: si empiezan con línea "
                                         "continua o discontinua.</li>"
                                         "<li><b>Distancias</b>: entre cajas vecinas de un mismo nivel, entre las cajas y "
@@ -750,11 +763,16 @@ namespace ui::help {
                                         "conserva sus proporciones; desde un lado, solo cambia el ancho o el alto. El "
                                         "botón <b>↺</b> de cada fila le devuelve el tamaño que tenía el proyecto.")),
                     picture(pic("projectSettings", 4), QStringLiteral("El círculo, a punto de cambiar de tamaño.")),
+                    heading(QStringLiteral("La banda negra del hogar por defecto")),
+                    text(QStringLiteral("Cada forma tiene también la altura por defecto de la banda negra de un "
+                                        "<b>Hogar</b>. Las tres aparecen dibujadas como hogar: arrastra la línea de una "
+                                        "hacia arriba o hacia abajo, o escribe su porcentaje en los campos de debajo.")),
                     heading(QStringLiteral("Las cajas que ya existen")),
-                    text(QStringLiteral("Si cambias el tamaño por defecto de una forma y hay cajas que lo usan, al aceptar "
-                                        "se te pregunta qué hacer con ellas: con <b>Solo las cajas nuevas</b> se quedan "
-                                        "con el tamaño que tenían; con <b>También las existentes</b> toman el nuevo.")),
-                    picture(pic("projectSettings", 2), QStringLiteral("La pregunta, al cambiar un tamaño por defecto.")),
+                    text(QStringLiteral("Si cambias el tamaño por defecto de una forma, o su banda negra, y hay cajas que los "
+                                        "usan porque no tienen unos propios (para la banda negra, los hogares), al aceptar se "
+                                        "te pregunta qué hacer con ellas: con <b>Solo las cajas nuevas</b> se quedan con los "
+                                        "que tenían; con <b>También las existentes</b> toman los nuevos.")),
+                    picture(pic("projectSettings", 2), QStringLiteral("La pregunta, al cambiar un tamaño o una banda negra por defecto.")),
                     heading(QStringLiteral("Predeterminados de la aplicación")),
                     text(QStringLiteral("Marca <b>Usar estos ajustes en los proyectos nuevos</b> para que todo proyecto "
                                         "nuevo empiece con ellos. <b>Cargar los de la aplicación</b> rellena el formulario "

@@ -75,6 +75,36 @@ namespace hypergraph_logic::node_tests {
         EXPECT_EQ(a.font_colour, (Color{ 0, 0, 0, 255 }));
     }
 
+    // A Hogar's ashes follow its shape's default until it has its own, which
+    // stay within their limits.
+    TEST(RealNode, AshesFollowTheShapesDefaultUnlessOwn) {
+        NodeAttributes a("H");
+        a.fire = FireState::FireWithAshes;
+        a.shape = NodeShape::Circle;
+        EXPECT_DOUBLE_EQ(a.ashesShare(), ASHES_SHARE);
+
+        BoxSizes sizes;
+        sizes.circle.ashes = 0.4;
+        sizes.rhombus.ashes = 0.7;
+        EXPECT_DOUBLE_EQ(a.ashesShare(&sizes), 0.4);
+        a.shape = NodeShape::Rhombus;
+        EXPECT_DOUBLE_EQ(a.ashesShare(&sizes), 0.7);
+        a.shape = NodeShape::RoundedRectangle; // the rectangle's
+        EXPECT_DOUBLE_EQ(a.ashesShare(&sizes), sizes.rectangle.ashes);
+
+        a.ashes = 0.55;
+        EXPECT_DOUBLE_EQ(a.ashesShare(&sizes), 0.55);
+        a.ashes = 2.0;
+        EXPECT_DOUBLE_EQ(a.ashesShare(&sizes), MAX_ASHES_SHARE);
+        a.ashes = 0.0;
+        EXPECT_DOUBLE_EQ(a.ashesShare(&sizes), MIN_ASHES_SHARE);
+
+        // They tell two boxes apart.
+        NodeAttributes b = a;
+        b.ashes.reset();
+        EXPECT_NE(a, b);
+    }
+
     TEST(RealNode, RoundedRectangleHasTheRectanglesSizeAndRoundedCorners) {
         NodeAttributes a("R");
         a.shape = NodeShape::RoundedRectangle;

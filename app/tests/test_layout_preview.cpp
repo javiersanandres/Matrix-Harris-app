@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include "LayoutPreview.h"
+#include "NodeVisuals.h"
 #include "SettingsWidgets.h"
 
 #include <QApplication>
@@ -82,14 +83,48 @@ TEST(DistanceSlider, KeysMoveItWithinItsRange) {
     EXPECT_EQ(reported.size(), 3u);
 }
 
-// The default box sizes do not reach the sample: only the distances do.
-TEST(LayoutPreview, IgnoresTheDefaultBoxSizes) {
+// A Hogar's label goes in the larger part: the white one on top, or the ashes
+// once they take more than half of the box; their default comes from the shape.
+TEST(HogarAshes, LabelGoesInTheLargerPart) {
+    ensureApplication();
+    namespace nv = ui::node_visuals;
+    NodeAttributes a("Hogar");
+    a.fire = FireState::FireWithAshes;
+    const QRectF box(0, 0, 100, 100);
+
+    a.ashes = 0.25;
+    EXPECT_LE(nv::labelRect(a, box).bottom(), nv::ashesLineY(box, 0.25));
+    a.ashes = 0.7;
+    EXPECT_GE(nv::labelRect(a, box).top(), nv::ashesLineY(box, 0.7));
+
+    // Without its own, the shape's default decides.
+    a.ashes.reset();
+    BoxSizes sizes;
+    sizes.rectangle.ashes = 0.8;
+    EXPECT_GE(nv::labelRect(a, box, &sizes).top(), nv::ashesLineY(box, 0.8));
+}
+
+// The line between the parts is found and moved in whole hundredths, within limits.
+TEST(HogarAshes, LineIsMeasuredWithinItsLimits) {
+    namespace nv = ui::node_visuals;
+    const QRectF box(0, 0, 100, 200);
+    EXPECT_DOUBLE_EQ(nv::ashesLineY(box, 0.25), 150.0);
+    EXPECT_DOUBLE_EQ(nv::ashesShareAt(box, 100.0), 0.5);
+    EXPECT_DOUBLE_EQ(nv::ashesShareAt(box, 101.0), 0.5); // whole hundredths
+    EXPECT_DOUBLE_EQ(nv::ashesShareAt(box, -50.0), MAX_ASHES_SHARE);
+    EXPECT_DOUBLE_EQ(nv::ashesShareAt(box, 500.0), MIN_ASHES_SHARE);
+    EXPECT_TRUE(nv::onAshesLine(box, 0.25, QPointF(50.0, 153.0), 7.0));
+    EXPECT_FALSE(nv::onAshesLine(box, 0.25, QPointF(50.0, 140.0), 7.0));
+    EXPECT_FALSE(nv::onAshesLine(box, 0.25, QPointF(2.0, 150.0), 7.0)); // the side's own handle
+}
+
+// The sample's boxes take the default size of rectangles, and the distances
+// it marks stay the ones set around them.
+TEST(LayoutPreview, FollowsTheDefaultBoxSizes) {
     ensureApplication();
     LayoutPreview preview;
-    const auto before = preview.measured(D::LayerGap);
     LayoutSettings s;
     s.box_sizes.rectangle = BoxSize{ 220.0, 140.0 };
     preview.setSettings(s);
-    EXPECT_EQ(preview.measured(D::LayerGap), before);
-    expectShows(preview, LayoutSettings());
+    expectShows(preview, s);
 }

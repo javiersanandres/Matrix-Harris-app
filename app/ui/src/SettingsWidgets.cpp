@@ -207,8 +207,9 @@ namespace ui {
         constexpr double LABELS_HEIGHT = 40.0;   // the names and sizes under the shapes
     }
 
-    ShapeSizesPreview::ShapeSizesPreview(QWidget* parent)
+    ShapeSizesPreview::ShapeSizesPreview(Edit edit, QWidget* parent)
         : QWidget(parent)
+        , edit_(edit)
         , glide_(new QVariantAnimation(this))
         , zoom_(new QVariantAnimation(this))
     {
@@ -218,6 +219,7 @@ namespace ui {
         sizes_ = from_ = { QSizeF(defaults.rectangle.width, defaults.rectangle.height),
                            QSizeF(defaults.circle.width, defaults.circle.height),
                            QSizeF(defaults.rhombus.width, defaults.rhombus.height) };
+        ashes_ = { defaults.rectangle.ashes, defaults.circle.ashes, defaults.rhombus.ashes };
         glide_->setDuration(280);
         glide_->setEasingCurve(QEasingCurve::OutCubic);
         glide_->setStartValue(0.0);
@@ -242,6 +244,11 @@ namespace ui {
         const std::array<QSizeF, COUNT> next = { QSizeF(sizes.rectangle.width, sizes.rectangle.height),
                                                  QSizeF(sizes.circle.width, sizes.circle.height),
                                                  QSizeF(sizes.rhombus.width, sizes.rhombus.height) };
+        const std::array<double, COUNT> next_ashes = { sizes.rectangle.ashes, sizes.circle.ashes, sizes.rhombus.ashes };
+        if (next_ashes != ashes_) {
+            ashes_ = next_ashes; // right under the mouse while dragged, so no glide
+            update();
+        }
         if (next == sizes_) return;
         if (drag_shape_ >= 0 || !isVisible()) {
             // Dragged: right under the mouse, no glide.
@@ -258,6 +265,13 @@ namespace ui {
             glide_->start();
             zoomToFit();
         }
+        update();
+    }
+
+    void ShapeSizesPreview::setSampleText(const QString& text, int font_size) {
+        if (text == sample_text_ && font_size == sample_font_size_) return;
+        sample_text_ = text;
+        sample_font_size_ = font_size;
         update();
     }
 
@@ -338,8 +352,9 @@ namespace ui {
         small.setPointSizeF(8.0);
         p.setFont(small);
         p.setPen(style::palette::muted);
-        p.drawText(QRectF(rect()).adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop,
-            QStringLiteral("Arrastra los bordes de una forma para cambiar su tamaño por defecto"));
+        p.drawText(QRectF(rect()).adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop, edit_ == Edit::Ashes
+            ? QStringLiteral("Arrastra la línea de un hogar para cambiar su banda negra por defecto")
+            : QStringLiteral("Arrastra los bordes de una forma para cambiar su tamaño por defecto"));
 
         p.save();
         p.setClipPath(card);
@@ -359,6 +374,12 @@ namespace ui {
             NodeAttributes a;
             a.shape = SHAPES[i];
             a.colour = { 0xEE, 0xF0, 0xFF, 255 };
+            if (edit_ == Edit::Ashes) {
+                a.fire = FireState::FireWithAshes;
+                a.ashes = ashes_[i];
+                a.name = sample_text_.toStdString();
+                a.font_size = sample_font_size_;
+            }
             const QRectF box(-sizes[i].width() / 2.0, -sizes[i].height() / 2.0, sizes[i].width(), sizes[i].height());
             p.save();
             p.translate(shown[i].center());
@@ -374,7 +395,10 @@ namespace ui {
             opts.outline = QPen(QColor("#3A3F52"), 1.5 / scale);
             nv::paintNode(&p, a, box, opts);
             const bool lit = i == drag_shape_ || (drag_shape_ < 0 && i == hover_shape_);
-            if (lit) nv::paintResizeFrame(&p, box, drag_shape_ >= 0 ? drag_edges_ : hover_edges_, 1.0 / scale);
+            if (edit_ == Edit::Ashes)
+                nv::paintAshesHandle(&p, a.shape, box, ashes_[i], lit && (drag_shape_ >= 0 || hover_edges_), 1.0 / scale);
+            else if (lit)
+                nv::paintResizeFrame(&p, box, drag_shape_ >= 0 ? drag_edges_ : hover_edges_, 1.0 / scale);
             p.restore();
 
             // Its name and size underneath.
@@ -386,8 +410,9 @@ namespace ui {
             p.drawText(label, Qt::AlignHCenter | Qt::AlignTop, NAMES[i]);
             p.setFont(small);
             p.setPen(lit ? style::palette::accent : style::palette::muted);
-            p.drawText(label.translated(0.0, 16.0), Qt::AlignHCenter | Qt::AlignTop,
-                QStringLiteral("%1 × %2 px").arg(qRound(sizes[i].width())).arg(qRound(sizes[i].height())));
+            p.drawText(label.translated(0.0, 16.0), Qt::AlignHCenter | Qt::AlignTop, edit_ == Edit::Ashes
+                ? QStringLiteral("Banda negra %1 %").arg(qRound(ashes_[i] * 100.0))
+                : QStringLiteral("%1 × %2 px").arg(qRound(sizes[i].width())).arg(qRound(sizes[i].height())));
         }
         p.restore();
     }
@@ -402,6 +427,17 @@ namespace ui {
     void ShapeSizesPreview::hoverAt(const QPointF& pos) {
         int shape = -1, edges = 0;
         const std::array<QRectF, COUNT> b = boxes();
+        if (edit_ == Edit::Ashes) {
+            for (int i = 0; i < COUNT && !edges; ++i)
+                if (nv::onAshesLine(b[i], ashes_[i], pos, HANDLE_REACH)) { shape = i; edges = 1; }
+            if (shape == hover_shape_ && edges == hover_edges_) return;
+            hover_shape_ = shape;
+            hover_edges_ = edges;
+            if (edges) setCursor(Qt::SizeVerCursor);
+            else       unsetCursor();
+            update();
+            return;
+        }
         for (int i = 0; i < COUNT && !edges; ++i)
             if ((edges = nv::resizeEdgesAt(b[i], pos, HANDLE_REACH))) shape = i;
         // Over a shape, its frame shows where to drag.
@@ -437,6 +473,11 @@ namespace ui {
     }
 
     void ShapeSizesPreview::mouseMoveEvent(QMouseEvent* event) {
+        if (drag_shape_ >= 0 && edit_ == Edit::Ashes) {
+            const double share = nv::ashesShareAt(boxes()[drag_shape_], event->position().y());
+            if (share != ashes_[drag_shape_]) emit ashesEdited(SHAPES[drag_shape_], share);
+            return;
+        }
         if (drag_shape_ >= 0) {
             const QSizeF size = nv::resizedBox(press_size_, drag_edges_, (event->position() - press_pos_) / scale_);
             if (size != sizes_[drag_shape_]) emit sizeEdited(SHAPES[drag_shape_], size.width(), size.height());

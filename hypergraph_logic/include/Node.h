@@ -72,6 +72,12 @@ namespace hypergraph_logic {
 		std::optional<double> width;
 		std::optional<double> height;
 
+		// Share of the box's height the black band of a Hogar takes (see BoxSize::ashes). Empty
+		// follows the default of its shape; a value is the user's for this box. Read it through
+		// ashesShare, which keeps it within [MIN_ASHES_SHARE, MAX_ASHES_SHARE]. It only shows
+		// while the box is a Hogar (fire == FireWithAshes), but is kept otherwise.
+		std::optional<double> ashes;
+
 		NodeAttributes() = default;
 
 		// Intentionally implicit: lets every API that takes NodeAttributes keep
@@ -92,6 +98,11 @@ namespace hypergraph_logic {
 		double boxWidth(const BoxSizes* sizes = nullptr) const noexcept;
 		double boxHeight(const BoxSizes* sizes = nullptr) const noexcept;
 
+		// The default ashes of a Hogar of the given shape, as in `sizes` (built-in without them),
+		// and the ones this box is drawn with: its own if it has them, else its shape's.
+		static double defaultAshes(NodeShape shape, const BoxSizes* sizes = nullptr) noexcept;
+		double ashesShare(const BoxSizes* sizes = nullptr) const noexcept;
+
 		// Gives the box the colours its fire state imposes: black with white text for Fire,
 		// white with black text for FireWithAshes. Without a fire, nothing changes.
 		void applyFireColours() noexcept {
@@ -108,9 +119,33 @@ namespace hypergraph_logic {
 		bool operator==(const NodeAttributes& other) const noexcept {
 			return name == other.name && shape == other.shape && colour == other.colour
 				&& font_colour == other.font_colour && font_size == other.font_size
-				&& fire == other.fire && width == other.width && height == other.height;
+				&& fire == other.fire && width == other.width && height == other.height
+				&& ashes == other.ashes;
 		}
 		bool operator!=(const NodeAttributes& other) const noexcept { return !(*this == other); }
+	};
+
+	// ── BoxDefaults ───────────────────────────────────────────────────────────────────────────────
+	//
+	// What a diagram gives its new boxes on top of its project's defaults: each value it has
+	// replaces the project's; the others are left as the project's are.
+	struct BoxDefaults {
+		std::optional<Color> colour;
+		std::optional<Color> font_colour;
+		std::optional<int> font_size;
+
+		bool empty() const noexcept { return !colour && !font_colour && !font_size; }
+
+		void applyTo(NodeAttributes& a) const noexcept {
+			if (colour) a.colour = *colour;
+			if (font_colour) a.font_colour = *font_colour;
+			if (font_size) a.font_size = *font_size;
+		}
+
+		bool operator==(const BoxDefaults& other) const noexcept {
+			return colour == other.colour && font_colour == other.font_colour && font_size == other.font_size;
+		}
+		bool operator!=(const BoxDefaults& other) const noexcept { return !(*this == other); }
 	};
 
 	// ============================================================================

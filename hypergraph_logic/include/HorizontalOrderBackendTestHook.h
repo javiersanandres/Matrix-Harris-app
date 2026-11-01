@@ -1,7 +1,7 @@
 #pragma once
 
 // ============================================================================
-// Test-only hook for comparing the horizontal-order MIP's two backends
+// Test-only hook for comparing the horizontal-order ILP's two backends
 // head-to-head, mirroring ILPBackendTestHook.h for the crossing-minimization
 // ILP.
 //

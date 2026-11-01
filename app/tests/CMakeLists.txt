@@ -16,6 +16,7 @@ add_executable(app_logic_tests
     test_app_defaults.cpp
     test_layout_preview.cpp
     test_project_history_window.cpp
+    test_fuse_dialog.cpp
 )
 
 target_include_directories(app_logic_tests

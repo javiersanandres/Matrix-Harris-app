@@ -151,6 +151,10 @@ namespace hypergraph_logic::layout_settings_tests {
         s.box_sizes.rhombus = BoxSize{ 1.0, 1e6 };
         g.setLayoutSettings(s);
         EXPECT_EQ(g.getLayoutSettings().box_sizes.rhombus, (BoxSize{ MIN_NODE_WIDTH, MAX_NODE_HEIGHT }));
+        // The ashes of a Hogar too.
+        s.box_sizes.circle.ashes = 5.0;
+        g.setLayoutSettings(s);
+        EXPECT_DOUBLE_EQ(g.getLayoutSettings().box_sizes.circle.ashes, MAX_ASHES_SHARE);
     }
 
     // The tightest gap still leaves every port on its box and the boxes apart,

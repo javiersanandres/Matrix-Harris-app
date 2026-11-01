@@ -134,6 +134,15 @@ namespace hypergraph_logic {
 		const LayoutSettings& getLayoutSettings() const { return layout_settings_; }
 		void setLayoutSettings(const LayoutSettings& settings);
 
+		// ── Box defaults ──────────────────────────────────────────────────────────
+		//
+		// What this diagram gives its new boxes on top of its project's defaults
+		// (see BoxDefaults). Unlike the layout settings they are the diagram's
+		// own: kept by clone() and duplicate(), and saved by toJSON().
+		//
+		const BoxDefaults& getBoxDefaults() const { return box_defaults_; }
+		void setBoxDefaults(const BoxDefaults& defaults) { box_defaults_ = defaults; }
+
 		// ── refreshUncertainPorts ─────────────────────────────────────────────────
 		//
 		// Copies each connection's uncertain ends into Port::uncertain on the
@@ -396,6 +405,7 @@ namespace hypergraph_logic {
 		std::unordered_map<int, double>        layer_layout_;
 
 		LayoutSettings layout_settings_;
+		BoxDefaults box_defaults_; // see getBoxDefaults
 		std::shared_ptr<const BoxSizes> box_sizes_ = std::make_shared<const BoxSizes>(); // layout_settings_.box_sizes
 
 		// Gives every box the graph's box sizes (see setLayoutSettings).

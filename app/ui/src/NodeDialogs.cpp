@@ -30,11 +30,13 @@ namespace ui {
         void fitToWindow(QDialog* dialog, QWidget* banner, QScrollArea* scroll,
             QWidget* footer, int preferred_width)
         {
+            // As large as the screen allows (not only the main window: a small
+            // window would make the body scroll for no reason), centred on the window.
             QWidget* host = dialog->parentWidget() ? dialog->parentWidget()->window() : nullptr;
             QScreen* screen = host ? host->screen() : QGuiApplication::primaryScreen();
             QRect limit = screen ? screen->availableGeometry() : QRect(0, 0, 1280, 800);
-            if (host) limit = limit.intersected(host->frameGeometry());
             limit.adjust(WINDOW_MARGIN, WINDOW_MARGIN, -WINDOW_MARGIN, -WINDOW_MARGIN);
+            const QPoint centre = host ? host->frameGeometry().center() : limit.center();
 
             const QSize content = scroll->widget()->sizeHint();
             // Room for the vertical scroll bar (as the style sheet draws it) and the
@@ -42,7 +44,10 @@ namespace ui {
             const int scrollbar = std::max(scroll->style()->pixelMetric(QStyle::PM_ScrollBarExtent),
                 scroll->verticalScrollBar()->sizeHint().width());
             const int want_w = std::max(preferred_width, content.width() + scrollbar + 2);
-            const int want_h = banner->height() + content.height() + footer->sizeHint().height();
+            // The banner's own height may not be laid out yet: its size hint is. A few
+            // pixels more for the card's border, so nothing is left to scroll.
+            const int want_h = std::max(banner->height(), banner->sizeHint().height())
+                + content.height() + footer->sizeHint().height() + 8;
 
             const int max_w = limit.width();
             const int max_h = std::max(240, limit.height() - FRAME_ALLOWANCE);
@@ -52,7 +57,10 @@ namespace ui {
             const int w = std::min(want_w, max_w);
             const int h = std::min(want_h, max_h);
             dialog->resize(w, h);
-            dialog->move(limit.center().x() - w / 2, limit.center().y() - (h + FRAME_ALLOWANCE) / 2);
+            // Centred on the window, but whole on the screen.
+            const int x = std::clamp(centre.x() - w / 2, limit.left(), limit.right() - w + 1);
+            const int y = std::clamp(centre.y() - (h + FRAME_ALLOWANCE) / 2, limit.top(), limit.bottom() - h + 1);
+            dialog->move(x, y);
         }
     } // namespace dialog_theme
 
@@ -95,15 +103,21 @@ namespace ui {
             body->setSpacing(12);
             body->addWidget(form);
 
-            auto* title = new QLabel(preview_title.toUpper());
-            title->setObjectName("previewTitle");
-            title->setAlignment(Qt::AlignCenter);
-            body->addWidget(title);
-            auto* preview_row = new QHBoxLayout;
-            preview_row->addStretch();
-            preview_row->addWidget(preview);
-            preview_row->addStretch();
-            body->addLayout(preview_row);
+            if (form->isMerge()) {
+                // Merging, the result sits between the two boxes it comes from.
+                form->placeResultPreview(preview);
+            }
+            else {
+                auto* title = new QLabel(preview_title.toUpper());
+                title->setObjectName("previewTitle");
+                title->setAlignment(Qt::AlignCenter);
+                body->addWidget(title);
+                auto* preview_row = new QHBoxLayout;
+                preview_row->addStretch();
+                preview_row->addWidget(preview);
+                preview_row->addStretch();
+                body->addLayout(preview_row);
+            }
 
             auto* scroll = new QScrollArea;
             scroll->setObjectName("dialogScroll");
@@ -147,6 +161,8 @@ namespace ui {
             // The box's size is chosen on the preview itself.
             preview->setResizable(true);
             QObject::connect(preview, &NodePreview::sizeEdited, form, &NodeAttributesForm::setBoxSize);
+            // So are a Hogar's ashes.
+            QObject::connect(preview, &NodePreview::ashesEdited, form, &NodeAttributesForm::setAshes);
             refresh();
 
             // The footer only needs a divider when the body actually scrolls.
@@ -184,7 +200,7 @@ namespace ui {
 
         form_ = new NodeAttributesForm(initial, recent_colours, this);
         form_->setFontSizeForAllAvailable(!create);
-        form_->setProjectDefaultsAvailable(true);
+        form_->setDiagramDefaultsAvailable(true);
         form_->setProject(project);
         preview_ = new NodePreview(this);
         preview_->setFixedWidth(340);
@@ -202,6 +218,7 @@ namespace ui {
     bool NodeDialog::colourAsDefault() const { return form_->colourAsDefault(); }
     bool NodeDialog::fontColourAsDefault() const { return form_->fontColourAsDefault(); }
     bool NodeDialog::fontSizeAsDefault() const { return form_->fontSizeAsDefault(); }
+    void NodeDialog::setDiagramDefaultsAvailable(bool available) { form_->setDiagramDefaultsAvailable(available); }
 
     // ============================================================================
     // FuseNodesDialog
@@ -218,7 +235,7 @@ namespace ui {
 
         auto* banner = new DialogBanner(DialogBanner::Glyph::Fuse,
             QStringLiteral("Fusionar cajas"),
-            QStringLiteral("Elige qué valor prevalece en cada campo, o escríbelo tú mismo"),
+            QStringLiteral("Haz clic en el valor de una caja para quedártelo, o escríbelo en medio"),
             this);
 
         // The fused node starts as a copy of the first node chosen.
@@ -226,11 +243,12 @@ namespace ui {
             first, first_title, second, second_title, this);
         form_->setProject(project);
         preview_ = new NodePreview(this);
-        preview_->setFixedWidth(360);
         if (project) preview_->setBoxSizes(project->layout.box_sizes);
+        // Between the two boxes, wide and low so the rows below fit without scrolling.
+        preview_->setFixedSize(440, 200);
 
         accept_ = buildNodeDialog(this, banner, form_, preview_,
-            QStringLiteral("Vista previa de la caja fusionada"), QStringLiteral("Fusionar"), 1000);
+            QStringLiteral("Vista previa de la caja fusionada"), QStringLiteral("Fusionar"), 1120);
 
         form_->focusName();
     }

@@ -25,14 +25,16 @@ namespace app_logic {
 		}
 
 		json boxToJSON(const BoxSize& b) {
-			return { { "width", b.width }, { "height", b.height } };
+			return { { "width", b.width }, { "height", b.height }, { "ashes", b.ashes } };
 		}
 
+		// Each field is optional: settings saved before it existed keep its default.
 		void boxFromJSON(const json& j, const char* key, BoxSize& b) {
 			if (!j.contains(key)) return;
 			const json& box = j.at(key);
 			if (box.contains("width"))  b.width = box.at("width").get<double>();
 			if (box.contains("height")) b.height = box.at("height").get<double>();
+			if (box.contains("ashes"))  b.ashes = box.at("ashes").get<double>();
 		}
 	}
 

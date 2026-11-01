@@ -104,6 +104,7 @@ namespace ui {
         opts.outline = pen();
         opts.label_scroll = label_scroll_;
         opts.show_scroll_indicator = hovered_;
+        opts.sizes = node_->getBoxSizes();
         node_visuals::paintNode(painter, node_->getAttributes(), rect(), opts);
 
         if (candidate || origin) {
@@ -164,7 +165,7 @@ namespace ui {
     void NodeItem::wheelEvent(QGraphicsSceneWheelEvent* event) {
         // Scroll the label only when it overflows its box and can still move in
         // the requested direction; otherwise let the view handle the wheel.
-        const double max_scroll = node_visuals::maxLabelScroll(node_->getAttributes(), rect());
+        const double max_scroll = node_visuals::maxLabelScroll(node_->getAttributes(), rect(), node_->getBoxSizes());
         if (max_scroll <= 0.0 || (event->modifiers() & Qt::ControlModifier)) {
             event->ignore();
             return;

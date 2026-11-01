@@ -555,6 +555,60 @@ namespace app_logic {
                 EXPECT_DOUBLE_EQ(boxNamed(p.getEditor(1).getGraph(), "D")->getWidth(), 160.0);
             }
 
+            // New default ashes ask, as sizes do, about the Hogar boxes that follow
+            // the old ones: they keep them as their own, or take the new ones.
+            TEST(ProjectSettings, NewDefaultAshesAreAskedAboutLikeSizes) {
+                auto build = [](Project& p) {
+                    auto& ed = p.getEditor(0);
+                    NodeAttributes follows("H");
+                    follows.fire = FireState::FireWithAshes;
+                    ed.createNode(follows, 0, -1, nullptr);
+                    NodeAttributes own("O");
+                    own.fire = FireState::FireWithAshes;
+                    own.ashes = 0.5;
+                    ed.createNode(own, 0, -1, nullptr);
+                    ed.createNode(NodeAttributes("N"), 0, -1, nullptr); // not a Hogar
+                };
+                auto ashesOf = [](const Project& p, const std::string& name) {
+                    return boxNamed(p.getEditor(0).getGraph(), name)->getAttributes().ashes;
+                };
+                {
+                    Project p("P");
+                    build(p);
+                    ProjectSettings s = p.getSettings();
+                    s.layout.box_sizes.rectangle.ashes = 0.6;
+                    EXPECT_TRUE(p.usesDefaultSizesChangedBy(s.layout.box_sizes));
+
+                    // Only the new boxes: H keeps the old ones, as its own.
+                    p.setSettings(s, Project::ExistingBoxes::KeepTheirSize);
+                    EXPECT_EQ(ashesOf(p, "H"), ASHES_SHARE);
+                    EXPECT_EQ(ashesOf(p, "O"), 0.5);
+                    EXPECT_FALSE(ashesOf(p, "N").has_value());
+                    // Undone, H follows the default again.
+                    p.undoProjectChange();
+                    EXPECT_FALSE(ashesOf(p, "H").has_value());
+                }
+                {
+                    Project p("P");
+                    build(p);
+                    ProjectSettings s = p.getSettings();
+                    s.layout.box_sizes.rectangle.ashes = 0.6;
+                    // Also the existing ones: H follows the new ones.
+                    p.setSettings(s, Project::ExistingBoxes::TakeNewSize);
+                    EXPECT_FALSE(ashesOf(p, "H").has_value());
+                    EXPECT_DOUBLE_EQ(boxNamed(p.getEditor(0).getGraph(), "H")->getAttributes()
+                        .ashesShare(boxNamed(p.getEditor(0).getGraph(), "H")->getBoxSizes()), 0.6);
+                }
+                {
+                    // Without any Hogar following them, there is nothing to ask.
+                    Project p("P");
+                    p.getEditor(0).createNode(NodeAttributes("N"), 0, -1, nullptr);
+                    ProjectSettings s = p.getSettings();
+                    s.layout.box_sizes.rectangle.ashes = 0.6;
+                    EXPECT_FALSE(p.usesDefaultSizesChangedBy(s.layout.box_sizes));
+                }
+            }
+
             TEST(ProjectSettings, NewDefaultSizesCanBeOnlyForNewBoxes) {
                 Project p("P");
                 threeBoxes(p);

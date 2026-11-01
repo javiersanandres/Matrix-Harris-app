@@ -68,6 +68,7 @@ namespace hypergraph_logic {
 			// Only a size the user gave the box: without one it follows its shape's default.
 			if (a.width) entry["width"] = *a.width;
 			if (a.height) entry["height"] = *a.height;
+			if (a.ashes) entry["ashes"] = *a.ashes; // likewise for a Hogar's ashes
 		}
 
 		// Every field but the name is optional, so files saved before node attributes
@@ -88,6 +89,8 @@ namespace hypergraph_logic {
 				a.width = entry.at("width").get<double>();
 			if (entry.contains("height"))
 				a.height = entry.at("height").get<double>();
+			if (entry.contains("ashes"))
+				a.ashes = entry.at("ashes").get<double>();
 			return a;
 		}
 
@@ -110,6 +113,7 @@ namespace hypergraph_logic {
 		copy.id_ = id_;  // preserve identity across copies
 		copy.layout_settings_ = layout_settings_;
 		copy.box_sizes_ = box_sizes_;
+		copy.box_defaults_ = box_defaults_;
 
 		// 1. Build a mapping from old Node* -> new NodePtr (fresh allocation).
 		std::unordered_map<Node*, NodePtr> node_map;
@@ -287,6 +291,14 @@ namespace hypergraph_logic {
 	void GraphicalHypergraph::toJSON(json& j) const {
 		j["name"] = name_;
 		j["id"] = id_;
+		// The defaults it gives its new boxes, only those it has (see getBoxDefaults).
+		if (!box_defaults_.empty()) {
+			json defaults = json::object();
+			if (box_defaults_.colour) defaults["colour"] = colorToHex(*box_defaults_.colour);
+			if (box_defaults_.font_colour) defaults["font_colour"] = colorToHex(*box_defaults_.font_colour);
+			if (box_defaults_.font_size) defaults["font_size"] = *box_defaults_.font_size;
+			j["box_defaults"] = std::move(defaults);
+		}
 
 		// ── 1. Assign stable integer IDs to every node ────────────────────────────
 		std::unordered_map<Node*, int> node_id;
@@ -455,6 +467,16 @@ namespace hypergraph_logic {
 		// recognise this graph even after a serialization round-trip.
 		if (j.contains("id"))
 			g.id_ = j.at("id").get<std::string>();
+		// Files saved before diagrams had defaults of their own have none.
+		if (j.contains("box_defaults")) {
+			const json& defaults = j.at("box_defaults");
+			if (defaults.contains("colour"))
+				g.box_defaults_.colour = colorFromString(defaults.at("colour").get<std::string>());
+			if (defaults.contains("font_colour"))
+				g.box_defaults_.font_colour = colorFromString(defaults.at("font_colour").get<std::string>());
+			if (defaults.contains("font_size"))
+				g.box_defaults_.font_size = defaults.at("font_size").get<int>();
+		}
 
 		// ── Pass 1a: allocate nodes ───────────────────────────────────────────────
 		std::unordered_map<int, NodePtr> node_by_id;

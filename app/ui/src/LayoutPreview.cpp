@@ -175,11 +175,11 @@ namespace ui {
     }
 
     void LayoutPreview::setSettings(const LayoutSettings& settings, bool glide) {
-        // Only the distances: its boxes keep the built-in size whatever the defaults.
-        LayoutSettings distances = settings.clamped();
-        distances.box_sizes = BoxSizes();
-        if (distances == graph_.getLayoutSettings()) return;
-        graph_.setLayoutSettings(distances);
+        // With the defaults' sizes too: the sample's boxes are drawn as the
+        // project's will be, so the distances can be judged against them.
+        const LayoutSettings next = settings.clamped();
+        if (next == graph_.getLayoutSettings()) return;
+        graph_.setLayoutSettings(next);
         // From wherever the drawing is now, even part way through a glide.
         from_ = shown();
         to_ = layOut();

@@ -53,6 +53,8 @@ public:
     bool colourAsDefault() const;
     bool fontColourAsDefault() const;
     bool fontSizeAsDefault() const;
+    // Offers those tick boxes (shown by default); not where no boxes are created.
+    void setDiagramDefaultsAvailable(bool available);
 
 private:
     NodeAttributesForm* form_ = nullptr;

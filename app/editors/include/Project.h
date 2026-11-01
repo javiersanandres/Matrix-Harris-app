@@ -300,7 +300,8 @@ namespace app_logic {
 		// A new default size of a shape reaches the boxes that use its default
 		// (no size of their own) only with ExistingBoxes::TakeNewSize; with
 		// KeepTheirSize they keep the one they have, which becomes their own,
-		// also in what undo and redo bring back.
+		// also in what undo and redo bring back. The same goes for a shape's
+		// default ashes and the boxes that are a Hogar without their own.
 		//
 		// Every diagram keeps matching the settings, also after an undo or redo
 		// (see HypergraphEditorBase::setConformer). A change of settings is a
@@ -310,8 +311,9 @@ namespace app_logic {
 		const ProjectSettings& getSettings() const { return *settings_; }
 		void setSettings(const ProjectSettings& settings, ExistingBoxes existing = ExistingBoxes::KeepTheirSize);
 
-		// Whether some box of a diagram or the joint uses a default size that
-		// `sizes` would change, i.e. whether ExistingBoxes makes any difference.
+		// Whether some box of a diagram or the joint uses a default size (or,
+		// being a Hogar, default ashes) that `sizes` would change, i.e. whether
+		// ExistingBoxes makes any difference.
 		bool usesDefaultSizesChangedBy(const BoxSizes& sizes) const;
 
 		// Shortcuts to single defaults for new boxes (setting one is setSettings with it changed).

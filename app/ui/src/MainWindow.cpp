@@ -644,10 +644,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
                 project_->addRecentColour(node_visuals::fromQColor(colour));
             });
         scene->setProjectDefaultsStore(
-            [this](const std::string& name) { return project_->newNodeAttributes(name); },
-            [this](const QColor& colour) { project_->setDefaultColour(node_visuals::fromQColor(colour)); },
-            [this](const QColor& colour) { project_->setDefaultFontColour(node_visuals::fromQColor(colour)); },
-            [this](int size) { project_->setDefaultFontSize(size); });
+            [this](const std::string& name) { return project_->newNodeAttributes(name); });
         scene->setProjectSettingsSource([this] { return &project_->getSettings(); });
     }
 

@@ -121,14 +121,11 @@ namespace ui {
         void setColourStore(std::function<QList<QColor>()> recent,
             std::function<void(const QColor&)> remember);
 
-        // Where new boxes take the project's defaults from, and where the node
-        // dialog sets a new default background, text colour or font size. Set by
+        // Where new boxes take the project's defaults from (the diagram's own,
+        // set from the node dialog, then go on top: see BoxDefaults). Set by
         // MainWindow; without it new boxes take the usual ones.
         void setProjectDefaultsStore(
-            std::function<hypergraph_logic::NodeAttributes(const std::string&)> new_attributes,
-            std::function<void(const QColor&)> set_colour,
-            std::function<void(const QColor&)> set_font_colour,
-            std::function<void(int)> set_font_size);
+            std::function<hypergraph_logic::NodeAttributes(const std::string&)> new_attributes);
 
         // The project's settings: the node dialogs' "Sigue al proyecto" and default
         // sizes, and whether new equivalences are continuous. Set by MainWindow;
@@ -243,9 +240,6 @@ namespace ui {
         std::function<QList<QColor>()> recent_colours_;
         std::function<void(const QColor&)> remember_colour_;
         std::function<hypergraph_logic::NodeAttributes(const std::string&)> new_attributes_;
-        std::function<void(const QColor&)> set_default_colour_;
-        std::function<void(const QColor&)> set_default_font_colour_;
-        std::function<void(int)> set_default_font_size_;
         std::function<const app_logic::ProjectSettings*()> project_settings_;
         const app_logic::ProjectSettings* projectSettings() const {
             return project_settings_ ? project_settings_() : nullptr;
@@ -458,8 +452,14 @@ namespace ui {
         bool canResizeBoxes() const;
         QList<QColor> recentColours() const;
         void rememberColours(const QList<QColor>& colours);
-        // Makes the dialog's colours and font size the project's defaults where it was asked to.
-        void applyProjectDefaults(const NodeDialog& dialog);
+        // The attributes a new box starts with: the project's defaults, with the
+        // diagram's own on top.
+        hypergraph_logic::NodeAttributes newBoxAttributes(const std::string& name) const;
+        // Makes the dialog's colours and font size the diagram's defaults where it
+        // was asked to; joined to the step just committed when there is one
+        // (the box edit they came with), so one undo takes both back. Whether
+        // they changed.
+        bool applyDiagramDefaults(const NodeDialog& dialog, bool join_last_step);
         QWidget* dialogParent() const;
 
         // Convenience: get the graph from whichever editor is active.

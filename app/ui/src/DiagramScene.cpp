@@ -480,8 +480,10 @@ namespace ui {
         menu->setToolTipsVisible(true);
 
         const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
+        NodeAttributes shown = node->getAttributes();
+        shown.ashes = shown.ashesShare(node->getBoxSizes()); // as its graph's defaults draw it
         style::addMenuHeader(menu,
-            renderNodeIcon(node->getAttributes(), QSize(44, 30), dpr),
+            renderNodeIcon(shown, QSize(44, 30), dpr),
             QString::fromStdString(node->getName()),
             QStringLiteral("%1 por encima · %2 por debajo")
                 .arg(node->getParents().size()).arg(node->getChildren().size()));
@@ -1213,17 +1215,19 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
     {
         cancelInteraction();
         const std::string name = default_name.toStdString();
-        NodeDialog dlg(NodeDialog::Mode::Create, new_attributes_ ? new_attributes_(name) : NodeAttributes(name),
+        NodeDialog dlg(NodeDialog::Mode::Create, newBoxAttributes(name),
             recentColours(), dialogParent(), projectSettings());
+        dlg.setDiagramDefaultsAvailable(!is_joint_);
         if (dlg.exec() != QDialog::Accepted) return;
 
+        const std::uint64_t before = is_joint_ ? 0 : regular_editor_->stateId();
         try {
             create(dlg.attributes());
         }
         catch (const std::exception& e) { showError(e); return; }
 
         rememberColours(dlg.pickedColours());
-        applyProjectDefaults(dlg);
+        applyDiagramDefaults(dlg, !is_joint_ && regular_editor_->stateId() != before);
         rebuild();
         emit graphChanged();
     }
@@ -1236,16 +1240,20 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         NodePtr node_ptr = item->node()->shared_from_this();
         NodeDialog dlg(NodeDialog::Mode::Edit, node_ptr->getAttributes(), recentColours(), dialogParent(),
             projectSettings());
+        // The joint diagram creates no boxes, so it has no defaults to set.
+        dlg.setDiagramDefaultsAvailable(!is_joint_);
         if (dlg.exec() != QDialog::Accepted) return;
 
         const NodeAttributes updated = dlg.attributes();
         const bool font_size_for_all = dlg.fontSizeForAll();
         if (updated == node_ptr->getAttributes() && !font_size_for_all) {
-            applyProjectDefaults(dlg); // the box stays as it was, the project may not
+            // The box stays as it was, the diagram's defaults may not.
+            if (applyDiagramDefaults(dlg, false)) emit graphChanged();
             return;
         }
         // A new shape or size may move the boxes around it: they glide there.
         const auto from = nodeCenters();
+        const std::uint64_t before = is_joint_ ? 0 : regular_editor_->stateId();
         try {
             if (font_size_for_all) {
                 if (is_joint_) joint_editor_->setNodeAttributesWithFontSizeForAll(node_ptr, updated);
@@ -1259,7 +1267,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         catch (const std::exception& e) { showError(e); return; }
 
         rememberColours(dlg.pickedColours());
-        applyProjectDefaults(dlg);
+        applyDiagramDefaults(dlg, !is_joint_ && regular_editor_->stateId() != before);
         rebuildAnimated(from);
         emit graphChanged();
     }
@@ -1296,34 +1304,26 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         project_settings_ = std::move(settings);
     }
 
-    void DiagramScene::setProjectDefaultsStore(
-        std::function<NodeAttributes(const std::string&)> new_attributes,
-        std::function<void(const QColor&)> set_colour,
-        std::function<void(const QColor&)> set_font_colour,
-        std::function<void(int)> set_font_size)
-    {
+    void DiagramScene::setProjectDefaultsStore(std::function<NodeAttributes(const std::string&)> new_attributes) {
         new_attributes_ = std::move(new_attributes);
-        set_default_colour_ = std::move(set_colour);
-        set_default_font_colour_ = std::move(set_font_colour);
-        set_default_font_size_ = std::move(set_font_size);
     }
 
-    void DiagramScene::applyProjectDefaults(const NodeDialog& dialog) {
+    NodeAttributes DiagramScene::newBoxAttributes(const std::string& name) const {
+        NodeAttributes a = new_attributes_ ? new_attributes_(name) : NodeAttributes(name);
+        if (regular_editor_) regular_editor_->getGraph().getBoxDefaults().applyTo(a);
+        return a;
+    }
+
+    bool DiagramScene::applyDiagramDefaults(const NodeDialog& dialog, bool join_last_step) {
+        if (!regular_editor_) return false; // the joint diagram has none: no boxes are created there
         const NodeAttributes a = dialog.attributes();
-        bool changed = false;
-        if (dialog.colourAsDefault() && set_default_colour_) {
-            set_default_colour_(node_visuals::toQColor(a.colour));
-            changed = true;
-        }
-        if (dialog.fontColourAsDefault() && set_default_font_colour_) {
-            set_default_font_colour_(node_visuals::toQColor(a.font_colour));
-            changed = true;
-        }
-        if (dialog.fontSizeAsDefault() && set_default_font_size_) {
-            set_default_font_size_(a.font_size);
-            changed = true;
-        }
-        if (changed) emit graphChanged(); // the title shows the unsaved change
+        const BoxDefaults old_defaults = regular_editor_->getGraph().getBoxDefaults();
+        BoxDefaults defaults = old_defaults;
+        if (dialog.colourAsDefault())     defaults.colour = a.colour;
+        if (dialog.fontColourAsDefault()) defaults.font_colour = a.font_colour;
+        if (dialog.fontSizeAsDefault())   defaults.font_size = a.font_size;
+        regular_editor_->setBoxDefaults(defaults, join_last_step);
+        return defaults != old_defaults;
     }
 
     void DiagramScene::setColourStore(std::function<QList<QColor>()> recent,

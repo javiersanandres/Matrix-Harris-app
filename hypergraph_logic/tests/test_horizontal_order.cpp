@@ -1,10 +1,12 @@
 #include "HorizontalOrder.h"
+#include "HorizontalOrderBackendTestHook.h"
 #include "GraphicalHypergraph.h"
 #include <gtest/gtest.h>
 
 #include <algorithm>
 #include <numeric>
 #include <limits>
+#include <random>
 
 namespace hypergraph_logic {
     namespace graphicalhypergraph_tests {
@@ -676,6 +678,118 @@ namespace hypergraph_logic {
                 int bf = bruteForceMin(g, 0);   // 5! = 120 permutations
                 g.orderHyperedges(0);
                 EXPECT_EQ(totalCrossings(g, 0), bf);
+            }
+
+            // ════════════════════════════════════════════════════════════════════════
+            // Random layers — the model is exact
+            //
+            // The solver gives each pair of bars its crossings in either order as
+            // the cost of HO, without the paper's CT variables. On random layers of
+            // up to 5 bars, the order it finds must have as few crossings as the
+            // best of all n! orders (totalCrossings counts them as the solver
+            // does), with each backend.
+            // ════════════════════════════════════════════════════════════════════════
+
+            TEST(RandomLayers, OptimalWithEachBackend) {
+                using namespace horizontal_overlapping_internal;
+                std::vector<ILPBackendOverride> backends = { ILPBackendOverride::kForceHighs };
+                if (isGurobiUsableForHorizontalOrderTesting()) backends.push_back(ILPBackendOverride::kForceGurobi);
+
+                int checked = 0;
+                for (unsigned seed = 1; seed <= 250; ++seed) {
+                    std::mt19937 rng(seed);
+                    const int tops = 2 + static_cast<int>(rng() % 5);
+                    const int bottoms = 2 + static_cast<int>(rng() % 5);
+                    TestGraph g("random_" + std::to_string(seed));
+                    std::vector<NodePtr> top, bottom;
+                    for (int i = 0; i < tops; ++i) top.push_back(g.createNode("T" + std::to_string(i), 0, i, nullptr));
+                    for (int j = 0; j < bottoms; ++j)
+                        bottom.push_back(g.createNode("B" + std::to_string(j), 1, j, top[rng() % tops]));
+                    const int extra = static_cast<int>(rng() % 6);
+                    for (int k = 0; k < extra; ++k) {
+                        try {
+                            const std::vector<HyperedgePtr> edges = g.layers().at(0).outgoing_edges;
+                            const HyperedgePtr e = edges[rng() % edges.size()];
+                            switch (rng() % 3) {
+                            case 0: { const NodePtr s = top[rng() % tops]; if (!e->containsSource(s)) g.addSourceToEdge(e, s); break; }
+                            case 1: { const NodePtr t = bottom[rng() % bottoms]; if (!e->containsTarget(t)) g.addTargetToEdge(e, t); break; }
+                            default: g.addConnection(top[rng() % tops], bottom[rng() % bottoms]); break;
+                            }
+                        }
+                        catch (const std::exception&) {} // an operation the graph refuses: skip it
+                    }
+                    auto& edges = g.layers().at(0).outgoing_edges;
+                    if (edges.size() < 2 || edges.size() > 5) continue; // 5! orders at most
+                    g.assignXCoordinates();
+                    const int best = bruteForceMin(g, 0);
+                    const auto initial = edges;
+                    for (ILPBackendOverride backend : backends) {
+                        edges = initial;
+                        setHorizontalOrderBackendOverrideForTesting(backend);
+                        g.orderHyperedges(0);
+                        EXPECT_EQ(totalCrossings(g, 0), best)
+                            << "seed " << seed << ", " << initial.size() << " bars, backend "
+                            << (backend == ILPBackendOverride::kForceHighs ? "HiGHS" : "Gurobi");
+                    }
+                    ++checked;
+                }
+                EXPECT_GT(checked, 100); // most seeds give a layer worth checking
+            }
+
+            // ════════════════════════════════════════════════════════════════════════
+            // Shared boxes on the ends of a span
+            //
+            //   A(0)    V1(100)    V2(200)    Z(300)        e1: V1, V2 -> C
+            //                                               e2: A, V1, V2, Z -> D
+            //      D(50)      C(150)
+            //
+            // V1 and V2 belong to both edges and are e1's two ends. With e1's bar
+            // above, their e2 lines leave from the outer side of their e1 ports,
+            // outside e1's bar: only C's line crosses e2's bar (1). With e2's bar
+            // above, e1's lines from V1 and V2 cross it (2). So e1 goes above.
+            // Counting V1 and V2 as inside e1's span would charge e1 above with
+            // two crossings that never show (3 against 2) and put e2 above.
+            // ════════════════════════════════════════════════════════════════════════
+
+            TEST(SharedBoxesOnSpanEnds, AreNotCountedAsCrossings) {
+                using namespace horizontal_overlapping_internal;
+                TestGraph g("shared_ends");
+                NodePtr A = g.createNode("A", 0, 0, nullptr);
+                NodePtr V1 = g.createNode("V1", 0, 1, nullptr);
+                NodePtr V2 = g.createNode("V2", 0, 2, nullptr);
+                NodePtr Z = g.createNode("Z", 0, 3, nullptr);
+                NodePtr D = g.createNode("D", 1, 0, A);
+                NodePtr C = g.createNode("C", 1, 1, V1);
+                HyperedgePtr e2 = findEdge(g, A, D);
+                HyperedgePtr e1 = findEdge(g, V1, C);
+                ASSERT_TRUE(e1 && e2);
+                g.addSourceToEdge(e1, V2);
+                g.addSourceToEdge(e2, V1);
+                g.addSourceToEdge(e2, V2);
+                g.addSourceToEdge(e2, Z);
+                g.assignXCoordinates();
+                // The positions of the sketch above.
+                auto& nl = g.nodeLayout();
+                nl[A.get()].x = 0;    nl[V1.get()].x = 100; nl[V2.get()].x = 200; nl[Z.get()].x = 300;
+                nl[D.get()].x = 50;   nl[C.get()].x = 150;
+
+                auto& edges = g.layers().at(0).outgoing_edges;
+                ASSERT_EQ(edges.size(), 2u);
+                // e1 above has 1 crossing, e2 above has 2.
+                edges = { e1, e2 };
+                EXPECT_EQ(totalCrossings(g, 0), 1);
+                edges = { e2, e1 };
+                EXPECT_EQ(totalCrossings(g, 0), 2);
+
+                std::vector<ILPBackendOverride> backends = { ILPBackendOverride::kForceHighs };
+                if (isGurobiUsableForHorizontalOrderTesting()) backends.push_back(ILPBackendOverride::kForceGurobi);
+                for (ILPBackendOverride backend : backends) {
+                    edges = { e2, e1 }; // starting from the wrong order
+                    setHorizontalOrderBackendOverrideForTesting(backend);
+                    g.orderHyperedges(0);
+                    EXPECT_EQ(edges.front().get(), e1.get())
+                        << (backend == ILPBackendOverride::kForceHighs ? "HiGHS" : "Gurobi");
+                }
             }
 
             TEST(FiveEdgeStress, EdgeSetPreserved) {

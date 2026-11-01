@@ -70,6 +70,14 @@ namespace hypergraph_logic {
 		return std::clamp(height.value_or(defaultHeight(shape, sizes)), MIN_NODE_HEIGHT, MAX_NODE_HEIGHT);
 	}
 
+	double NodeAttributes::defaultAshes(NodeShape shape, const BoxSizes* sizes) noexcept {
+		return defaultBox(shape, sizes).ashes;
+	}
+
+	double NodeAttributes::ashesShare(const BoxSizes* sizes) const noexcept {
+		return std::clamp(ashes.value_or(defaultAshes(shape, sizes)), MIN_ASHES_SHARE, MAX_ASHES_SHARE);
+	}
+
 	// ============================================================================
 	// Construction
 	// ============================================================================

@@ -159,18 +159,22 @@ namespace app_logic {
 			const BoxSizes old_sizes = step.before.layout.box_sizes;
 			const BoxSizes new_sizes = step.after.layout.box_sizes;
 			if (step.existing == ExistingBoxes::KeepTheirSize && old_sizes != new_sizes) {
-				// The sizes the change gave as their own to the boxes using an old
-				// default go: with that default back, they follow it again.
+				// The sizes (and a Hogar's ashes) the change gave as their own to the
+				// boxes using an old default go: with that default back, they follow it again.
 				auto follow_again = [old_sizes, new_sizes](GraphicalHypergraph& g) {
 					for (const auto& node : g.getAllNodes()) {
 						if (node->isDummy()) continue;
 						NodeAttributes a = node->getAttributes();
 						const double old_w = NodeAttributes::defaultWidth(a.shape, &old_sizes);
 						const double old_h = NodeAttributes::defaultHeight(a.shape, &old_sizes);
+						const double old_ashes = NodeAttributes::defaultAshes(a.shape, &old_sizes);
 						if (a.width && *a.width == old_w && old_w != NodeAttributes::defaultWidth(a.shape, &new_sizes))
 							a.width.reset();
 						if (a.height && *a.height == old_h && old_h != NodeAttributes::defaultHeight(a.shape, &new_sizes))
 							a.height.reset();
+						if (a.hasAshes() && a.ashes && *a.ashes == old_ashes
+							&& old_ashes != NodeAttributes::defaultAshes(a.shape, &new_sizes))
+							a.ashes.reset();
 						if (a != node->getAttributes()) node->setAttributes(a);
 					}
 				};
@@ -342,15 +346,19 @@ namespace app_logic {
 		const BoxSizes before = settings_->layout.box_sizes;
 		const BoxSizes after = clamped.layout.box_sizes;
 		if (existing == ExistingBoxes::KeepTheirSize && before != after) {
-			// The boxes using a default that changes keep its old value, as their own.
+			// The boxes using a default that changes keep its old value, as their own:
+			// sizes, and the ashes of the boxes that are a Hogar.
 			auto keep = [before, after](GraphicalHypergraph& g) {
 				for (const auto& node : g.getAllNodes()) {
 					if (node->isDummy()) continue;
 					NodeAttributes a = node->getAttributes();
 					const double old_w = NodeAttributes::defaultWidth(a.shape, &before);
 					const double old_h = NodeAttributes::defaultHeight(a.shape, &before);
+					const double old_ashes = NodeAttributes::defaultAshes(a.shape, &before);
 					if (!a.width && old_w != NodeAttributes::defaultWidth(a.shape, &after))   a.width = old_w;
 					if (!a.height && old_h != NodeAttributes::defaultHeight(a.shape, &after)) a.height = old_h;
+					if (a.hasAshes() && !a.ashes && old_ashes != NodeAttributes::defaultAshes(a.shape, &after))
+						a.ashes = old_ashes;
 					if (a != node->getAttributes()) node->setAttributes(a);
 				}
 			};
@@ -371,6 +379,9 @@ namespace app_logic {
 				if (!a.width && NodeAttributes::defaultWidth(a.shape, &now) != NodeAttributes::defaultWidth(a.shape, &sizes))
 					return true;
 				if (!a.height && NodeAttributes::defaultHeight(a.shape, &now) != NodeAttributes::defaultHeight(a.shape, &sizes))
+					return true;
+				if (a.hasAshes() && !a.ashes
+					&& NodeAttributes::defaultAshes(a.shape, &now) != NodeAttributes::defaultAshes(a.shape, &sizes))
 					return true;
 			}
 			return false;

@@ -285,6 +285,41 @@ namespace app_logic {
 				} });
 		}
 
+		// ── setBoxDefaults ────────────────────────────────────────────────────────
+		//
+		// Gives the diagram these defaults for its new boxes (see
+		// GraphicalHypergraph::getBoxDefaults). A step of its own in the history,
+		// or, with join_last_step, part of the step just committed (the box edit
+		// they come with), so that one undo takes both back. Nothing happens if
+		// they do not change.
+		void setBoxDefaults(const BoxDefaults& defaults, bool join_last_step = false) {
+			auto& graph = derived().graph();
+			const BoxDefaults old_defaults = graph.getBoxDefaults();
+			if (old_defaults == defaults) return;
+			graph.setBoxDefaults(defaults);
+			auto& past = derived().past_;
+			if (join_last_step && !past.empty()) {
+				// A snapshot already holds the graph from before them, and swaps the
+				// live one (with them) in on undo: nothing more to do. A local change
+				// learns to set them back too.
+				if (auto* local = std::get_if<LocalChange>(&past.back().change)) {
+					LocalChange step = *local;
+					*local = LocalChange{
+						[step, old_defaults](GraphicalHypergraph& g) { step.undo(g); g.setBoxDefaults(old_defaults); },
+						[step, defaults](GraphicalHypergraph& g) { step.redo(g); g.setBoxDefaults(defaults); } };
+				}
+				notifyMutated();
+				return;
+			}
+			commitLocal({
+				[old_defaults](GraphicalHypergraph& g) { g.setBoxDefaults(old_defaults); },
+				[defaults](GraphicalHypergraph& g) { g.setBoxDefaults(defaults); } });
+		}
+
+		// Changes with every step done, undone or redone (see isAtSavedState):
+		// comparing it before and after an operation tells whether it was recorded.
+		std::uint64_t stateId() const { return state_; }
+
 	private:
 		// Applies the attributes to the node and returns how to undo and redo it,
 		// or nothing if they were already the node's (see setNodeAttributes).

@@ -3,6 +3,7 @@
 #include "Project.h"
 #include "LayoutTypes.h"
 #include <gtest/gtest.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <stdexcept>
@@ -968,6 +969,74 @@ namespace app_logic {
                 bool found = std::any_of(layer0.begin(), layer0.end(),
                     [&](const NodePtr& n) { return n == A; });
                 EXPECT_TRUE(found);
+            }
+
+            // ── The diagram's defaults for its new boxes ──────────────────────
+
+            static BoxDefaults redDefaults() {
+                BoxDefaults d;
+                d.colour = Color{ 200, 0, 0, 255 };
+                d.font_size = 14;
+                return d;
+            }
+
+            // Joined to a box edit (a local change), one undo takes both back.
+            TEST(HypergraphEditor, BoxDefaultsJoinTheBoxEditInOneStep) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                NodePtr A = ed.createNode("A", 0, 0, nullptr);
+                NodeAttributes a = A->getAttributes();
+                a.colour = Color{ 200, 0, 0, 255 };
+                const std::uint64_t before = ed.stateId();
+                ed.setNodeAttributes(A, a);
+                ASSERT_NE(ed.stateId(), before);
+                ed.setBoxDefaults(redDefaults(), true);
+                EXPECT_EQ(ed.getGraph().getBoxDefaults(), redDefaults());
+
+                ed.undo();
+                EXPECT_TRUE(ed.getGraph().getBoxDefaults().empty());
+                EXPECT_NE(ed.getAllNodes()[0]->getAttributes().colour, (Color{ 200, 0, 0, 255 }));
+                ed.redo();
+                EXPECT_EQ(ed.getGraph().getBoxDefaults(), redDefaults());
+                EXPECT_EQ(ed.getAllNodes()[0]->getAttributes().colour, (Color{ 200, 0, 0, 255 }));
+                ed.undo();
+                EXPECT_TRUE(ed.canUndo()); // the creation of A is still there: one step was taken back
+            }
+
+            // Joined to the creation of a box (a snapshot), too.
+            TEST(HypergraphEditor, BoxDefaultsJoinTheCreationOfABox) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                ed.createNode("A", 0, 0, nullptr);
+                ed.setBoxDefaults(redDefaults(), true);
+                ed.undo();
+                EXPECT_TRUE(ed.getAllNodes().empty());
+                EXPECT_TRUE(ed.getGraph().getBoxDefaults().empty());
+                ed.redo();
+                EXPECT_EQ(ed.getAllNodes().size(), 1u);
+                EXPECT_EQ(ed.getGraph().getBoxDefaults(), redDefaults());
+            }
+
+            // On their own (the box was left as it was), they are a step of their own.
+            TEST(HypergraphEditor, BoxDefaultsAloneAreTheirOwnStep) {
+                HypergraphEditor ed(GraphicalHypergraph("g"));
+                ed.createNode("A", 0, 0, nullptr);
+                ed.setBoxDefaults(redDefaults());
+                ed.undo();
+                EXPECT_TRUE(ed.getGraph().getBoxDefaults().empty());
+                EXPECT_EQ(ed.getAllNodes().size(), 1u); // A stays
+            }
+
+            // They are saved with the diagram and kept by its copies.
+            TEST(HypergraphEditor, BoxDefaultsAreSavedAndCopied) {
+                GraphicalHypergraph g("g");
+                g.setBoxDefaults(redDefaults());
+                nlohmann::json j;
+                g.toJSON(j);
+                EXPECT_EQ(GraphicalHypergraph::fromJSON(j).getBoxDefaults(), redDefaults());
+                EXPECT_EQ(g.clone().getBoxDefaults(), redDefaults());
+                EXPECT_EQ(g.duplicate().getBoxDefaults(), redDefaults());
+                // A diagram saved before they existed has none.
+                j.erase("box_defaults");
+                EXPECT_TRUE(GraphicalHypergraph::fromJSON(j).getBoxDefaults().empty());
             }
 
         } // namespace hypergraph_editor_tests

@@ -63,6 +63,10 @@ namespace app_defaults {
 //   - Tamaño por defecto   : width and height of each shape's boxes, the three
 //                            drawn side by side to compare and resize them by
 //                            their edges (ShapeSizesPreview), and their fields.
+//   - Banda negra del hogar: the default black band of a Hogar of each shape, the
+//                            three drawn as a Hogar to drag the line between
+//                            their parts (ShapeSizesPreview::Edit::Ashes), and
+//                            their fields, in percent.
 //
 // Under them, a tick box to also make these the application's defaults for new
 // projects, and buttons to fill the form with the application's defaults or the
@@ -116,7 +120,8 @@ private:
     DistanceSlider* horizontal_slider_ = nullptr;
     LayoutPreview* layout_preview_ = nullptr;
     ShapeSizesPreview* sizes_preview_ = nullptr;
-    struct SizeFields { QSpinBox* width = nullptr; QSpinBox* height = nullptr; };
+    ShapeSizesPreview* ashes_preview_ = nullptr; // the same three, as a Hogar
+    struct SizeFields { QSpinBox* width = nullptr; QSpinBox* height = nullptr; QSpinBox* ashes = nullptr; };
     SizeFields rectangle_, circle_, rhombus_;
     TickBox* as_app_defaults_ = nullptr;
     // The "↺" of each distance and size: whether its value differs from the

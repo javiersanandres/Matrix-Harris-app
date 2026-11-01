@@ -26,9 +26,12 @@ namespace ui::node_visuals {
     // (getWidth() x getHeight(), centred on the node).
     // ============================================================================
 
-    // Share of the box height painted white on top of a fire with ashes; the
-    // remaining bottom part (1/4) is painted black.
-    inline constexpr double ASHES_WHITE_FRACTION = 3.0 / 4.0;
+    // A fire with ashes ("Hogar") is painted white with a black band along its
+    // bottom, the ashes, whose share of the box's height is the node's own or
+    // its shape's default (NodeAttributes::ashesShare). The label goes in the
+    // larger of the two parts: black on the white one, white on the ashes.
+    // The functions below take the shapes' defaults as `sizes` (the built-in
+    // ones without them), as boxSize does.
 
     // ── Colour conversion ────────────────────────────────────────────────────────
     QColor toQColor(const hypergraph_logic::Color& c);
@@ -49,15 +52,17 @@ namespace ui::node_visuals {
     QPainterPath shapePath(hypergraph_logic::NodeShape shape, const QRectF& box);
 
     // Area where the label may be drawn: the largest comfortable rectangle
-    // inside the shape, restricted to the white top part for a fire with ashes.
-    QRectF labelRect(const hypergraph_logic::NodeAttributes& attributes, const QRectF& box);
+    // inside the shape, restricted to the larger part for a fire with ashes.
+    QRectF labelRect(const hypergraph_logic::NodeAttributes& attributes, const QRectF& box,
+        const hypergraph_logic::BoxSizes* sizes = nullptr);
 
     // Font used for the label (application font at the node's font size).
     QFont labelFont(const hypergraph_logic::NodeAttributes& attributes);
 
     // How far the label can be scrolled when its wrapped text is taller than
     // labelRect (0 when everything fits).
-    double maxLabelScroll(const hypergraph_logic::NodeAttributes& attributes, const QRectF& box);
+    double maxLabelScroll(const hypergraph_logic::NodeAttributes& attributes, const QRectF& box,
+        const hypergraph_logic::BoxSizes* sizes = nullptr);
 
     // ── Painting ─────────────────────────────────────────────────────────────────
 
@@ -71,6 +76,8 @@ namespace ui::node_visuals {
         // Draw the slim scroll indicator when the label overflows (the canvas
         // shows it only while the mouse is over the node).
         bool show_scroll_indicator = false;
+        // The shapes' defaults the node follows (its graph's, Node::getBoxSizes).
+        const hypergraph_logic::BoxSizes* sizes = nullptr;
     };
 
     // Paints the whole node (fill, outline and clipped label) inside box.
@@ -108,5 +115,30 @@ namespace ui::node_visuals {
 
     // The box's size ("120 × 50") in a chip just above it.
     void paintSizeChip(QPainter* painter, const QRectF& box, double unit = 1.0);
+
+    // ── The ashes of a Hogar ─────────────────────────────────────────────────────
+    //
+    // In the dialogs' previews (never on the canvas), the line between the
+    // white part and the ashes can be dragged up or down, like an edge.
+
+    // The y of that line for ashes taking `share` of the box's height.
+    double ashesLineY(const QRectF& box, double share);
+
+    // The share the ashes take with the line at y, within the limits of
+    // LayoutTypes.h, in whole hundredths.
+    double ashesShareAt(const QRectF& box, double y);
+
+    // Whether pos is on the line, within `reach` of it and away from the box's
+    // sides (where the edges' own handles are).
+    bool onAshesLine(const QRectF& box, double share, const QPointF& pos, double reach);
+
+    // The line across the shape with a handle in its middle; it stands out
+    // when active (under the mouse or being dragged). `unit` as in
+    // paintResizeFrame.
+    void paintAshesHandle(QPainter* painter, hypergraph_logic::NodeShape shape, const QRectF& box,
+        double share, bool active, double unit = 1.0);
+
+    // The black band's share ("Negro 25 %") in a chip just right of the handle.
+    void paintAshesChip(QPainter* painter, const QRectF& box, double share, double unit = 1.0);
 
 } // namespace ui::node_visuals

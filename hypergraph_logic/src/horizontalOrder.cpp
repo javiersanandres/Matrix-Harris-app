@@ -12,7 +12,7 @@
 
 
 // ==============================================================================================
-// This module implements the crossing-minimisation MIP for the vertical order of hyperedge
+// This module implements the crossing-minimisation model for the vertical order of hyperedge
 // horizontal segments within a single layer, as described in equations (26)–(30) of:
 //
 //  Fridman, G., Vasiliev, Y., Puhkalo, V., & Ryzhov, V. (2021).
@@ -24,12 +24,20 @@
 // The outgoing_edges vector of the layer is re-sorted in-place after the solve
 // so that index 0 = topmost (highest y) bar on the canvas.
 //
+// The paper's crossing variables CT and their big-M constraints (27)-(28) are
+// not built: with the nodes' x already fixed here, a pair's crossings are a
+// known constant for each of its two orders, so they go straight into the
+// objective as the cost of HO (see solve). What remains is the linear ordering
+// problem, a pure 0-1 ILP: same optimum, half the columns, and no big-M
+// weakening the LP relaxation. (The MipModel / MipSolveResult names below
+// are the backends' generic ones.)
+//
 // Solver backend: the model itself (columns + sparse rows, below) is built
 // once, independent of which solver ends up running it. HiGHS is
 // always available and is the default/fallback backend. When Gurobi (any
 // version, found at run time, see GurobiRuntime.h) is installed and licensed
 // on the machine, Gurobi is used instead, since it's substantially faster on
-// this kind of MIP.
+// this kind of ILP.
 // ==============================================================================================
 namespace horizontal_overlapping_internal {
 
@@ -45,7 +53,7 @@ namespace horizontal_overlapping_internal {
         // Both HiGHS and Gurobi return whatever incumbent they've found so
         // far when the limit is hit, not a hard failure -- solve() below
         // accepts that "good enough" solution the same way it would accept a
-        // proven optimum. We set the maximum time for a single layer MIP to
+        // proven optimum. We set the maximum time for a single layer ILP to
         // be 1.0 seconds and 5.0 for all the layers to be computed.
         constexpr double kSolveTimeLimitSeconds = 1.0;
         constexpr double kSolveAllLayersTimeLimitSeconds = 5.0;
@@ -203,24 +211,32 @@ namespace horizontal_overlapping_internal {
 
     // ── Crossing auxiliary counts ─────────────────────────────────────────────────
     //
-    // acs(e1, e2): sources of e2 whose x lies inside span(e1).
-    // act(e1, e2): targets of e2 whose x lies inside span(e1).
-    int HorizontalOrderSolver::acs(const HyperedgePtr& e1, const HyperedgePtr& e2) const {
-        Span s1 = computeSpan(e1);
+    // acs(e1, e2): sources of e2 whose x lies strictly inside span(e1).
+    // act(e1, e2): targets of e2 whose x lies strictly inside span(e1).
+    //
+    // Strictly: a node on an end of span(e1) is mostly one of e1's own nodes,
+    // and the port ordering gives e1's port the outer side of it, so e1's bar
+    // starts there and runs away from the node's other lines: none of them
+    // crosses it, and counting it would charge e1 being above with a crossing
+    // that never shows. (A node of the other layer that only shares that x
+    // has its line moved aside by the port assignment: no sure crossing either.)
+    //
+    // Both take span(e1) already computed: solve() computes each edge's span
+    // once, instead of once per pair it is in.
+    int HorizontalOrderSolver::acs(const Span& s1, const HyperedgePtr& e2) const {
         int count = 0;
         for (const auto& src : e2->getSources()) {
             double x = node_layout_.at(src.get()).x;
-            if (x >= s1.lo && x <= s1.hi) ++count;
+            if (x > s1.lo && x < s1.hi) ++count;
         }
         return count;
     }
 
-    int HorizontalOrderSolver::act(const HyperedgePtr& e1, const HyperedgePtr& e2) const {
-        Span s1 = computeSpan(e1);
+    int HorizontalOrderSolver::act(const Span& s1, const HyperedgePtr& e2) const {
         int count = 0;
         for (const auto& tgt : e2->getTargets()) {
             double x = node_layout_.at(tgt.get()).x;
-            if (x >= s1.lo && x <= s1.hi) ++count;
+            if (x > s1.lo && x < s1.hi) ++count;
         }
         return count;
     }
@@ -228,23 +244,25 @@ namespace horizontal_overlapping_internal {
 
     // ── solve ─────────────────────────────────────────────────────────────────────
     //
-    // Builds and solves the MIP (26)–(30).
+    // Builds and solves the model (26)-(30), without CT.
     //
     // Both backends need the variables indexed, so we do the following:
     // Edges are indexed 0...n-1 in the order they appear in outgoing_edges.
-    // For each ordered pair (i, j) with i < j we create:
+    // For each pair (i, j) with i < j we create:
     //   HO[i][j]  in {0,1}    (HO_{e_i, e_j} in the paper)
-    //   CT[i][j]  >= 0        (CT_{e_i, e_j} in the paper)
     //
-    // Constraint (27): CT[i][j] >= acs(e_i,e_j) + act(e_j,e_i) - M*(1 - HO[i][j])
-    // Constraint (28): CT[i][j] >= acs(e_j,e_i) + act(e_i,e_j) - M*HO[i][j]
-    // Constraint (29): 0 <= HO[i][j] - HO[i][k] + HO[j][k] <= 1  for all i<j<k
-    // Constraint (30): CT[i][j] >= 0, HO[i][j] in {0,1}  (variable bounds)
-    //
-    // In the paper, they specify M to be "a sufficiently large constant". 
-    // We need to choose a specific value for M to implement the constraints. 
-    // A rather tight big-M value is max possible acs+act value = |S(e2)| + |T(e2)|.
-    // We use the total node count as a safe global upper bound.
+    // In the paper, CT[i][j] >= 0 is bounded by
+    //   (27): CT[i][j] >= acs(e_i,e_j) + act(e_j,e_i) - M*(1 - HO[i][j])
+    //   (28): CT[i][j] >= acs(e_j,e_i) + act(e_i,e_j) - M*HO[i][j]
+    // and minimised, so at the optimum, with the counts being constants >= 0,
+    //   CT[i][j] = up * HO[i][j] + down * (1 - HO[i][j])
+    //   up   = acs(e_i,e_j) + act(e_j,e_i)   (crossings with e_i above e_j)
+    //   down = acs(e_j,e_i) + act(e_i,e_j)   (crossings with e_j above e_i)
+    // which is linear in HO. The objective (26) is therefore
+    //   sum (up - down) * HO[i][j]  +  sum down
+    // whose constant part does not change the optimal order. The constraints
+    // left are the transitivity ones:
+    //   (29): 0 <= HO[i][j] - HO[i][k] + HO[j][k] <= 1  for all i<j<k
     //
     // After the solve, outgoing_edges is re-sorted by the induced order:
     // e_i comes before e_j (higher bar) iff HO[i][j] = 1.
@@ -255,19 +273,11 @@ namespace horizontal_overlapping_internal {
         // Nothing to order with fewer than two edges.
         if (n < 2) return;
 
-        // Safe big-M: total number of nodes in the graph is an upper bound on
-        // acs + act for any pair, since acs and act count subsets of nodes.
-        int total_nodes = 0;
-        for (const auto& e : edges)
-            total_nodes += static_cast<int>(e->getSources().size()) + static_cast<int>(e->getTargets().size());
-        double M = static_cast<double>(total_nodes);
-
         // ── Assemble the backend-neutral model ──────────────────────────────────
         //
-        // HO[i][j] and CT[i][j] for all i < j, flattened into columns and looked
-        // up via these index tables.
+        // HO[i][j] for all i < j, flattened into columns and looked up via this
+        // index table.
         std::vector<std::vector<int>> HO_idx(n, std::vector<int>(n, -1));
-        std::vector<std::vector<int>> CT_idx(n, std::vector<int>(n, -1));
 
         MipModel model;
 
@@ -280,9 +290,7 @@ namespace horizontal_overlapping_internal {
         // the user didn't ask to move. Edges are indexed 0..n-1 by their
         // CURRENT position, so "e_i before e_j" for every i<j pair is true
         // BY CONSTRUCTION here -- the guess is simply HO[i][j]=1 for all
-        // i<j, with CT[i][j] guessed to match (the smallest value that
-        // satisfies (27) when HO=1; (28) is never binding there since M is
-        // large). That makes this a genuinely feasible integral starting
+        // i<j. That makes this a genuinely feasible integral starting
         // solution (the current order, unchanged), not just a rough hint.
         auto addColumn = [&](double lower, double upper, double cost, bool integer, double guess) -> int {
             int idx = static_cast<int>(model.col_lower.size());
@@ -294,55 +302,42 @@ namespace horizontal_overlapping_internal {
             return idx;
             };
 
-        auto addConstraint = [&](std::vector<std::pair<int, double>> terms, double lo, double hi) {
-            std::map<int, double> merged; // merge duplicate columns, if any
-            for (auto& [idx, coeff] : terms) merged[idx] += coeff;
-            SparseRow row;
-            for (auto& [idx, coeff] : merged) {
-                if (coeff == 0.0) continue;
-                row.idx.push_back(idx);
-                row.val.push_back(coeff);
-            }
-            row.lo = (lo <= -kInf) ? -kInf : lo;
-            row.hi = (hi >= kInf) ? kInf : hi;
-            model.rows.push_back(std::move(row));
-            };
+        // Each edge's span, once.
+        std::vector<Span> spans;
+        spans.reserve(n);
+        for (const auto& e : edges) spans.push_back(computeSpan(e));
 
+        model.col_lower.reserve(n * (n - 1) / 2);
+        model.col_upper.reserve(n * (n - 1) / 2);
+        model.col_cost.reserve(n * (n - 1) / 2);
+        model.col_integrality.reserve(n * (n - 1) / 2);
+        model.col_guess.reserve(n * (n - 1) / 2);
         for (int i = 0; i < n; ++i) {
             for (int j = i + 1; j < n; ++j) {
-                double a_ij = static_cast<double>(acs(edges[i], edges[j]));
-                double b_ij = static_cast<double>(act(edges[i], edges[j]));
-                double a_ji = static_cast<double>(acs(edges[j], edges[i]));
-                double b_ji = static_cast<double>(act(edges[j], edges[i]));
+                // The pair's crossings in each of its two orders.
+                const double up = static_cast<double>(acs(spans[i], edges[j]) + act(spans[j], edges[i]));
+                const double down = static_cast<double>(acs(spans[j], edges[i]) + act(spans[i], edges[j]));
 
                 // Guess: keep the current order, i.e. HO[i][j] = 1 (e_i, at
-                // the smaller CURRENT index, stays above e_j). With HO fixed
-                // to 1, (27) needs CT >= a_ij + b_ji; (28) needs CT >= a_ji +
-                // b_ij - M, which is not binding since M is large. So the
-                // smallest feasible CT under this guess is max(0, a_ij+b_ji).
-                HO_idx[i][j] = addColumn(0.0, 1.0, 0.0, /*integer=*/true, /*guess=*/1.0);
-                CT_idx[i][j] = addColumn(0.0, kInf, 1.0, /*integer=*/false, /*guess=*/std::max(0.0, a_ij + b_ji));
-
-                int ho = HO_idx[i][j];
-                int ct = CT_idx[i][j];
-
-                // (27): CT[i][j] - M*HO[i][j] >= acs(e_i,e_j) + act(e_j,e_i) - M
-                addConstraint({ {ct, 1.0}, {ho, -M} }, a_ij + b_ji - M, kInf);
-
-                // (28): CT[i][j] + M*HO[i][j] >= acs(e_j,e_i) + act(e_i,e_j)
-                addConstraint({ {ct, 1.0}, {ho, M} }, a_ji + b_ij, kInf);
+                // the smaller CURRENT index, stays above e_j).
+                HO_idx[i][j] = addColumn(0.0, 1.0, up - down, /*integer=*/true, /*guess=*/1.0);
             }
         }
 
         // ── Constraint (29): transitivity ─────────────────────────────────────
         //
         // For all i < j < k:  0 <= HO[i][j] - HO[i][k] + HO[j][k] <= 1
+        // Each row is built as it is: its three columns are always distinct.
+        model.rows.reserve(static_cast<size_t>(n) * (n - 1) * (n - 2) / 6);
         for (int i = 0; i < n; ++i) {
             for (int j = i + 1; j < n; ++j) {
                 for (int k = j + 1; k < n; ++k) {
-                    addConstraint(
-                        { {HO_idx[i][j], 1.0}, {HO_idx[i][k], -1.0}, {HO_idx[j][k], 1.0} },
-                        0.0, 1.0);
+                    SparseRow row;
+                    row.idx = { HO_idx[i][j], HO_idx[i][k], HO_idx[j][k] };
+                    row.val = { 1.0, -1.0, 1.0 };
+                    row.lo = 0.0;
+                    row.hi = 1.0;
+                    model.rows.push_back(std::move(row));
                 }
             }
         }
@@ -385,7 +380,7 @@ namespace horizontal_overlapping_internal {
         }
 
         if (!result.success) {
-            // The MIP could not be resolved in time and therefore 
+            // The ILP could not be resolved in time and therefore
             // the previous order is preserved.
             return;
         }

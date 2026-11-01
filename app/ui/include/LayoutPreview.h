@@ -47,9 +47,8 @@ namespace ui {
 
         explicit LayoutPreview(QWidget* parent = nullptr);
 
-        // Draws the sample with these distances, gliding there or at once. Their
-        // default box sizes are left out: the sample's boxes keep the built-in
-        // size, so only the distances change it.
+        // Draws the sample with these distances and default box sizes (its boxes
+        // are rectangles), gliding there or at once.
         void setSettings(const hypergraph_logic::LayoutSettings& settings, bool glide = true);
 
         // Keeps the drawing's scale (while a distance is dragged); let go, it

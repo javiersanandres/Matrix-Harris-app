@@ -723,6 +723,29 @@ int main(int argc, char* argv[]) {
         save(preview->grab().toImage(), "information/resizeBox/03.png");
         dialog.close();
     });
+    run("resize box, ashes", [] {
+        // A Hogar's preview, the mouse on the line between its two parts (found
+        // by moving down the middle, from below the box's top edge, until the
+        // preview offers to drag it).
+        NodeAttributes hogar("Hogar");
+        hogar.fire = FireState::FireWithAshes;
+        hogar.applyFireColours();
+        hogar.ashes = 0.4;
+        NodeDialog dialog(NodeDialog::Mode::Edit, hogar, {});
+        dialog.show();
+        settle(400);
+        auto* preview = dialog.findChild<NodePreview*>();
+        if (!preview) throw std::runtime_error("No preview in the box dialog");
+        for (int y = preview->height() * 3 / 10; y < preview->height(); ++y) {
+            const QPointF at(preview->width() / 2.0 - 4.0, y);
+            QMouseEvent move(QEvent::MouseMove, at, preview->mapToGlobal(at), Qt::NoButton, Qt::NoButton, Qt::NoModifier);
+            QApplication::sendEvent(preview, &move);
+            if (preview->cursor().shape() == Qt::SizeVerCursor) break;
+        }
+        settle(200);
+        save(preview->grab().toImage(), "information/resizeBox/04.png");
+        dialog.close();
+    });
 
     // ── The project's settings ────────────────────────────────────────────────
     run("project settings", [] {

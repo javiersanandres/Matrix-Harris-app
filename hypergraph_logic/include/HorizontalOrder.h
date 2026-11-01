@@ -11,19 +11,22 @@ namespace horizontal_overlapping_internal {
 
     // ── HorizontalOrderSolver ─────────────────────────────────────────────────────
     //
-    // Internal helper that solves the MIP described in equations (26)–(30) of
+    // Internal helper that solves the model described in equations (26)–(30) of
     // Fridman et al. (2021) for a single layer pair, establishing the vertical
     // order of hyperedge horizontal segments so as to minimise crossing count.
     //
     // The problem is formulated in the following manner:
     // 
     // Given the set E_H of outgoing hyperedges on layer 'layer' (all pairs
-    // ordered e_1 ≺ e_2 by their index in outgoing_edges), the MIP introduces:
+    // ordered e_1 ≺ e_2 by their index in outgoing_edges), the model, a 0-1
+    // ILP (the linear ordering problem), introduces:
     //
     //   HO_{e1,e2} in {0,1}   1 if e1 is higher than e2, 0 otherwise.
-    //   CT_{e1,e2} in >= 0    crossing count between e1 and e2.
     //
-    // The objective (26) minimises sum CT_{e1,e2}. (count crossing)
+    // The objective (26) minimises the crossings between every two hyperedges.
+    // The paper counts them in variables CT_{e1,e2}; here, with the nodes' x
+    // already known, each pair's crossings in either order are constants, so
+    // they are the cost of HO itself and CT is not needed (see solve()).
     //
     // Auxiliary quantities (computed from node x-coordinates):
     //   acs(e1, e2) —> sources of e2 that lie strictly inside span(e1).
@@ -38,8 +41,9 @@ namespace horizontal_overlapping_internal {
 
         // ── solve ─────────────────────────────────────────────────────────────────
         //
-        // Runs the Gurobi MIP and re-sorts outgoing_edges in-place.
-        // Throws std::runtime_error if Gurobi fails to find an optimal solution.
+        // Solves the ILP (with Gurobi when it is usable, otherwise HiGHS) and
+        // re-sorts outgoing_edges in-place. If no solution is found in time,
+        // the layer keeps its order.
         void solve();
 
     private:
@@ -56,8 +60,9 @@ namespace horizontal_overlapping_internal {
         //
         // acs(e1, e2): number of sources of e2 strictly inside span(e1).
         // act(e1, e2): number of targets of e2 strictly inside span(e1).
-        int acs(const HyperedgePtr& e1, const HyperedgePtr& e2) const;
-        int act(const HyperedgePtr& e1, const HyperedgePtr& e2) const;
+        // Both take span(e1), computed once per edge by solve().
+        int acs(const Span& span_e1, const HyperedgePtr& e2) const;
+        int act(const Span& span_e1, const HyperedgePtr& e2) const;
     };
 
 } // namespace horizontal_overlapping_internal

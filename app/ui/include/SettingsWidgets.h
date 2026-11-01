@@ -76,19 +76,31 @@ namespace ui {
     // Each one is resized by dragging its edges, as a box in the box dialog's
     // preview (both sides move); the others keep their place meanwhile, and
     // the drawing makes room once it is let go. Sizes set from outside glide.
+    //
+    // Editing Edit::Ashes instead, the shapes are drawn as a Hogar with their
+    // default ashes, and it is the line between the white part and the ashes
+    // that is dragged, up or down, as in the box dialog's preview.
     // ============================================================================
     class ShapeSizesPreview : public QWidget {
         Q_OBJECT
     public:
-        explicit ShapeSizesPreview(QWidget* parent = nullptr);
+        enum class Edit { Sizes, Ashes };
+
+        explicit ShapeSizesPreview(Edit edit = Edit::Sizes, QWidget* parent = nullptr);
 
         void setSizes(const hypergraph_logic::BoxSizes& sizes);
+
+        // Edit::Ashes: the text shown in each Hogar, at this font size, to see how
+        // it fits in the part it goes in.
+        void setSampleText(const QString& text, int font_size);
 
         QSize sizeHint() const override { return QSize(460, 220); }
 
     signals:
         // The user dragged a shape to this size (rectangle stands for the rounded one too).
         void sizeEdited(hypergraph_logic::NodeShape shape, double width, double height);
+        // The user dragged a shape's ashes to this share of its height (Edit::Ashes).
+        void ashesEdited(hypergraph_logic::NodeShape shape, double share);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -111,7 +123,11 @@ namespace ui {
         void zoomToFit();
         void hoverAt(const QPointF& pos);
 
+        Edit edit_;
         std::array<QSizeF, COUNT> sizes_, from_;
+        std::array<double, COUNT> ashes_{};
+        QString sample_text_;
+        int sample_font_size_ = hypergraph_logic::NodeAttributes::DEFAULT_FONT_SIZE;
         double progress_ = 1.0;
         QVariantAnimation* glide_;
         double scale_ = 0.0; // 0 until laid out
@@ -121,6 +137,8 @@ namespace ui {
         double zoom_from_ = 0.0, zoom_to_ = 0.0, zoom_t_ = 1.0;
         bool releasing_ = false;
 
+        // The edges under the mouse or being dragged; for Edit::Ashes, any
+        // non-zero value stands for a shape's line.
         int hover_shape_ = -1, hover_edges_ = 0;
         int drag_shape_ = -1, drag_edges_ = 0;
         QPointF press_pos_;

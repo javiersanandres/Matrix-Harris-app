@@ -15,6 +15,7 @@
 #include <QWidget>
 
 #include <array>
+#include <vector>
 #include <optional>
 
 class QComboBox;
@@ -27,6 +28,7 @@ class QListWidget;
 class QMenu;
 class QPushButton;
 class QSpinBox;
+class QVBoxLayout;
 
 namespace ui {
 
@@ -200,6 +202,11 @@ namespace ui {
     // the fields in the bottom right corner show the size in pixels, to type it,
     // with a button to go back to the shape's size. The preview zooms to keep
     // both in sight once the drag ends.
+    //
+    // For a Hogar it is also where its ashes are chosen: the line between the
+    // white part and the black band is dragged up or down, and a row under the
+    // size fields shows their share of the height, to type it, with a button
+    // to go back to the shape's default. (Only here: never on the canvas.)
     // ============================================================================
     class NodePreview : public QWidget {
         Q_OBJECT
@@ -215,6 +222,8 @@ namespace ui {
     signals:
         // The user gave the box this size; an empty side follows its shape's default.
         void sizeEdited(std::optional<double> width, std::optional<double> height);
+        // The user gave a Hogar these ashes (share of the height); empty follows its shape's.
+        void ashesEdited(std::optional<double> share);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -230,6 +239,7 @@ namespace ui {
         QRectF boxRect() const;    // the box, in widget coordinates, at the current zoom
         void zoomToFit();          // glides to fitScale()
         void syncFields();
+        bool onAshesLine(const QPointF& pos) const; // on a Hogar's line between its two parts
 
         hypergraph_logic::NodeAttributes attributes_;
         hypergraph_logic::BoxSizes box_sizes_;
@@ -241,11 +251,16 @@ namespace ui {
         int drag_edges_ = 0;       // the edges being dragged (0 when not resizing)
         QPointF press_pos_;
         QSizeF press_size_;
+        bool hover_ashes_ = false;
+        bool drag_ashes_ = false;  // a Hogar's line between its parts, being dragged
 
         QWidget* fields_ = nullptr;
         QSpinBox* width_ = nullptr;
         QSpinBox* height_ = nullptr;
         QToolButton* reset_ = nullptr;
+        QWidget* ashes_row_ = nullptr;
+        QSpinBox* ashes_ = nullptr;
+        QToolButton* ashes_reset_ = nullptr;
         bool syncing_ = false;
     };
 
@@ -261,20 +276,27 @@ namespace ui {
     //                          the background (black or white, whichever reads
     //                          better) until the user picks a colour explicitly.
     //                          Both colours optionally have a tick box to make
-    //                          them the project's defaults for new boxes.
+    //                          them the diagram's defaults for new boxes.
     //   - Tamaño de fuente   : FontSizeSelector, optionally with tick boxes to
     //                          give that size to every box of the diagram and to
-    //                          make it the project's default, stacked on its right.
+    //                          make it the diagram's default, stacked on its right.
     //   - Capa negra / Hogar : two mutually exclusive tick boxes. Capa negra forces
     //                          a black background and white text, Hogar a white
     //                          background and black text (both lock the pickers);
     //                          unticking restores the colours in use before.
     //
     // Merge mode (when both `left` and `right` are given) lays the same editors
-    // out as a three-way merge: each row shows the left node's value, a button
-    // to take it, the editable result, a button to take the right node's value,
-    // and the right node's value. Rows where the two nodes differ are flagged.
-    // It also has a "Tamaño" row, to take either node's size.
+    // out as a three-way merge:
+    //
+    //   [ left box  ]     [ the result, as the dialog's preview ]     [ right box ]
+    //   [Conservar todo]                                          [Conservar todo]
+    //   [ left value →]  Label  [ editor of the result ]  [← right value ]
+    //
+    // Each row shows both nodes' values as cards: clicking one takes it, and
+    // the card the result's value comes from is marked. The editor in the
+    // middle still edits it by hand. It also has a "Tamaño" row, to take
+    // either node's size. The dialog places its preview of the result between
+    // the two boxes (placeResultPreview).
     //
     // The box's size is chosen in the dialog's preview (NodePreview), which
     // hands it over through setBoxSize.
@@ -293,11 +315,18 @@ namespace ui {
             const hypergraph_logic::NodeAttributes& right, const QString& right_title,
             QWidget* parent = nullptr);
 
+        bool isMerge() const { return left_.has_value(); }
+        // Merge mode: shows the result's preview between the two boxes, at the top.
+        void placeResultPreview(QWidget* preview);
+
         hypergraph_logic::NodeAttributes attributes() const;
         void setAttributes(const hypergraph_logic::NodeAttributes& attributes);
 
         // Gives the box this size; an empty side follows its shape's default.
         void setBoxSize(std::optional<double> width, std::optional<double> height);
+
+        // Gives a Hogar these ashes (share of the height); empty follows its shape's default.
+        void setAshes(std::optional<double> share);
 
         // The project the box belongs to, whose default sizes the sizes shown
         // are measured with (nullptr: the built-in ones).
@@ -315,9 +344,9 @@ namespace ui {
         bool fontSizeForAll() const;
 
         // Shows, next to each colour and the font size, a tick box to make it the
-        // project's default for new boxes (hidden by default), and whether each is
+        // diagram's default for new boxes (hidden by default), and whether each is
         // ticked. The colours' are never ticked while a fire state imposes them.
-        void setProjectDefaultsAvailable(bool available);
+        void setDiagramDefaultsAvailable(bool available);
         bool colourAsDefault() const;
         bool fontColourAsDefault() const;
         bool fontSizeAsDefault() const;
@@ -329,15 +358,13 @@ namespace ui {
         enum Field { Name, Shape, Size, Colour, FontColour, FontSize, Fire, FieldCount };
 
         struct MergeRow {
-            QFrame* left_chip = nullptr;
-            QFrame* right_chip = nullptr;
-            QToolButton* take_left = nullptr;
-            QToolButton* take_right = nullptr;
+            QPushButton* left_chip = nullptr;  // clicking it takes the left node's value
+            QPushButton* right_chip = nullptr;
         };
 
         void build(const QList<QColor>& recent_colours);
         QWidget* createEditor(Field field, const QList<QColor>& recent_colours);
-        QFrame* createChip(Field field, const hypergraph_logic::NodeAttributes& side);
+        QPushButton* createChip(Field field, const hypergraph_logic::NodeAttributes& side, bool left);
         QWidget* createSideHeader(const hypergraph_logic::NodeAttributes& side,
             const QString& title, bool left);
 
@@ -387,6 +414,12 @@ namespace ui {
         QString left_title_;
         QString right_title_;
         std::array<MergeRow, FieldCount> merge_rows_{};
+        QVBoxLayout* result_slot_ = nullptr;
+        QWidget* result_preview_ = nullptr; // the name's field ends where it does
+        void alignNameWithPreview();
+
+    protected:
+        bool eventFilter(QObject* watched, QEvent* event) override;
     };
 
 } // namespace ui

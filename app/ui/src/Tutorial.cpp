@@ -82,8 +82,8 @@ namespace ui::tutorial {
 
             { QStringLiteral("Cambia el aspecto de una caja"),
               QStringLiteral("Haz %1 sobre una caja para editar su nombre, su forma, sus colores y el tamaño de la "
-                             "letra. Sus colores pueden quedar como los <b>predeterminados del proyecto</b>, los que "
-                             "tendrán las cajas nuevas. Si el nombre no cabe, la rueda del ratón sobre la caja lo "
+                             "letra. Sus colores y su letra pueden quedar como los <b>predeterminados del "
+                             "esquema</b>, los que tendrán sus cajas nuevas. Si el nombre no cabe, la rueda del ratón sobre la caja lo "
                              "desplaza.")
                   .arg(key(QStringLiteral("doble clic"))),
               picture("properties"), { T::Canvas }, View::FirstDiagram },

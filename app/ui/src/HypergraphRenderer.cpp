@@ -49,6 +49,8 @@ namespace ui {
                 , box_(box)
             {
                 setPen(QPen(Qt::black, 1.5));
+                // The ashes its graph's defaults give it, kept with the copy.
+                attributes_.ashes = attributes_.ashesShare(node->getBoxSizes());
             }
 
             void paint(QPainter* painter, const QStyleOptionGraphicsItem*, QWidget*) override {

@@ -37,6 +37,7 @@ TEST_F(AppDefaultsTest, SavedOnesComeBack) {
     s.equivalence_continuous = false;
     s.layout.block_sep = 90.0;
     s.layout.box_sizes.rhombus = BoxSize{ 120.0, 70.0 };
+    s.layout.box_sizes.circle.ashes = 0.6; // a Hogar's default ashes
     ui::app_defaults::save(settings, s);
     settings.sync();
 

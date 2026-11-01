@@ -44,6 +44,7 @@ namespace ui {
         // Width of the colour pickers and the font size, so the tick boxes on their
         // right line up in one column.
         constexpr int EDITOR_WIDTH = 196;
+        constexpr int CHIP_WIDTH = 210; // a value of one of the boxes being fused
 
         QString hexOf(const QColor& c) { return c.name(QColor::HexRgb).toUpper(); }
 
@@ -202,17 +203,18 @@ QListWidget#shapeList::item {
 }
 QListWidget#shapeList::item:hover { border-color: #A5A8F5; background: #FAFAFF; }
 QListWidget#shapeList::item:selected { border: 2px solid #6366F1; background: #EEF0FF; color: #1F2330; }
-QToolButton#takeButton {
-    border: 1px solid #D6DAE4; border-radius: 12px; background: white;
-    min-width: 24px; min-height: 24px; color: #6366F1; font-weight: 700;
+QPushButton#chip {
+    background: white; border: 1px solid #E3E6EF; border-radius: 8px; padding: 0; text-align: left;
 }
-QToolButton#takeButton:hover { background: #EEF0FF; border-color: #6366F1; }
-QToolButton#takeButton:disabled { color: #C4C7D3; border-color: #E3E6EF; }
-QToolButton#takeButton[active="true"], QToolButton#takeButton[active="true"]:disabled {
-    background: #6366F1; color: white; border-color: #6366F1;
+QPushButton#chip:hover { border-color: #6366F1; background: #F7F7FF; }
+QPushButton#chip[chosen="true"] { background: #EEF0FF; border: 1px solid #6366F1; }
+QPushButton#chip:disabled { background: #F6F7FA; border-color: #EDEEF3; }
+QLabel#chipArrow {
+    border: 1px solid #D6DAE4; border-radius: 11px; background: white; color: #6366F1; font-weight: 700;
 }
-QFrame#chip { background: #F4F5F9; border: 1px solid #E6E8EF; border-radius: 8px; }
-QFrame#chip[conflict="true"] { background: #FFF7E6; border-color: #F5C26B; }
+QPushButton#chip:hover QLabel#chipArrow { border-color: #6366F1; }
+QLabel#chipArrow[active="true"] { background: #6366F1; color: white; border-color: #6366F1; }
+QLabel#chipArrow:disabled { color: #C4C7D3; border-color: #E3E6EF; }
 QFrame#sideHeader { background: #F8F8FC; border: 1px solid #E6E8EF; border-radius: 10px; }
 QScrollArea#dialogScroll { background: transparent; border: none; }
 QWidget#dialogBody { background: transparent; }
@@ -777,13 +779,18 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         setMinimumSize(300, 140);
         setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Fixed);
 
-        // The size in pixels, in the bottom right corner: [ 100 × 50 px ↺ ].
+        // The size in pixels, in the bottom right corner: [ 100 × 50 px ↺ ], and
+        // under it, for a Hogar, its black band: [ Banda negra 25 % ↺ ].
         auto* fields = new QFrame(this);
         fields->setObjectName("previewFields");
         fields_ = fields;
-        auto* h = new QHBoxLayout(fields);
-        h->setContentsMargins(6, 3, 4, 3);
+        auto* rows = new QVBoxLayout(fields);
+        rows->setContentsMargins(6, 3, 4, 3);
+        rows->setSpacing(2);
+        auto* h = new QHBoxLayout;
+        h->setContentsMargins(0, 0, 0, 0);
         h->setSpacing(2);
+        rows->addLayout(h);
         auto makeSpin = [](double min, double max, const QString& what) {
             auto* spin = new QSpinBox;
             spin->setObjectName("previewSpin");
@@ -822,6 +829,32 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             if (!syncing_) emit sizeEdited(attributes_.width, static_cast<double>(v));
         });
         connect(reset_, &QToolButton::clicked, this, [this] { emit sizeEdited(std::nullopt, std::nullopt); });
+
+        ashes_row_ = new QWidget;
+        auto* a = new QHBoxLayout(ashes_row_);
+        a->setContentsMargins(0, 0, 0, 0);
+        a->setSpacing(2);
+        ashes_ = makeSpin(MIN_ASHES_SHARE * 100.0, MAX_ASHES_SHARE * 100.0, QStringLiteral("Altura de la banda negra"));
+        ashes_->setToolTip(QStringLiteral("Altura de la banda negra, en porcentaje de la caja (de %1 a %2)")
+            .arg(qRound(MIN_ASHES_SHARE * 100.0)).arg(qRound(MAX_ASHES_SHARE * 100.0)));
+        ashes_reset_ = new QToolButton;
+        ashes_reset_->setObjectName("previewReset");
+        ashes_reset_->setText(QStringLiteral("↺"));
+        ashes_reset_->setCursor(Qt::PointingHandCursor);
+        ashes_reset_->setToolTip(QStringLiteral("Volver a la banda negra de la forma (y seguirla si cambia)"));
+        a->addStretch();
+        a->addWidget(makeUnit(QStringLiteral("Banda negra")));
+        a->addSpacing(4);
+        a->addWidget(ashes_);
+        a->addWidget(makeUnit(QStringLiteral("%")));
+        a->addSpacing(6);
+        a->addWidget(ashes_reset_);
+        rows->addWidget(ashes_row_);
+        connect(ashes_, &QSpinBox::valueChanged, this, [this](int v) {
+            if (!syncing_) emit ashesEdited(v / 100.0);
+        });
+        connect(ashes_reset_, &QToolButton::clicked, this, [this] { emit ashesEdited(std::nullopt); });
+        ashes_row_->setVisible(false);
         fields_->setVisible(false);
     }
 
@@ -843,7 +876,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         resizable_ = resizable;
         fields_->setVisible(resizable);
         setMouseTracking(resizable);
-        setMinimumHeight(resizable ? 220 : 140);
+        // Never above a height it was given (the fusion dialog keeps it low).
+        setMinimumHeight(std::min(resizable ? 220 : 140, maximumHeight()));
         updateGeometry();
         scale_ = 0.0;
         update();
@@ -875,8 +909,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             small.setPointSizeF(8.0);
             p.setFont(small);
             p.setPen(MUTED);
-            p.drawText(card.adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop,
-                QStringLiteral("Arrastra los bordes de la caja para cambiar su tamaño"));
+            p.drawText(card.adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop, attributes_.hasAshes()
+                ? QStringLiteral("Arrastra los bordes o la línea de la banda negra")
+                : QStringLiteral("Arrastra los bordes de la caja para cambiar su tamaño"));
 
             if (own_size) {
                 // Legend of the shadow, level with the size fields.
@@ -926,7 +961,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         p.drawPath(nv::shapePath(attributes_.shape, node_box));
         p.restore();
 
-        nv::paintNode(&p, attributes_, node_box);
+        nv::PaintOptions opts;
+        opts.sizes = &box_sizes_;
+        nv::paintNode(&p, attributes_, node_box, opts);
 
         // ...whose outline still shows where the box covers it.
         if (show_ghost) {
@@ -939,6 +976,13 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
         if (resizable_)
             nv::paintResizeFrame(&p, node_box, drag_edges_ ? drag_edges_ : hover_edges_, 1.0 / scale);
+        // A Hogar's ashes: the line between the two parts can be dragged too.
+        if (resizable_ && attributes_.hasAshes()) {
+            const double share = attributes_.ashesShare(&box_sizes_);
+            const bool active = drag_ashes_ || hover_ashes_;
+            nv::paintAshesHandle(&p, attributes_.shape, node_box, share, active, 1.0 / scale);
+            if (active) nv::paintAshesChip(&p, node_box, share, 1.0 / scale);
+        }
         p.restore();
     }
 
@@ -1006,6 +1050,21 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             }
         }
         reset_->setEnabled(attributes_.width || attributes_.height);
+
+        // The ashes' row, only for a Hogar; greyed while it follows its shape's.
+        ashes_->setValue(qRound(attributes_.ashesShare(&box_sizes_) * 100.0));
+        if (ashes_->property("inherited").toBool() != !attributes_.ashes) {
+            ashes_->setProperty("inherited", !attributes_.ashes);
+            dialog_theme::repolish(ashes_);
+        }
+        ashes_reset_->setEnabled(attributes_.ashes.has_value());
+        if (ashes_row_->isVisibleTo(fields_) != attributes_.hasAshes()) {
+            ashes_row_->setVisible(attributes_.hasAshes());
+            // The fields grow or shrink in their corner, and the stage with them.
+            fields_->adjustSize();
+            fields_->move(width() - fields_->width() - 12, height() - fields_->height() - 10);
+            if (!drag_edges_) zoomToFit();
+        }
         syncing_ = false;
     }
 
@@ -1026,8 +1085,18 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 update();
                 return;
             }
+            if (onAshesLine(event->position())) {
+                drag_ashes_ = true;
+                update();
+                return;
+            }
         }
         QWidget::mousePressEvent(event);
+    }
+
+    bool NodePreview::onAshesLine(const QPointF& pos) const {
+        return resizable_ && attributes_.hasAshes()
+            && nv::onAshesLine(boxRect(), attributes_.ashesShare(&box_sizes_), pos, PREVIEW_HANDLE_REACH);
     }
 
     void NodePreview::mouseMoveEvent(QMouseEvent* event) {
@@ -1041,12 +1110,21 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             if (w != attributes_.width || h != attributes_.height) emit sizeEdited(w, h);
             return;
         }
+        if (drag_ashes_) {
+            // The ashes become the box's own as soon as the line moves.
+            const double share = nv::ashesShareAt(boxRect(), event->position().y());
+            if (share != attributes_.ashesShare(&box_sizes_) || !attributes_.ashes) emit ashesEdited(share);
+            return;
+        }
         if (!resizable_) return;
         const int edges = nv::resizeEdgesAt(boxRect(), event->position(), PREVIEW_HANDLE_REACH);
-        if (edges == hover_edges_) return;
+        const bool ashes = !edges && onAshesLine(event->position());
+        if (edges == hover_edges_ && ashes == hover_ashes_) return;
         hover_edges_ = edges;
-        if (edges) setCursor(nv::resizeCursor(edges));
-        else       unsetCursor();
+        hover_ashes_ = ashes;
+        if (edges)       setCursor(nv::resizeCursor(edges));
+        else if (ashes)  setCursor(Qt::SizeVerCursor);
+        else             unsetCursor();
         update();
     }
 
@@ -1058,12 +1136,19 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             update();
             return;
         }
+        if (drag_ashes_ && event->button() == Qt::LeftButton) {
+            drag_ashes_ = false;
+            hover_ashes_ = onAshesLine(event->position());
+            update();
+            return;
+        }
         QWidget::mouseReleaseEvent(event);
     }
 
     void NodePreview::leaveEvent(QEvent* event) {
-        if (!drag_edges_ && hover_edges_) {
+        if (!drag_edges_ && !drag_ashes_ && (hover_edges_ || hover_ashes_)) {
             hover_edges_ = 0;
+            hover_ashes_ = false;
             unsetCursor();
             update();
         }
@@ -1130,14 +1215,21 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         emit attributesChanged();
     }
 
+    void NodeAttributesForm::setAshes(std::optional<double> share) {
+        if (current_.ashes == share) return;
+        current_.ashes = share;
+        sync();
+        emit attributesChanged();
+    }
+
     void NodeAttributesForm::setProject(const app_logic::ProjectSettings* project) {
         if (project) project_ = *project;
         else         project_.reset();
         // The sizes shown on each side when merging are the project's.
         if (left_ && right_ && merge_rows_[Size].left_chip) {
             const BoxSizes* sizes = project_ ? &project_->layout.box_sizes : nullptr;
-            if (auto* l = merge_rows_[Size].left_chip->findChild<QLabel*>()) l->setText(sizeText(*left_, sizes));
-            if (auto* r = merge_rows_[Size].right_chip->findChild<QLabel*>()) r->setText(sizeText(*right_, sizes));
+            if (auto* l = merge_rows_[Size].left_chip->findChild<QLabel*>("chipText")) l->setText(sizeText(*left_, sizes));
+            if (auto* r = merge_rows_[Size].right_chip->findChild<QLabel*>("chipText")) r->setText(sizeText(*right_, sizes));
         }
         sync();
         emit attributesChanged();
@@ -1157,7 +1249,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         return !font_size_all_->isHidden() && font_size_all_->isChecked();
     }
 
-    void NodeAttributesForm::setProjectDefaultsAvailable(bool available) {
+    void NodeAttributesForm::setDiagramDefaultsAvailable(bool available) {
         for (TickBox* box : { colour_default_, font_colour_default_, font_size_default_ }) {
             box->setVisible(available);
             if (!available) box->setChecked(false);
@@ -1194,37 +1286,32 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         grid->setHorizontalSpacing(12);
         grid->setVerticalSpacing(8);
 
-        // Column layout: normal = [label][editor]; merge = [left][→][label][editor][←][right].
-        const int label_col = merge ? 2 : 0;
-        const int editor_col = merge ? 3 : 1;
-        const int columns = merge ? 6 : 2;
+        // Column layout: normal = [label][editor]; merge = [left value][label][editor][right value].
+        const int label_col = merge ? 1 : 0;
+        const int editor_col = merge ? 2 : 1;
+        const int columns = merge ? 4 : 2;
         grid->setColumnStretch(editor_col, 1);
         if (merge) {
-            grid->setColumnStretch(0, 1);
-            grid->setColumnStretch(5, 1);
+            // Compact, so every row fits on a laptop's screen without scrolling.
+            grid->setHorizontalSpacing(16);
+            grid->setVerticalSpacing(6);
         }
 
         int row = 0;
         if (merge) {
-            grid->addWidget(createSideHeader(*left_, left_title_, true), row, 0, 1, 2);
-            auto* result_title = new QLabel(QStringLiteral("Resultado"));
-            result_title->setObjectName("columnTitle");
-            result_title->setAlignment(Qt::AlignCenter);
-            auto* result_hint = new QLabel(QStringLiteral("Toma cada campo de un lado o edítalo a mano"));
-            result_hint->setObjectName("hint");
-            result_hint->setAlignment(Qt::AlignCenter);
-            auto* result_box = new QVBoxLayout;
-            result_box->addStretch();
-            result_box->addWidget(result_title);
-            result_box->addWidget(result_hint);
-            result_box->addStretch();
-            grid->addLayout(result_box, row, 2, 1, 2);
-            grid->addWidget(createSideHeader(*right_, right_title_, false), row, 4, 1, 2);
+            // The two boxes on either side of the result, whose preview the dialog
+            // places in between (placeResultPreview).
+            grid->addWidget(createSideHeader(*left_, left_title_, true), row, 0, Qt::AlignVCenter);
+            result_slot_ = new QVBoxLayout;
+            result_slot_->setContentsMargins(0, 0, 0, 6);
+            grid->addLayout(result_slot_, row, 1, 1, 2);
+            grid->addWidget(createSideHeader(*right_, right_title_, false), row, 3, Qt::AlignVCenter);
             ++row;
         }
 
+        // Merging, each row's label already names it: no section titles, to save room.
         auto addSection = [&](const QString& title) {
-            grid->addWidget(sectionTitle(title), row++, 0, 1, columns);
+            if (!merge) grid->addWidget(sectionTitle(title), row++, 0, 1, columns);
         };
 
         auto addField = [&](Field field, const QString& label) {
@@ -1233,27 +1320,10 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             grid->addWidget(createEditor(field, recent_colours), row, editor_col);
             if (merge) {
                 MergeRow& mr = merge_rows_[field];
-                mr.left_chip = createChip(field, *left_);
-                mr.right_chip = createChip(field, *right_);
-
-                mr.take_left = new QToolButton;
-                mr.take_left->setObjectName("takeButton");
-                mr.take_left->setText(QStringLiteral("→"));
-                mr.take_left->setToolTip(QStringLiteral("Usar el valor de %1").arg(left_title_));
-                mr.take_left->setCursor(Qt::PointingHandCursor);
-                connect(mr.take_left, &QToolButton::clicked, this, [this, field] { takeField(field, *left_); });
-
-                mr.take_right = new QToolButton;
-                mr.take_right->setObjectName("takeButton");
-                mr.take_right->setText(QStringLiteral("←"));
-                mr.take_right->setToolTip(QStringLiteral("Usar el valor de %1").arg(right_title_));
-                mr.take_right->setCursor(Qt::PointingHandCursor);
-                connect(mr.take_right, &QToolButton::clicked, this, [this, field] { takeField(field, *right_); });
-
+                mr.left_chip = createChip(field, *left_, true);
+                mr.right_chip = createChip(field, *right_, false);
                 grid->addWidget(mr.left_chip, row, 0, Qt::AlignVCenter);
-                grid->addWidget(mr.take_left, row, 1, Qt::AlignCenter);
-                grid->addWidget(mr.take_right, row, 4, Qt::AlignCenter);
-                grid->addWidget(mr.right_chip, row, 5, Qt::AlignVCenter);
+                grid->addWidget(mr.right_chip, row, 3, Qt::AlignVCenter);
             }
             ++row;
         };
@@ -1267,7 +1337,29 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         addField(FontColour, QStringLiteral("Color del texto"));
         addField(FontSize, QStringLiteral("Tamaño de fuente"));
         addSection(QStringLiteral("Estado"));
-        addField(Fire, QString()); // the tick boxes already say it all
+        // The tick boxes already say it all, under their section; merging, there is none.
+        addField(Fire, merge ? QStringLiteral("Estado") : QString());
+    }
+
+    void NodeAttributesForm::placeResultPreview(QWidget* preview) {
+        if (!result_slot_) return;
+        result_slot_->addWidget(preview, 0, Qt::AlignHCenter);
+        // The name's field ends where the preview does, wherever the layout puts it.
+        result_preview_ = preview;
+        preview->installEventFilter(this);
+    }
+
+    bool NodeAttributesForm::eventFilter(QObject* watched, QEvent* event) {
+        if (watched == result_preview_ && (event->type() == QEvent::Move || event->type() == QEvent::Resize))
+            QTimer::singleShot(0, this, [this] { alignNameWithPreview(); }); // once the row is laid out too
+        return QWidget::eventFilter(watched, event);
+    }
+
+    void NodeAttributesForm::alignNameWithPreview() {
+        if (!result_preview_ || !name_ || name_->parentWidget() != result_preview_->parentWidget()) return;
+        const int width = result_preview_->geometry().right() - name_->geometry().left() + 1;
+        if (width >= name_->minimumSizeHint().width() && width != name_->maximumWidth())
+            name_->setMaximumWidth(width);
     }
 
     QWidget* NodeAttributesForm::createEditor(Field field, const QList<QColor>& recent_colours) {
@@ -1347,9 +1439,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 rememberPicked(c);
                 setBackground(c);
             });
-            colour_default_ = new TickBox(QStringLiteral("Por defecto en el proyecto"));
+            colour_default_ = new TickBox(QStringLiteral("Establecer por defecto en el esquema"));
             colour_default_->setToolTip(QStringLiteral(
-                "Las cajas nuevas de este proyecto tendrán este color de fondo"));
+                "Las cajas nuevas de este esquema tendrán este color de fondo"));
             colour_default_->setVisible(false);
             return withTicks(colour_, { colour_default_ });
         }
@@ -1362,9 +1454,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 setFontColourManual(c);
             });
             connect(font_colour_, &ColorPickerButton::automaticPicked, this, [this] { setFontColourAutomatic(); });
-            font_colour_default_ = new TickBox(QStringLiteral("Por defecto en el proyecto"));
+            font_colour_default_ = new TickBox(QStringLiteral("Establecer por defecto en el esquema"));
             font_colour_default_->setToolTip(QStringLiteral(
-                "Las cajas nuevas de este proyecto tendrán este color de texto"));
+                "Las cajas nuevas de este esquema tendrán este color de texto"));
             font_colour_default_->setVisible(false);
             return withTicks(font_colour_, { font_colour_default_ });
         }
@@ -1380,9 +1472,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             font_size_all_->setToolTip(QStringLiteral(
                 "Las demás cajas del esquema tomarán también este tamaño de fuente"));
             font_size_all_->setVisible(false);
-            font_size_default_ = new TickBox(QStringLiteral("Por defecto en el proyecto"));
+            font_size_default_ = new TickBox(QStringLiteral("Establecer por defecto en el esquema"));
             font_size_default_->setToolTip(QStringLiteral(
-                "Las cajas nuevas de este proyecto tendrán este tamaño de fuente"));
+                "Las cajas nuevas de este esquema tendrán este tamaño de fuente"));
             font_size_default_->setVisible(false);
             // Stacked as before: giving the size to every box, then making it the default.
             QWidget* wrap = withTicks(font_size_, { font_size_all_, font_size_default_ });
@@ -1424,15 +1516,26 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         }
     }
 
-    QFrame* NodeAttributesForm::createChip(Field field, const NodeAttributes& side) {
-        auto* chip = new QFrame;
+    QPushButton* NodeAttributesForm::createChip(Field field, const NodeAttributes& side, bool left) {
+        // A card with the side's value; clicking it takes that value. Its labels let
+        // the clicks through to it.
+        auto* chip = new QPushButton;
         chip->setObjectName("chip");
-        chip->setMinimumWidth(150);
-        chip->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        chip->setCursor(Qt::PointingHandCursor);
+        chip->setAutoDefault(false);
+        chip->setFixedWidth(CHIP_WIDTH);
+        chip->setToolTip(QStringLiteral("Quedarse con el valor de %1").arg(left ? left_title_ : right_title_));
         auto* h = new QHBoxLayout(chip);
-        h->setContentsMargins(8, 5, 8, 5);
+        h->setContentsMargins(8, 6, 8, 6);
         h->setSpacing(6);
         const qreal dpr = devicePixelRatioF();
+
+        // The arrow towards the result, filled on the side its value comes from.
+        auto* arrow = new QLabel(left ? QStringLiteral("→") : QStringLiteral("←"));
+        arrow->setObjectName("chipArrow");
+        arrow->setAlignment(Qt::AlignCenter);
+        arrow->setFixedSize(22, 22);
+        if (!left) h->addWidget(arrow);
 
         auto addIcon = [&](const QPixmap& pm) {
             auto* icon = new QLabel;
@@ -1441,10 +1544,12 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         };
         auto addText = [&](const QString& text) {
             auto* label = new QLabel;
-            label->setText(label->fontMetrics().elidedText(text, Qt::ElideRight, 150));
+            label->setObjectName("chipText");
+            label->setText(label->fontMetrics().elidedText(text, Qt::ElideRight, CHIP_WIDTH - 80));
             label->setToolTip(text);
             h->addWidget(label, 1);
         };
+        connect(chip, &QPushButton::clicked, this, [this, field, left] { takeField(field, left ? *left_ : *right_); });
 
         switch (field) {
         case Name:
@@ -1476,12 +1581,18 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         default:
             break;
         }
+        if (left) {
+            h->addStretch();
+            h->addWidget(arrow);
+        }
+        chip->setMinimumHeight(h->sizeHint().height()); // a button sizes itself by its text, not its layout
         return chip;
     }
 
     QWidget* NodeAttributesForm::createSideHeader(const NodeAttributes& side, const QString& title, bool left) {
         auto* frame = new QFrame;
         frame->setObjectName("sideHeader");
+        frame->setFixedWidth(CHIP_WIDTH); // over its column of values
         auto* v = new QVBoxLayout(frame);
         v->setContentsMargins(10, 8, 10, 10);
         v->setSpacing(6);
@@ -1582,6 +1693,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             current_.font_size = side.font_size;
             break;
         case Fire:
+            current_.ashes = side.ashes; // a Hogar comes with its ashes
             setFireState(side.fire);
             return;
         default:
@@ -1605,7 +1717,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         case Colour:     return a.colour == b.colour;
         case FontColour: return a.font_colour == b.font_colour;
         case FontSize:   return a.font_size == b.font_size;
-        case Fire:       return a.fire == b.fire;
+        case Fire:       return a.fire == b.fire && (!a.hasAshes() || a.ashes == b.ashes);
         default:         return true;
         }
     }
@@ -1646,22 +1758,20 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         if (left_ && right_) {
             for (int f = 0; f < FieldCount; ++f) {
                 MergeRow& mr = merge_rows_[f];
-                if (!mr.take_left) continue;
+                if (!mr.left_chip) continue;
                 const Field field = static_cast<Field>(f);
-                const bool from_left = sameField(field, current_, *left_);
-                const bool from_right = sameField(field, current_, *right_);
-                const bool conflict = !sameField(field, *left_, *right_);
                 const bool colour_locked = fire && (field == Colour || field == FontColour);
-
-                mr.take_left->setProperty("active", from_left);
-                mr.take_right->setProperty("active", from_right);
-                mr.take_left->setEnabled(!from_left && !colour_locked);
-                mr.take_right->setEnabled(!from_right && !colour_locked);
-                mr.left_chip->setProperty("conflict", conflict);
-                mr.right_chip->setProperty("conflict", conflict);
-                for (QWidget* w : { static_cast<QWidget*>(mr.take_left), static_cast<QWidget*>(mr.take_right),
-                                    static_cast<QWidget*>(mr.left_chip), static_cast<QWidget*>(mr.right_chip) })
-                    dialog_theme::repolish(w);
+                // The card the result's value comes from is marked (both, where they agree).
+                for (auto [chip, side] : { std::pair{ mr.left_chip, &*left_ }, std::pair{ mr.right_chip, &*right_ } }) {
+                    const bool chosen = sameField(field, current_, *side);
+                    chip->setProperty("chosen", chosen && !colour_locked);
+                    chip->setEnabled(!colour_locked);
+                    if (auto* arrow = chip->findChild<QLabel*>("chipArrow")) {
+                        arrow->setProperty("active", chosen && !colour_locked);
+                        dialog_theme::repolish(arrow);
+                    }
+                    dialog_theme::repolish(chip);
+                }
             }
         }
 

@@ -354,7 +354,8 @@ namespace ui {
         connect(sizes_preview_, &ShapeSizesPreview::sizeEdited, this, [this](NodeShape shape, double w, double h) {
             BoxSize& size = shape == NodeShape::Circle ? settings_.layout.box_sizes.circle
                 : shape == NodeShape::Rhombus ? settings_.layout.box_sizes.rhombus : settings_.layout.box_sizes.rectangle;
-            size = BoxSize{ w, h };
+            size.width = w; // its ashes stay
+            size.height = h;
             sync();
         });
         auto addSize = [&](const QString& label, NodeShape shape, SizeFields& fields, BoxSize BoxSizes::* box) {
@@ -373,13 +374,16 @@ namespace ui {
             auto* icon = new QLabel;
             icon->setPixmap(shapeIcon(shape, QSize(30, 22), devicePixelRatioF()));
             QToolButton* revert = revertButton();
+            // Only the size: the ashes have their own row below.
             connect(revert, &QToolButton::clicked, this, [this, box] {
-                settings_.layout.box_sizes.*box = original_.layout.box_sizes.*box;
+                (settings_.layout.box_sizes.*box).width = (original_.layout.box_sizes.*box).width;
+                (settings_.layout.box_sizes.*box).height = (original_.layout.box_sizes.*box).height;
                 sync();
             });
             reverts_.push_back({ revert, [this, box] {
                 const BoxSize& was = original_.layout.box_sizes.*box;
-                return std::pair{ settings_.layout.box_sizes.*box != was,
+                const BoxSize& now = settings_.layout.box_sizes.*box;
+                return std::pair{ now.width != was.width || now.height != was.height,
                     QStringLiteral("%1 × %2 px").arg(qRound(was.width)).arg(qRound(was.height)) };
             } });
             addField(label, row({ icon, fields.width, unit(QStringLiteral("×")), fields.height, unit(QStringLiteral("px")), revert }));
@@ -387,6 +391,50 @@ namespace ui {
         addSize(QStringLiteral("Rectángulo y redondeado"), NodeShape::Rectangle, rectangle_, &BoxSizes::rectangle);
         addSize(QStringLiteral("Círculo"), NodeShape::Circle, circle_, &BoxSizes::circle);
         addSize(QStringLiteral("Rombo"), NodeShape::Rhombus, rhombus_, &BoxSizes::rhombus);
+
+        // Banda negra del hogar por defecto.
+        addSection(QStringLiteral("Banda negra del hogar por defecto"),
+            QStringLiteral("La altura de la banda negra de un hogar, según su forma; el texto va en la parte más "
+                           "grande. Si algún hogar existente usa la anterior, al aceptar se pregunta si debe cambiar."));
+        // The three as a Hogar, to drag the line between their two parts.
+        ashes_preview_ = new ShapeSizesPreview(ShapeSizesPreview::Edit::Ashes);
+        ashes_preview_->setFixedHeight(230);
+        grid->addWidget(ashes_preview_, r++, 0, 1, 2);
+        connect(ashes_preview_, &ShapeSizesPreview::ashesEdited, this, [this](NodeShape shape, double share) {
+            BoxSize& size = shape == NodeShape::Circle ? settings_.layout.box_sizes.circle
+                : shape == NodeShape::Rhombus ? settings_.layout.box_sizes.rhombus : settings_.layout.box_sizes.rectangle;
+            size.ashes = share;
+            sync();
+        });
+        auto addAshes = [&](const QString& label, NodeShape shape, SizeFields& fields, BoxSize BoxSizes::* box) {
+            fields.ashes = lengthField(MIN_ASHES_SHARE * 100.0, MAX_ASHES_SHARE * 100.0, label);
+            fields.ashes->setToolTip(QStringLiteral("Altura de la banda negra, en porcentaje de la caja (de %1 a %2)")
+                .arg(qRound(MIN_ASHES_SHARE * 100.0)).arg(qRound(MAX_ASHES_SHARE * 100.0)));
+            connect(fields.ashes, &QSpinBox::valueChanged, this, [this, box](int v) {
+                if (syncing_) return;
+                (settings_.layout.box_sizes.*box).ashes = v / 100.0;
+                sync();
+            });
+            NodeAttributes hogar;
+            hogar.shape = shape;
+            hogar.fire = FireState::FireWithAshes;
+            auto* icon = new QLabel;
+            icon->setPixmap(renderNodeIcon(hogar, QSize(30, 22), devicePixelRatioF()));
+            QToolButton* revert = revertButton();
+            connect(revert, &QToolButton::clicked, this, [this, box] {
+                (settings_.layout.box_sizes.*box).ashes = (original_.layout.box_sizes.*box).ashes;
+                sync();
+            });
+            reverts_.push_back({ revert, [this, box] {
+                const double was = (original_.layout.box_sizes.*box).ashes;
+                return std::pair{ (settings_.layout.box_sizes.*box).ashes != was,
+                    QStringLiteral("%1 %").arg(qRound(was * 100.0)) };
+            } });
+            addField(label, row({ icon, fields.ashes, unit(QStringLiteral("%")), revert }));
+        };
+        addAshes(QStringLiteral("Rectángulo y redondeado"), NodeShape::Rectangle, rectangle_, &BoxSizes::rectangle);
+        addAshes(QStringLiteral("Círculo"), NodeShape::Circle, circle_, &BoxSizes::circle);
+        addAshes(QStringLiteral("Rombo"), NodeShape::Rhombus, rhombus_, &BoxSizes::rhombus);
 
         // The application's defaults.
         auto* defaults_card = new QFrame;
@@ -499,6 +547,7 @@ namespace ui {
         for (const auto& [fields, size] : sizes) {
             fields->width->setValue(qRound(size->width));
             fields->height->setValue(qRound(size->height));
+            fields->ashes->setValue(qRound(size->ashes * 100.0));
         }
         for (auto [slider, v] : { std::pair{ block_slider_, settings_.layout.block_sep },
                                   std::pair{ layer_slider_, settings_.layout.layer_gap },
@@ -508,6 +557,9 @@ namespace ui {
         const bool dragging = block_slider_->isDragging() || layer_slider_->isDragging() || horizontal_slider_->isDragging();
         layout_preview_->setSettings(settings_.layout, !dragging);
         sizes_preview_->setSizes(settings_.layout.box_sizes);
+        ashes_preview_->setSizes(settings_.layout.box_sizes);
+        // How a new box's text fits, at the font size chosen above (even before accepting it).
+        ashes_preview_->setSampleText(QStringLiteral("Caja nueva"), settings_.font_size);
         for (const Revert& revert : reverts_) {
             const auto [changed, was] = revert.state();
             revert.button->setEnabled(changed);
@@ -562,8 +614,8 @@ namespace ui {
     StyledDialog* existingBoxesQuestion(QWidget* parent) {
         auto* ask = new StyledDialog(StyledDialog::Badge::Question, QStringLiteral("¿Y las cajas que ya existen?"), parent);
         ask->setMessage(QStringLiteral(
-            "Has cambiado el tamaño por defecto de alguna forma, y hay cajas que lo usan porque no tienen "
-            "un tamaño propio. ¿Deben tomar el tamaño nuevo, o quedarse con el que tienen?"));
+            "Has cambiado el tamaño o la banda negra por defecto de alguna forma, y hay cajas que los usan "
+            "porque no tienen unos propios. ¿Deben tomar los nuevos, o quedarse con los que tienen?"));
         ask->addButton(QStringLiteral("Cancelar"), -1, StyledDialog::ButtonStyle::Secondary, false, true);
         ask->addButton(QStringLiteral("Solo las cajas nuevas"), 0, StyledDialog::ButtonStyle::Secondary);
         ask->addButton(QStringLiteral("También las existentes"), 1, StyledDialog::ButtonStyle::Primary, true);
