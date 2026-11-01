@@ -23,6 +23,7 @@ add_executable(horizontalOrderResults
     ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraphBlocks.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../GraphicalHypergraphPersistence.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../portAssignment.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Text.cpp
 )
 
 target_include_directories(horizontalOrderResults

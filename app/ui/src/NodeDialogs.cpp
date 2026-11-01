@@ -1,4 +1,5 @@
 #include "NodeDialogs.h"
+#include "Translation.h"
 #include "NodeEditorWidgets.h"
 
 #include <QFrame>
@@ -140,7 +141,7 @@ namespace ui {
             accept->setObjectName("primary");
             accept->setDefault(true);
             accept->setCursor(Qt::PointingHandCursor);
-            auto* cancel = new QPushButton(QStringLiteral("Cancelar"));
+            auto* cancel = new QPushButton(Tr::tr("Cancelar"));
             cancel->setObjectName("secondary");
             cancel->setCursor(Qt::PointingHandCursor);
             buttons->addWidget(accept);
@@ -155,7 +156,7 @@ namespace ui {
                 const NodeAttributes a = form->attributes();
                 preview->setAttributes(a);
                 accept->setEnabled(!a.name.empty());
-                accept->setToolTip(a.name.empty() ? QStringLiteral("El nombre no puede estar vacío") : QString());
+                accept->setToolTip(a.name.empty() ? Tr::tr("El nombre no puede estar vacío") : QString());
             };
             QObject::connect(form, &NodeAttributesForm::attributesChanged, dialog, refresh);
             // The box's size is chosen on the preview itself.
@@ -189,13 +190,13 @@ namespace ui {
         : QDialog(parent)
     {
         const bool create = mode == Mode::Create;
-        setWindowTitle(create ? QStringLiteral("Crear caja") : QStringLiteral("Propiedades de la caja"));
+        setWindowTitle(create ? Tr::tr("Crear caja") : Tr::tr("Propiedades de la caja"));
 
         auto* banner = new DialogBanner(
             create ? DialogBanner::Glyph::Create : DialogBanner::Glyph::Edit,
-            create ? QStringLiteral("Nueva caja") : QStringLiteral("Propiedades de la caja"),
-            create ? QStringLiteral("Dale un nombre y un aspecto a tu nueva caja")
-                   : QStringLiteral("Modifica cualquier atributo de «%1»").arg(QString::fromStdString(initial.name)),
+            create ? Tr::tr("Nueva caja") : Tr::tr("Propiedades de la caja"),
+            create ? Tr::tr("Dale un nombre y un aspecto a tu nueva caja")
+                   : Tr::tr("Modifica cualquier atributo de «%1»").arg(QString::fromStdString(initial.name)),
             this);
 
         form_ = new NodeAttributesForm(initial, recent_colours, this);
@@ -206,8 +207,8 @@ namespace ui {
         preview_->setFixedWidth(340);
         if (project) preview_->setBoxSizes(project->layout.box_sizes);
 
-        accept_ = buildNodeDialog(this, banner, form_, preview_, QStringLiteral("Vista previa"),
-            create ? QStringLiteral("Crear") : QStringLiteral("Actualizar"), 700);
+        accept_ = buildNodeDialog(this, banner, form_, preview_, Tr::tr("Vista previa"),
+            create ? Tr::tr("Crear") : Tr::tr("Actualizar"), 700);
 
         form_->focusName();
     }
@@ -228,14 +229,14 @@ namespace ui {
         const QList<QColor>& recent_colours, QWidget* parent, const app_logic::ProjectSettings* project)
         : QDialog(parent)
     {
-        setWindowTitle(QStringLiteral("Fusionar cajas"));
+        setWindowTitle(Tr::tr("Fusionar cajas"));
 
-        const QString first_title = QStringLiteral("«%1»").arg(QString::fromStdString(first.name));
-        const QString second_title = QStringLiteral("«%1»").arg(QString::fromStdString(second.name));
+        const QString first_title = Tr::tr("«%1»").arg(QString::fromStdString(first.name));
+        const QString second_title = Tr::tr("«%1»").arg(QString::fromStdString(second.name));
 
         auto* banner = new DialogBanner(DialogBanner::Glyph::Fuse,
-            QStringLiteral("Fusionar cajas"),
-            QStringLiteral("Haz clic en el valor de una caja para quedártelo, o escríbelo en medio"),
+            Tr::tr("Fusionar cajas"),
+            Tr::tr("Haz clic en el valor de una caja para quedártelo, o escríbelo en medio"),
             this);
 
         // The fused node starts as a copy of the first node chosen.
@@ -248,7 +249,7 @@ namespace ui {
         preview_->setFixedSize(440, 200);
 
         accept_ = buildNodeDialog(this, banner, form_, preview_,
-            QStringLiteral("Vista previa de la caja fusionada"), QStringLiteral("Fusionar"), 1120);
+            Tr::tr("Vista previa de la caja fusionada"), Tr::tr("Fusionar"), 1120);
 
         form_->focusName();
     }

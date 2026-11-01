@@ -36,7 +36,7 @@ TEST(OptionsHelp, EveryMenuOptionHasAnEntry) {
         "Copiar bloque", "Copiar esquema", "Copiar esquema «Esquema 1»", "Copiar este esquema", "Pegar",
         "Duplicar esquema",
         // equivalences (the box's menu and the line's)
-        "Hacer equivalente a…", "Quitar equivalencia con «4»", "Quitar equivalencia",
+        "Establecer equivalencia entre…", "Quitar equivalencia con «4»", "Quitar equivalencia",
     };
     const auto ids = topicIds();
     for (const QString& option : options) {
@@ -50,7 +50,7 @@ TEST(OptionsHelp, EveryMenuOptionHasAnEntry) {
     EXPECT_EQ(topicForMenuEntry("Copiar esquema «Esquema 1»"), "copyPiece");
     EXPECT_EQ(topicForMenuEntry("Pegar"), "paste");
     EXPECT_EQ(topicForMenuEntry("Duplicar esquema"), "duplicateDiagram");
-    EXPECT_EQ(topicForMenuEntry("Hacer equivalente a…"), "addEquivalence");
+    EXPECT_EQ(topicForMenuEntry("Establecer equivalencia entre…"), "addEquivalence");
     EXPECT_EQ(topicForMenuEntry("Quitar esquema «Esquema 1»"), "removeDiagram");
     EXPECT_EQ(topicForMenuEntry("Quitar este esquema"), "removeDiagram");
     EXPECT_EQ(topicForMenuEntry("Quitar equivalencia con «Un nombre»"), "removeEquivalence");

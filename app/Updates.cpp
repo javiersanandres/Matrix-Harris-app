@@ -1,8 +1,11 @@
 #include "Updates.h"
 #include "MainWindow.h"
+#include "Translation.h"
 
 #include <QApplication>
 #include <QPointer>
+
+#include <string>
 
 #include <winsparkle.h>
 
@@ -38,26 +41,45 @@ namespace updates {
             QMetaObject::invokeMethod(qApp, [] { QApplication::quit(); }, Qt::QueuedConnection);
         }
 
+        std::string g_appcast;   // where updates are announced
+        std::string g_language;  // the language WinSparkle was started in
+
+        // WinSparkle takes its language when it starts: started again for
+        // another one, with everything set again.
+        void startWinSparkle() {
+            win_sparkle_set_appcast_url(g_appcast.c_str());
+            win_sparkle_set_eddsa_public_key(PUBLIC_KEY);
+            // Shown in its windows; also where it keeps its settings (next to the app's own).
+            win_sparkle_set_app_details(
+                QCoreApplication::organizationName().toStdWString().c_str(),
+                QCoreApplication::applicationName().toStdWString().c_str(),
+                QCoreApplication::applicationVersion().toStdWString().c_str());
+            g_language = ui::i18n::code(ui::i18n::language()).toStdString();
+            win_sparkle_set_lang(g_language.c_str());
+            // Checking needs no permission prompt: it is on from the start.
+            win_sparkle_set_automatic_check_for_updates(1);
+            win_sparkle_set_can_shutdown_callback(canShutdown);
+            win_sparkle_set_shutdown_request_callback(shutdownRequest);
+            win_sparkle_init();
+        }
+
     } // namespace
 
     void start(ui::MainWindow& window, const QString& appcast_url) {
         g_window = &window;
-
-        win_sparkle_set_appcast_url(appcast_url.isEmpty() ? APPCAST_URL : appcast_url.toUtf8().constData());
-        win_sparkle_set_eddsa_public_key(PUBLIC_KEY);
-        // Shown in its windows; also where it keeps its settings (next to the app's own).
-        win_sparkle_set_app_details(
-            QCoreApplication::organizationName().toStdWString().c_str(),
-            QCoreApplication::applicationName().toStdWString().c_str(),
-            QCoreApplication::applicationVersion().toStdWString().c_str());
-        win_sparkle_set_lang("es");
-        // Checking needs no permission prompt: it is on from the start.
-        win_sparkle_set_automatic_check_for_updates(1);
-        win_sparkle_set_can_shutdown_callback(canShutdown);
-        win_sparkle_set_shutdown_request_callback(shutdownRequest);
-        win_sparkle_init();
-
+        g_appcast = appcast_url.isEmpty() ? std::string(APPCAST_URL) : appcast_url.toStdString();
+        startWinSparkle();
         window.setUpdateChecker([] { win_sparkle_check_update_with_ui(); });
+    }
+
+    void follow(ui::MainWindow& window) {
+        g_window = &window;
+        // The language changed: its windows too (a check under way is dropped;
+        // the daily one comes again).
+        if (!g_language.empty() && g_language != ui::i18n::code(ui::i18n::language()).toStdString()) {
+            win_sparkle_cleanup();
+            startWinSparkle();
+        }
     }
 
     void stop() {

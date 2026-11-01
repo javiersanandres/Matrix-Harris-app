@@ -4,6 +4,10 @@
 #include "Project.h"
 #include "Tutorial.h"
 
+#include <QAction>
+#include <QApplication>
+#include <QMenu>
+#include <QMenuBar>
 #include <QSettings>
 #include <QTemporaryDir>
 
@@ -66,4 +70,48 @@ TEST(TutorialExample, TwoDiagramsReadyToPractise) {
     EXPECT_EQ(example->getEditor(1).getAllNodes().size(), 3u);
     // Only the first diagram starts in the joint: adding the second is a step.
     EXPECT_EQ(example->getJointEditor().getAllNodes().size(), 6u);
+}
+
+// The title's dot goes when the menu opens; each entry's, when it is chosen.
+TEST(HelpNotifierTest, EntriesStayFlaggedUntilChosen) {
+    if (!QCoreApplication::instance()) {
+        static int argc = 1;
+        static char name[] = "app_logic_tests";
+        static char* argv[] = { name, nullptr };
+        qputenv("QT_QPA_PLATFORM", "offscreen");
+        static QApplication app(argc, argv);
+    }
+    QTemporaryDir dir;
+    QSettings::setDefaultFormat(QSettings::IniFormat);
+    QSettings::setPath(QSettings::IniFormat, QSettings::UserScope, dir.path());
+    {
+        QMenuBar bar;
+        QMenu* help = bar.addMenu(QStringLiteral("Ayuda"));
+        QAction* tutorial = help->addAction(QStringLiteral("Tutorial"));
+        QAction* install = help->addAction(QStringLiteral("Instalar Gurobi"));
+        HelpNotifier notifier(&bar, help);
+        notifier.addEntry(QStringLiteral("tutorial"), tutorial);
+        notifier.addEntry(QStringLiteral("gurobiInstall"), install);
+
+        notifier.flag(QStringLiteral("gurobiInstall"));
+        notifier.flag(QStringLiteral("tutorial"));
+        QSettings settings;
+        EXPECT_TRUE(HelpNotifier::storedTitleFlag(settings));
+
+        emit help->aboutToShow(); // opening the menu: the title's news is seen
+        emit help->aboutToHide();
+        QSettings after_menu;
+        EXPECT_FALSE(HelpNotifier::storedTitleFlag(after_menu));
+        EXPECT_EQ(notifier.flagged(), (QStringList{ "gurobiInstall", "tutorial" }));
+
+        install->trigger(); // that entry is seen; the other keeps its dot
+        EXPECT_EQ(notifier.flagged(), QStringList{ "tutorial" });
+        QSettings after_entry;
+        EXPECT_EQ(HelpNotifier::storedFlags(after_entry), QStringList{ "tutorial" });
+
+        notifier.flag(QStringLiteral("gurobiInstall")); // something new: the title again
+        QSettings after_flag;
+        EXPECT_TRUE(HelpNotifier::storedTitleFlag(after_flag));
+    }
+    QSettings::setDefaultFormat(QSettings::NativeFormat);
 }

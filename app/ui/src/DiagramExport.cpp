@@ -1,4 +1,5 @@
 #include "DiagramExport.h"
+#include "Translation.h"
 #include "UiStyle.h"
 
 #include <QApplication>
@@ -69,9 +70,9 @@ namespace ui::exporting {
             p.setPen(style::palette::muted);
             p.setFont(font(8));
             const QRectF footer(MARGIN, footer_top + 4, width, 14);
-            p.drawText(footer, Qt::AlignLeft | Qt::AlignVCenter, QStringLiteral("Taller Matrix Harris"));
+            p.drawText(footer, Qt::AlignLeft | Qt::AlignVCenter, Tr::tr("Taller Matrix Harris"));
             p.drawText(footer, Qt::AlignRight | Qt::AlignVCenter,
-                QStringLiteral("Página %1 de %2").arg(number).arg(total));
+                Tr::tr("Página %1 de %2").arg(number).arg(total));
 
             // The drawing, scaled down to fit (never up) and centred.
             const QRectF area(MARGIN, MARGIN + HEADER + 14, width,
@@ -79,7 +80,7 @@ namespace ui::exporting {
             if (!content.scene || content.scene->items().isEmpty()) {
                 p.setPen(style::palette::faint);
                 p.setFont(font(11, false, true));
-                p.drawText(area, Qt::AlignCenter, QStringLiteral("Este esquema está vacío"));
+                p.drawText(area, Qt::AlignCenter, Tr::tr("Este esquema está vacío"));
                 return;
             }
             const QRectF source = sourceRect(content.scene);
@@ -97,7 +98,7 @@ namespace ui::exporting {
         QPdfWriter pdf(path);
         pdf.setResolution(72); // painter units are points
         pdf.setTitle(project_name);
-        pdf.setCreator(QStringLiteral("Taller Matrix Harris"));
+        pdf.setCreator(Tr::tr("Taller Matrix Harris"));
         pdf.setPageLayout(layoutFor(pages.front().scene));
 
         QPainter p;
@@ -140,7 +141,7 @@ namespace ui::exporting {
         out.replace(QRegularExpression(QStringLiteral(R"([\\/:*?"<>|\x00-\x1F])")), QStringLiteral("-"));
         out = out.trimmed();
         while (out.endsWith('.')) out.chop(1); // Windows drops trailing dots
-        return out.isEmpty() ? QStringLiteral("Esquema") : out;
+        return out.isEmpty() ? Tr::tr("Esquema") : out;
     }
 
 } // namespace ui::exporting

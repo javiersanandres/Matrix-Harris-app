@@ -1,6 +1,7 @@
 #include "Hyperedge.h"
 #include <algorithm>
 #include <stdexcept>
+#include "Text.h"
 
 namespace hypergraph_logic {
 
@@ -57,7 +58,7 @@ namespace hypergraph_logic {
 
 	void Hyperedge::setContinuous(bool continuous) {
 		if (is_segment_) {
-			throw std::logic_error("El estilo de línea solo se puede cambiar en la conexión completa.");
+			throw std::logic_error(text(LogicText::tr("El estilo de línea solo se puede cambiar en la conexión completa.")));
 		}
 		// A decision for the whole connection overrides the per-end ones.
 		if (continuous) {
@@ -82,10 +83,10 @@ namespace hypergraph_logic {
 
 	void Hyperedge::setSourceUncertain(const NodePtr& node, bool uncertain) {
 		if (is_segment_) {
-			throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+			throw std::logic_error(text(LogicText::tr("Solo se puede marcar como dudosa la conexión completa.")));
 		}
 		if (!containsSource(node)) {
-			throw std::invalid_argument("La caja no está por encima en esta conexión.");
+			throw std::invalid_argument(text(LogicText::tr("La caja no está por encima en esta conexión.")));
 		}
 		if (sources_.size() == 1) return setContinuous(!uncertain);
 		if (uncertain) uncertain_sources_.insert(node.get());
@@ -94,10 +95,10 @@ namespace hypergraph_logic {
 
 	void Hyperedge::setTargetUncertain(const NodePtr& node, bool uncertain) {
 		if (is_segment_) {
-			throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+			throw std::logic_error(text(LogicText::tr("Solo se puede marcar como dudosa la conexión completa.")));
 		}
 		if (!containsTarget(node)) {
-			throw std::invalid_argument("La caja no está por debajo en esta conexión.");
+			throw std::invalid_argument(text(LogicText::tr("La caja no está por debajo en esta conexión.")));
 		}
 		if (targets_.size() == 1) return setContinuous(!uncertain);
 		if (uncertain) uncertain_targets_.insert(node.get());
@@ -106,15 +107,15 @@ namespace hypergraph_logic {
 
 	void Hyperedge::setUncertainEnds(const std::vector<NodePtr>& sources, const std::vector<NodePtr>& targets) {
 		if (is_segment_) {
-			throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+			throw std::logic_error(text(LogicText::tr("Solo se puede marcar como dudosa la conexión completa.")));
 		}
 		std::set<const Node*> new_sources, new_targets;
 		for (const auto& s : sources) {
-			if (!containsSource(s)) throw std::invalid_argument("La caja no está por encima en esta conexión.");
+			if (!containsSource(s)) throw std::invalid_argument(text(LogicText::tr("La caja no está por encima en esta conexión.")));
 			new_sources.insert(s.get());
 		}
 		for (const auto& t : targets) {
-			if (!containsTarget(t)) throw std::invalid_argument("La caja no está por debajo en esta conexión.");
+			if (!containsTarget(t)) throw std::invalid_argument(text(LogicText::tr("La caja no está por debajo en esta conexión.")));
 			new_targets.insert(t.get());
 		}
 		uncertain_sources_ = std::move(new_sources);

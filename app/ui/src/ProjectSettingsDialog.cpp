@@ -1,4 +1,5 @@
 #include "ProjectSettingsDialog.h"
+#include "Translation.h"
 #include "AppDialogs.h"
 #include "LayoutPreview.h"
 #include "SettingsWidgets.h"
@@ -94,10 +95,10 @@ namespace ui {
 
         QString shapeName(NodeShape shape) {
             switch (shape) {
-            case NodeShape::Circle:           return QStringLiteral("Círculo");
-            case NodeShape::Rhombus:          return QStringLiteral("Rombo");
-            case NodeShape::RoundedRectangle: return QStringLiteral("Redondeado");
-            default:                          return QStringLiteral("Rectángulo");
+            case NodeShape::Circle:           return Tr::tr("Círculo");
+            case NodeShape::Rhombus:          return Tr::tr("Rombo");
+            case NodeShape::RoundedRectangle: return Tr::tr("Redondeado");
+            default:                          return Tr::tr("Rectángulo");
             }
         }
 
@@ -117,7 +118,7 @@ namespace ui {
             spin->setKeyboardTracking(false); // one change per typed value, not per digit
             spin->setAlignment(Qt::AlignRight);
             spin->setFixedWidth(76);
-            spin->setToolTip(QStringLiteral("%1, en píxeles (de %2 a %3)")
+            spin->setToolTip(Tr::tr("%1, en píxeles (de %2 a %3)")
                 .arg(what).arg(static_cast<int>(min)).arg(static_cast<int>(max)));
             return spin;
         }
@@ -154,7 +155,7 @@ namespace ui {
         , original_(current.clamped())
         , app_defaults_(app_defaults.clamped())
     {
-        setWindowTitle(QStringLiteral("Ajustes del proyecto"));
+        setWindowTitle(Tr::tr("Ajustes del proyecto"));
         setObjectName("NodeDialog");
         setModal(true);
         // As the node dialogs: no system title bar, a rounded card on a transparent window.
@@ -163,8 +164,8 @@ namespace ui {
         setStyleSheet(dialog_theme::styleSheet());
         const qreal dpr = devicePixelRatioF();
 
-        auto* banner = new DialogBanner(DialogBanner::Glyph::Settings, QStringLiteral("Ajustes del proyecto"),
-            QStringLiteral("Lo que este proyecto decide para todos sus esquemas"), this);
+        auto* banner = new DialogBanner(DialogBanner::Glyph::Settings, Tr::tr("Ajustes del proyecto"),
+            Tr::tr("Lo que este proyecto decide para todos sus esquemas"), this);
         connect(banner, &DialogBanner::closeRequested, this, &QDialog::reject);
 
         auto* outer = new QVBoxLayout(this);
@@ -203,8 +204,8 @@ namespace ui {
         };
 
         // Cajas nuevas.
-        addSection(QStringLiteral("Valores iniciales de las cajas nuevas"),
-            QStringLiteral("Cada caja nueva empieza así, y después puedes cambiarla desde sus propiedades. "));
+        addSection(Tr::tr("Valores iniciales de las cajas nuevas"),
+            Tr::tr("Cada caja nueva empieza así, y después puedes cambiarla desde sus propiedades. "));
         shape_ = new QListWidget;
         shape_->setObjectName("shapeList");
         shape_->setViewMode(QListView::IconMode);
@@ -231,7 +232,7 @@ namespace ui {
             settings_.shape = static_cast<NodeShape>(shape_->item(row)->data(Qt::UserRole).toInt());
             sync();
         });
-        addField(QStringLiteral("Forma por defecto"), shape_);
+        addField(Tr::tr("Forma por defecto"), shape_);
 
         colour_ = new ColorPickerButton;
         colour_->setRecentColours(recent_colours);
@@ -241,7 +242,7 @@ namespace ui {
             if (font_auto_) settings_.font_colour = nv::fromQColor(nv::contrastingTextColour(c));
             sync();
         });
-        addField(QStringLiteral("Color de fondo por defecto"), row({ colour_ }));
+        addField(Tr::tr("Color de fondo por defecto"), row({ colour_ }));
 
         font_colour_ = new ColorPickerButton;
         font_colour_->setRecentColours(recent_colours);
@@ -257,7 +258,7 @@ namespace ui {
             settings_.font_colour = nv::fromQColor(nv::contrastingTextColour(nv::toQColor(settings_.colour)));
             sync();
         });
-        addField(QStringLiteral("Color del texto por defecto"), row({ font_colour_ }));
+        addField(Tr::tr("Color del texto por defecto"), row({ font_colour_ }));
 
         font_size_ = new FontSizeSelector;
         font_size_->setFixedWidth(196);
@@ -266,19 +267,19 @@ namespace ui {
             settings_.font_size = v;
             sync();
         });
-        addField(QStringLiteral("Tamaño de fuente por defecto"), row({ font_size_ }));
+        addField(Tr::tr("Tamaño de fuente por defecto"), row({ font_size_ }));
 
         preview_ = new NodePreview;
         preview_->setFixedSize(300, 120);
-        addField(QStringLiteral("Así empiezan"), row({ preview_ }));
+        addField(Tr::tr("Así empiezan"), row({ preview_ }));
 
         // Equivalencias nuevas.
-        addSection(QStringLiteral("Equivalencias nuevas"),
-            QStringLiteral("Cada equivalencia puede cambiar el tipo de línea después."));
-        continuous_ = new TickBox(QStringLiteral("Línea continua"), style::icon(style::Icon::EquivalenceSolid));
-        dashed_ = new TickBox(QStringLiteral("Línea discontinua"), style::icon(style::Icon::EquivalenceDashed));
-        continuous_->setToolTip(QStringLiteral("Las equivalencias nuevas empiezan siendo seguras"));
-        dashed_->setToolTip(QStringLiteral("Las equivalencias nuevas empiezan siendo hipotéticas"));
+        addSection(Tr::tr("Equivalencias nuevas"),
+            Tr::tr("Cada equivalencia puede cambiar el tipo de línea después."));
+        continuous_ = new TickBox(Tr::tr("Línea continua"), style::icon(style::Icon::EquivalenceSolid));
+        dashed_ = new TickBox(Tr::tr("Línea discontinua"), style::icon(style::Icon::EquivalenceDashed));
+        continuous_->setToolTip(Tr::tr("Las equivalencias nuevas empiezan siendo seguras"));
+        dashed_->setToolTip(Tr::tr("Las equivalencias nuevas empiezan siendo hipotéticas"));
         // One of the two, always.
         connect(continuous_, &TickBox::toggled, this, [this](bool on) {
             if (syncing_) return;
@@ -290,10 +291,10 @@ namespace ui {
             settings_.equivalence_continuous = !on;
             sync();
         });
-        addField(QStringLiteral("Por defecto"), row({ continuous_, dashed_ }, 18));
+        addField(Tr::tr("Por defecto"), row({ continuous_, dashed_ }, 18));
 
         // Distancias.
-        addSection(QStringLiteral("Distancias"), QStringLiteral("Para todos los esquemas del proyecto, que se redibujan con ellas, como el ejemplo de abajo."));
+        addSection(Tr::tr("Distancias"), Tr::tr("Para todos los esquemas del proyecto, que se redibujan con ellas, como el ejemplo de abajo."));
         // Each one dragged along its slider, or typed in its field.
         auto addLength = [&](const QString& label, QSpinBox*& spin, DistanceSlider*& slider,
                              double min, double max, double LayoutSettings::* field) {
@@ -326,11 +327,11 @@ namespace ui {
             } });
             addField(label, row({ slider, spin, unit(QStringLiteral("px")), revert }, 10));
         };
-        addLength(QStringLiteral("Entre cajas vecinas"), block_sep_, block_slider_,
+        addLength(Tr::tr("Entre cajas vecinas"), block_sep_, block_slider_,
             LayoutSettings::MIN_BLOCK_SEP_SETTING, LayoutSettings::MAX_BLOCK_SEP_SETTING, &LayoutSettings::block_sep);
-        addLength(QStringLiteral("Entre cajas y conexiones"), layer_gap_, layer_slider_,
+        addLength(Tr::tr("Entre cajas y conexiones"), layer_gap_, layer_slider_,
             LayoutSettings::MIN_LAYER_GAP_SETTING, LayoutSettings::MAX_LAYER_GAP_SETTING, &LayoutSettings::layer_gap);
-        addLength(QStringLiteral("Entre líneas horizontales"), horizontal_sep_, horizontal_slider_,
+        addLength(Tr::tr("Entre líneas horizontales"), horizontal_sep_, horizontal_slider_,
             LayoutSettings::MIN_HORIZONTAL_SEP_SETTING, LayoutSettings::MAX_HORIZONTAL_SEP_SETTING, &LayoutSettings::horizontal_sep);
         layout_preview_ = new LayoutPreview;
         layout_preview_->setFixedHeight(230);
@@ -344,8 +345,8 @@ namespace ui {
         });
 
         // Tamaño por defecto.
-        addSection(QStringLiteral("Tamaño por defecto de las cajas"),
-            QStringLiteral("Para aquellas cajas que usaban el anterior tamaño por defecto, "
+        addSection(Tr::tr("Tamaño por defecto de las cajas"),
+            Tr::tr("Para aquellas cajas que usaban el anterior tamaño por defecto, "
                             "al presionar Aceptar se pregunta si deben ajustarse al nuevo estándar."));
         // The three side by side, to compare them and drag their edges.
         sizes_preview_ = new ShapeSizesPreview;
@@ -359,8 +360,8 @@ namespace ui {
             sync();
         });
         auto addSize = [&](const QString& label, NodeShape shape, SizeFields& fields, BoxSize BoxSizes::* box) {
-            fields.width = lengthField(MIN_NODE_WIDTH, MAX_NODE_WIDTH, QStringLiteral("Ancho"));
-            fields.height = lengthField(MIN_NODE_HEIGHT, MAX_NODE_HEIGHT, QStringLiteral("Alto"));
+            fields.width = lengthField(MIN_NODE_WIDTH, MAX_NODE_WIDTH, Tr::tr("Ancho"));
+            fields.height = lengthField(MIN_NODE_HEIGHT, MAX_NODE_HEIGHT, Tr::tr("Alto"));
             connect(fields.width, &QSpinBox::valueChanged, this, [this, box](int v) {
                 if (syncing_) return;
                 (settings_.layout.box_sizes.*box).width = v;
@@ -388,13 +389,13 @@ namespace ui {
             } });
             addField(label, row({ icon, fields.width, unit(QStringLiteral("×")), fields.height, unit(QStringLiteral("px")), revert }));
         };
-        addSize(QStringLiteral("Rectángulo y redondeado"), NodeShape::Rectangle, rectangle_, &BoxSizes::rectangle);
-        addSize(QStringLiteral("Círculo"), NodeShape::Circle, circle_, &BoxSizes::circle);
-        addSize(QStringLiteral("Rombo"), NodeShape::Rhombus, rhombus_, &BoxSizes::rhombus);
+        addSize(Tr::tr("Rectángulo y redondeado"), NodeShape::Rectangle, rectangle_, &BoxSizes::rectangle);
+        addSize(Tr::tr("Círculo"), NodeShape::Circle, circle_, &BoxSizes::circle);
+        addSize(Tr::tr("Rombo"), NodeShape::Rhombus, rhombus_, &BoxSizes::rhombus);
 
         // Banda negra del hogar por defecto.
-        addSection(QStringLiteral("Banda negra del hogar por defecto"),
-            QStringLiteral("La altura de la banda negra de un hogar, según su forma; el texto va en la parte más "
+        addSection(Tr::tr("Banda negra del hogar por defecto"),
+            Tr::tr("La altura de la banda negra de un hogar, según su forma; el texto va en la parte más "
                            "grande. Si algún hogar existente usa la anterior, al aceptar se pregunta si debe cambiar."));
         // The three as a Hogar, to drag the line between their two parts.
         ashes_preview_ = new ShapeSizesPreview(ShapeSizesPreview::Edit::Ashes);
@@ -408,7 +409,7 @@ namespace ui {
         });
         auto addAshes = [&](const QString& label, NodeShape shape, SizeFields& fields, BoxSize BoxSizes::* box) {
             fields.ashes = lengthField(MIN_ASHES_SHARE * 100.0, MAX_ASHES_SHARE * 100.0, label);
-            fields.ashes->setToolTip(QStringLiteral("Altura de la banda negra, en porcentaje de la caja (de %1 a %2)")
+            fields.ashes->setToolTip(Tr::tr("Altura de la banda negra, en porcentaje de la caja (de %1 a %2)")
                 .arg(qRound(MIN_ASHES_SHARE * 100.0)).arg(qRound(MAX_ASHES_SHARE * 100.0)));
             connect(fields.ashes, &QSpinBox::valueChanged, this, [this, box](int v) {
                 if (syncing_) return;
@@ -432,9 +433,9 @@ namespace ui {
             } });
             addField(label, row({ icon, fields.ashes, unit(QStringLiteral("%")), revert }));
         };
-        addAshes(QStringLiteral("Rectángulo y redondeado"), NodeShape::Rectangle, rectangle_, &BoxSizes::rectangle);
-        addAshes(QStringLiteral("Círculo"), NodeShape::Circle, circle_, &BoxSizes::circle);
-        addAshes(QStringLiteral("Rombo"), NodeShape::Rhombus, rhombus_, &BoxSizes::rhombus);
+        addAshes(Tr::tr("Rectángulo y redondeado"), NodeShape::Rectangle, rectangle_, &BoxSizes::rectangle);
+        addAshes(Tr::tr("Círculo"), NodeShape::Circle, circle_, &BoxSizes::circle);
+        addAshes(Tr::tr("Rombo"), NodeShape::Rhombus, rhombus_, &BoxSizes::rhombus);
 
         // The application's defaults.
         auto* defaults_card = new QFrame;
@@ -443,20 +444,19 @@ namespace ui {
         auto* defaults = new QVBoxLayout(defaults_card);
         defaults->setContentsMargins(20, 14, 20, 16);
         defaults->setSpacing(8);
-        defaults->addWidget(sectionTitle(QStringLiteral("Predeterminados de la aplicación")));
-        as_app_defaults_ = new TickBox(QStringLiteral("Usar estos ajustes para proyectos futuros"));
-        as_app_defaults_->setToolTip(QStringLiteral(
-            "Se guardan en la aplicación: todo proyecto nuevo empezará con ellos"));
+        defaults->addWidget(sectionTitle(Tr::tr("Predeterminados de la aplicación")));
+        as_app_defaults_ = new TickBox(Tr::tr("Usar estos ajustes para proyectos futuros"));
+        as_app_defaults_->setToolTip(Tr::tr("Se guardan en la aplicación: todo proyecto nuevo empezará con ellos"));
         defaults->addWidget(as_app_defaults_);
-        auto* load_app = new QPushButton(QStringLiteral("Cargar los de la aplicación"));
+        auto* load_app = new QPushButton(Tr::tr("Cargar los de la aplicación"));
         load_app->setObjectName("ghost");
         load_app->setCursor(Qt::PointingHandCursor);
-        load_app->setToolTip(QStringLiteral("Rellena el formulario con los ajustes con los que empiezan los proyectos nuevos"));
+        load_app->setToolTip(Tr::tr("Rellena el formulario con los ajustes con los que empiezan los proyectos nuevos"));
         connect(load_app, &QPushButton::clicked, this, [this] { setSettings(app_defaults_); });
-        auto* factory = new QPushButton(QStringLiteral("Valores de fábrica"));
+        auto* factory = new QPushButton(Tr::tr("Valores de fábrica"));
         factory->setObjectName("ghost");
         factory->setCursor(Qt::PointingHandCursor);
-        factory->setToolTip(QStringLiteral("Rellena el formulario con los ajustes que trae la aplicación"));
+        factory->setToolTip(Tr::tr("Rellena el formulario con los ajustes que trae la aplicación"));
         connect(factory, &QPushButton::clicked, this, [this] { setSettings(ProjectSettings()); });
         defaults->addWidget(row({ load_app, factory }, 10));
 
@@ -475,11 +475,11 @@ namespace ui {
         auto* buttons = new QHBoxLayout(footer);
         buttons->setContentsMargins(22, 12, 22, 16);
         buttons->setSpacing(10);
-        auto* accept = new QPushButton(QStringLiteral("Aceptar"));
+        auto* accept = new QPushButton(Tr::tr("Aceptar"));
         accept->setObjectName("primary");
         accept->setDefault(true);
         accept->setCursor(Qt::PointingHandCursor);
-        auto* cancel = new QPushButton(QStringLiteral("Cancelar"));
+        auto* cancel = new QPushButton(Tr::tr("Cancelar"));
         cancel->setObjectName("secondary");
         cancel->setCursor(Qt::PointingHandCursor);
         connect(accept, &QPushButton::clicked, this, &QDialog::accept);
@@ -487,7 +487,7 @@ namespace ui {
         buttons->addWidget(accept);
         buttons->addWidget(cancel);
         buttons->addSpacing(8);
-        buttons->addWidget(hint(QStringLiteral("Se aplican a todo el proyecto. Proyecto › Deshacer (Ctrl+Alt+Z) los devuelve.")), 1);
+        buttons->addWidget(hint(Tr::tr("Se aplican a todo el proyecto. Proyecto › Deshacer (Ctrl+Alt+Z) los devuelve.")), 1);
         root->addWidget(footer);
         auto divider = [footer, scroll] {
             footer->setProperty("divided", scroll->verticalScrollBar()->maximum() > 0);
@@ -525,7 +525,7 @@ namespace ui {
         font_colour_->setColour(nv::toQColor(settings_.font_colour), font_auto_);
         font_size_->setValue(settings_.font_size);
 
-        NodeAttributes box(std::string("Caja nueva"));
+        NodeAttributes box(Tr::tr("Caja nueva").toStdString());
         box.shape = settings_.shape;
         box.colour = settings_.colour;
         box.font_colour = settings_.font_colour;
@@ -559,11 +559,11 @@ namespace ui {
         sizes_preview_->setSizes(settings_.layout.box_sizes);
         ashes_preview_->setSizes(settings_.layout.box_sizes);
         // How a new box's text fits, at the font size chosen above (even before accepting it).
-        ashes_preview_->setSampleText(QStringLiteral("Caja nueva"), settings_.font_size);
+        ashes_preview_->setSampleText(Tr::tr("Caja nueva"), settings_.font_size);
         for (const Revert& revert : reverts_) {
             const auto [changed, was] = revert.state();
             revert.button->setEnabled(changed);
-            revert.button->setToolTip(QStringLiteral("Volver al valor del proyecto (%1)").arg(was));
+            revert.button->setToolTip(Tr::tr("Volver al valor del proyecto (%1)").arg(was));
         }
         syncing_ = false;
     }
@@ -612,13 +612,12 @@ namespace ui {
     // ============================================================================
 
     StyledDialog* existingBoxesQuestion(QWidget* parent) {
-        auto* ask = new StyledDialog(StyledDialog::Badge::Question, QStringLiteral("¿Y las cajas que ya existen?"), parent);
-        ask->setMessage(QStringLiteral(
-            "Has cambiado el tamaño o la banda negra por defecto de alguna forma, y hay cajas que los usan "
+        auto* ask = new StyledDialog(StyledDialog::Badge::Question, Tr::tr("¿Y las cajas que ya existen?"), parent);
+        ask->setMessage(Tr::tr("Has cambiado el tamaño o la banda negra por defecto de alguna forma, y hay cajas que los usan "
             "porque no tienen unos propios. ¿Deben tomar los nuevos, o quedarse con los que tienen?"));
-        ask->addButton(QStringLiteral("Cancelar"), -1, StyledDialog::ButtonStyle::Secondary, false, true);
-        ask->addButton(QStringLiteral("Solo las cajas nuevas"), 0, StyledDialog::ButtonStyle::Secondary);
-        ask->addButton(QStringLiteral("También las existentes"), 1, StyledDialog::ButtonStyle::Primary, true);
+        ask->addButton(Tr::tr("Cancelar"), -1, StyledDialog::ButtonStyle::Secondary, false, true);
+        ask->addButton(Tr::tr("Solo las cajas nuevas"), 0, StyledDialog::ButtonStyle::Secondary);
+        ask->addButton(Tr::tr("También las existentes"), 1, StyledDialog::ButtonStyle::Primary, true);
         return ask;
     }
 

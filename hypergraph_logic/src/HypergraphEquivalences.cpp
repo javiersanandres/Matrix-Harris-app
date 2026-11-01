@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <stdexcept>
+#include "Text.h"
 
 // ============================================================================
 // Equivalences between nodes: the chains, the rules they follow (one layer,
@@ -324,11 +325,11 @@ namespace hypergraph_logic {
 	}
 
 	void Hypergraph::addEquivalence(const NodePtr& a, const NodePtr& b, bool continuous, std::set<int>* out_altered_layers) {
-		if (!a || !b) throw std::invalid_argument("Faltan las cajas que se quieren hacer equivalentes.");
-		if (a == b) throw std::invalid_argument("Una caja no puede ser equivalente a sí misma.");
-		if (a->isDummy() || b->isDummy()) throw std::invalid_argument("Solo las cajas del esquema pueden ser equivalentes.");
+		if (!a || !b) throw std::invalid_argument(text(LogicText::tr("Faltan las cajas entre las que se quiere establecer la equivalencia.")));
+		if (a == b) throw std::invalid_argument(text(LogicText::tr("Una caja no puede ser equivalente a sí misma.")));
+		if (a->isDummy() || b->isDummy()) throw std::invalid_argument(text(LogicText::tr("Solo las cajas del esquema pueden ser equivalentes.")));
 		const int ca = chainIndexOf(a.get()), cb = chainIndexOf(b.get());
-		if (ca >= 0 && ca == cb) throw std::logic_error("Estas cajas ya son equivalentes.");
+		if (ca >= 0 && ca == cb) throw std::logic_error(text(LogicText::tr("Estas cajas ya son equivalentes.")));
 
 		const bool a_left = horizontalPosition(a) <= horizontalPosition(b);
 		const NodePtr& left = a_left ? a : b;
@@ -336,11 +337,11 @@ namespace hypergraph_logic {
 		const std::vector<NodePtr> left_chain = equivalentNodes(left);
 		const std::vector<NodePtr> right_chain = equivalentNodes(right);
 		if (left_chain.back() != left)
-			throw std::logic_error("La caja de la izquierda ya tiene una caja equivalente a su derecha.");
+			throw std::logic_error(text(LogicText::tr("La caja de la izquierda ya tiene una caja equivalente a su derecha.")));
 		if (right_chain.front() != right)
-			throw std::logic_error("La caja de la derecha ya tiene una caja equivalente a su izquierda.");
+			throw std::logic_error(text(LogicText::tr("La caja de la derecha ya tiene una caja equivalente a su izquierda.")));
 		if (classReaches(a.get(), b.get()) || classReaches(b.get(), a.get()))
-			throw std::logic_error("Hacer equivalentes estas cajas crearía un ciclo en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Establecer una equivalencia entre estas cajas crearía un ciclo en el esquema.")));
 
 		// The chain that moves: the one that has to come down, or else the shorter (the right one on a tie).
 		const bool left_moves = left->getLayer() != right->getLayer()
@@ -477,7 +478,7 @@ namespace hypergraph_logic {
 
 	void Hypergraph::removeEquivalence(const NodePtr& a, const NodePtr& b, std::set<int>* out_altered_layers) {
 		if (!canRemoveEquivalence(a, b))
-			throw std::logic_error("Estas cajas no están unidas por una equivalencia.");
+			throw std::logic_error(text(LogicText::tr("Estas cajas no están unidas por una equivalencia.")));
 		const int c = chainIndexOf(a.get());
 		const EquivalenceChain chain = equivalences_[c];
 		const size_t gap = gapBetween(chain, a, b);
@@ -500,14 +501,14 @@ namespace hypergraph_logic {
 
 	bool Hypergraph::isEquivalenceContinuous(const NodePtr& a, const NodePtr& b) const {
 		if (!canRemoveEquivalence(a, b))
-			throw std::logic_error("Estas cajas no están unidas por una equivalencia.");
+			throw std::logic_error(text(LogicText::tr("Estas cajas no están unidas por una equivalencia.")));
 		const EquivalenceChain& chain = equivalences_[chainIndexOf(a.get())];
 		return chain.group.at(a.get()) == chain.group.at(b.get());
 	}
 
 	void Hypergraph::setEquivalenceContinuous(const NodePtr& a, const NodePtr& b, bool continuous) {
 		if (!canRemoveEquivalence(a, b))
-			throw std::logic_error("Estas cajas no están unidas por una equivalencia.");
+			throw std::logic_error(text(LogicText::tr("Estas cajas no están unidas por una equivalencia.")));
 		EquivalenceChain& chain = equivalences_[chainIndexOf(a.get())];
 		const int ga = chain.group.at(a.get()), gb = chain.group.at(b.get());
 		if (continuous) {
@@ -528,14 +529,14 @@ namespace hypergraph_logic {
 	bool Hypergraph::isEquivalenceCertain(const NodePtr& a, const NodePtr& b) const {
 		const int c = chainIndexOf(a.get());
 		if (!b || c < 0 || c != chainIndexOf(b.get()))
-			throw std::logic_error("Estas cajas no son equivalentes.");
+			throw std::logic_error(text(LogicText::tr("Estas cajas no son equivalentes.")));
 		const EquivalenceChain& chain = equivalences_[c];
 		return chain.group.at(a.get()) == chain.group.at(b.get());
 	}
 
 	std::vector<int> Hypergraph::getCertaintyGroups(const NodePtr& member) const {
 		const int c = chainIndexOf(member.get());
-		if (c < 0) throw std::logic_error("Esta caja no es equivalente a ninguna otra.");
+		if (c < 0) throw std::logic_error(text(LogicText::tr("Esta caja no es equivalente a ninguna otra.")));
 		const EquivalenceChain& chain = equivalences_[c];
 		std::map<int, int> renumbered;
 		std::vector<int> groups;
@@ -548,10 +549,10 @@ namespace hypergraph_logic {
 
 	void Hypergraph::setCertaintyGroups(const NodePtr& member, const std::vector<int>& groups) {
 		const int c = chainIndexOf(member.get());
-		if (c < 0) throw std::logic_error("Esta caja no es equivalente a ninguna otra.");
+		if (c < 0) throw std::logic_error(text(LogicText::tr("Esta caja no es equivalente a ninguna otra.")));
 		EquivalenceChain& chain = equivalences_[c];
 		if (groups.size() != chain.members.size())
-			throw std::invalid_argument("Hace falta un grupo por cada caja equivalente.");
+			throw std::invalid_argument(text(LogicText::tr("Hace falta un grupo por cada caja equivalente.")));
 		for (size_t k = 0; k < groups.size(); ++k) chain.group[chain.members[k].get()] = groups[k];
 	}
 

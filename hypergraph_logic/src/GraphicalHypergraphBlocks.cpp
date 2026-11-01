@@ -4,6 +4,7 @@
 #include <limits>
 #include <map>
 #include <stdexcept>
+#include "Text.h"
 
 // ============================================================================
 // Blocks (connected components) of a GraphicalHypergraph: finding them, the
@@ -127,7 +128,7 @@ namespace hypergraph_logic {
 		for (const auto& b : getBlocks())
 			if (std::find(b.nodes.begin(), b.nodes.end(), box) != b.nodes.end())
 				return { b.nodes.begin(), b.nodes.end() };
-		throw std::invalid_argument("La caja no forma parte del esquema.");
+		throw std::invalid_argument(text(LogicText::tr("La caja no forma parte del esquema.")));
 	}
 
 	void GraphicalHypergraph::ensureLayout() {
@@ -284,13 +285,13 @@ namespace hypergraph_logic {
 			for (const auto& s : orig->getSources()) (group.count(s.get()) ? inside : outside) = true;
 			for (const auto& t : orig->getTargets()) (group.count(t.get()) ? inside : outside) = true;
 			if (inside && outside)
-				throw std::invalid_argument("Las cajas que se copian están conectadas con otras.");
+				throw std::invalid_argument(text(LogicText::tr("Las cajas que se copian están conectadas con otras.")));
 		}
 		for (const auto& chain : equivalences_) {
 			bool inside = false, outside = false;
 			for (const auto& m : chain.members) (group.count(m.get()) ? inside : outside) = true;
 			if (inside && outside)
-				throw std::invalid_argument("Las cajas que se copian son equivalentes a otras.");
+				throw std::invalid_argument(text(LogicText::tr("Las cajas que se copian son equivalentes a otras.")));
 		}
 
 		// clone() keeps all_nodes_ in order: the copy's i-th box is this graph's i-th.

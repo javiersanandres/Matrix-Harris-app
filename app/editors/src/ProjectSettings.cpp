@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <stdexcept>
 #include <string>
+#include "Text.h"
 
 using json = nlohmann::json;
 
@@ -21,7 +22,7 @@ namespace app_logic {
 		NodeShape shapeFromKey(const std::string& key) {
 			for (NodeShape s : { NodeShape::Rectangle, NodeShape::Circle, NodeShape::Rhombus, NodeShape::RoundedRectangle })
 				if (key == shapeKey(s)) return s;
-			throw std::runtime_error("Forma desconocida: " + key);
+			throw std::runtime_error(hypergraph_logic::text(LogicText::tr("Forma desconocida: %1"), key));
 		}
 
 		json boxToJSON(const BoxSize& b) {
@@ -89,7 +90,7 @@ namespace app_logic {
 		}
 		catch (const std::runtime_error&) { throw; }
 		catch (const std::exception& e) {
-			throw std::runtime_error(std::string("Ajustes del proyecto no válidos: ") + e.what());
+			throw std::runtime_error(hypergraph_logic::text(LogicText::tr("Ajustes del proyecto no válidos: %1"), e.what()));
 		}
 		return s.clamped();
 	}

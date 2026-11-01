@@ -1,4 +1,5 @@
 #include "NodeEditorWidgets.h"
+#include "Translation.h"
 #include "NodeVisuals.h"
 #include "LayoutTypes.h"
 
@@ -50,29 +51,29 @@ namespace ui {
 
         QString shapeName(NodeShape shape) {
             switch (shape) {
-            case NodeShape::Circle:  return QStringLiteral("Círculo");
-            case NodeShape::Rhombus: return QStringLiteral("Rombo");
-            case NodeShape::RoundedRectangle: return QStringLiteral("Rectángulo redondeado");
-            default:                 return QStringLiteral("Rectángulo");
+            case NodeShape::Circle:  return Tr::tr("Círculo");
+            case NodeShape::Rhombus: return Tr::tr("Rombo");
+            case NodeShape::RoundedRectangle: return Tr::tr("Rectángulo redondeado");
+            default:                 return Tr::tr("Rectángulo");
             }
         }
 
         // Shorter names for the shape tiles, where the full one does not fit.
         QString shapeTileName(NodeShape shape) {
-            return shape == NodeShape::RoundedRectangle ? QStringLiteral("Redondeado") : shapeName(shape);
+            return shape == NodeShape::RoundedRectangle ? Tr::tr("Redondeado") : shapeName(shape);
         }
 
         // "120 × 50 px", marked when it is just the shape's default.
         QString sizeText(const NodeAttributes& a, const BoxSizes* sizes) {
             return QStringLiteral("%1 × %2 px%3").arg(qRound(a.boxWidth(sizes))).arg(qRound(a.boxHeight(sizes)))
-                .arg(a.width || a.height ? QString() : QStringLiteral(" (de la forma)"));
+                .arg(a.width || a.height ? QString() : Tr::tr(" (de la forma)"));
         }
 
         QString fireName(FireState fire) {
             switch (fire) {
-            case FireState::Fire:          return QStringLiteral("Capa negra");
-            case FireState::FireWithAshes: return QStringLiteral("Hogar");
-            default:                       return QStringLiteral("Ninguno");
+            case FireState::Fire:          return Tr::tr("Capa negra");
+            case FireState::FireWithAshes: return Tr::tr("Hogar");
+            default:                       return Tr::tr("Ninguno");
             }
         }
 
@@ -272,7 +273,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
         close_ = new QToolButton(this);
         close_->setText(QStringLiteral("✕"));
-        close_->setToolTip(QStringLiteral("Cerrar (Esc)"));
+        close_->setToolTip(Tr::tr("Cerrar (Esc)"));
         close_->setCursor(Qt::PointingHandCursor);
         close_->setFixedSize(30, 30);
         close_->setStyleSheet(QStringLiteral(
@@ -494,9 +495,9 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
 
     void ColorPickerButton::refreshFace() {
         setIcon(QIcon(swatchPixmap(colour_, iconSize(), devicePixelRatioF())));
-        setText(automatic_ ? QStringLiteral("Automático") : hexOf(colour_));
+        setText(automatic_ ? Tr::tr("Automático") : hexOf(colour_));
         setToolTip(automatic_
-            ? QStringLiteral("Automático (%1): negro o blanco según el fondo").arg(hexOf(colour_))
+            ? Tr::tr("Automático (%1): negro o blanco según el fondo").arg(hexOf(colour_))
             : hexOf(colour_));
     }
 
@@ -550,7 +551,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             automatic->setObjectName("paletteWide");
             automatic->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
             automatic->setIcon(QIcon(swatchPixmap(colour_, QSize(18, 18), dpr)));
-            automatic->setText(QStringLiteral("Automático  —  negro o blanco según el fondo"));
+            automatic->setText(Tr::tr("Automático  —  negro o blanco según el fondo"));
             automatic->setCheckable(true);
             automatic->setChecked(automatic_);
             automatic->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
@@ -583,16 +584,16 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 }
             }
         }
-        addCaption(QStringLiteral("Colores del tema"));
+        addCaption(Tr::tr("Colores del tema"));
         addGrid(theme, 10);
 
-        addCaption(QStringLiteral("Colores estándar"));
+        addCaption(Tr::tr("Colores estándar"));
         addGrid({ QColor("#FFFFC8"), QColor("#C00000"), QColor("#FF0000"), QColor("#FFFF00"), QColor("#92D050"),
                   QColor("#00B050"), QColor("#00B0F0"), QColor("#0070C0"), QColor("#002060"), QColor("#7030A0") }, 10);
 
-        addCaption(QStringLiteral("Usados en el proyecto"));
+        addCaption(Tr::tr("Usados en el proyecto"));
         if (recent_.isEmpty()) {
-            auto* none = new QLabel(QStringLiteral("Aún no se ha elegido ningún color."));
+            auto* none = new QLabel(Tr::tr("Aún no se ha elegido ningún color."));
             none->setStyleSheet("color: #A0A5B5; font-size: 8pt;");
             v->addWidget(none);
         }
@@ -622,7 +623,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             p.drawEllipse(QRectF(1, 1, 16, 16));
             more->setIcon(QIcon(pm));
         }
-        more->setText(QStringLiteral("Más colores…"));
+        more->setText(Tr::tr("Más colores…"));
         more->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
         connect(more, &QToolButton::clicked, this, [this] {
             menu_->close();
@@ -639,7 +640,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         for (int i = 0; i < recent_.size() && i < QColorDialog::customCount(); ++i)
             QColorDialog::setCustomColor(i, recent_[i]);
 
-        const QColor chosen = QColorDialog::getColor(colour_, window(), QStringLiteral("Más colores"),
+        const QColor chosen = QColorDialog::getColor(colour_, window(), Tr::tr("Más colores"),
             QColorDialog::DontUseNativeDialog);
         if (!chosen.isValid()) return;
         setColour(chosen, false);
@@ -694,20 +695,20 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         for (int s : fontPresets()) combo_->addItem(QString::number(s));
         combo_->setValidator(new QIntValidator(MIN_SIZE, MAX_SIZE, combo_));
         combo_->setFixedWidth(84);
-        combo_->setToolTip(QStringLiteral("Tamaño de fuente (pt)"));
+        combo_->setToolTip(Tr::tr("Tamaño de fuente (pt)"));
 
         grow_ = new QToolButton(this);
         grow_->setObjectName("sizeButton");
         grow_->setIcon(sizeStepIcon(true, devicePixelRatioF()));
         grow_->setIconSize(QSize(22, 20));
-        grow_->setToolTip(QStringLiteral("Aumentar tamaño de fuente"));
+        grow_->setToolTip(Tr::tr("Aumentar tamaño de fuente"));
         grow_->setCursor(Qt::PointingHandCursor);
 
         shrink_ = new QToolButton(this);
         shrink_->setObjectName("sizeButton");
         shrink_->setIcon(sizeStepIcon(false, devicePixelRatioF()));
         shrink_->setIconSize(QSize(22, 20));
-        shrink_->setToolTip(QStringLiteral("Disminuir tamaño de fuente"));
+        shrink_->setToolTip(Tr::tr("Disminuir tamaño de fuente"));
         shrink_->setCursor(Qt::PointingHandCursor);
 
         auto* unit = new QLabel(QStringLiteral("pt"), this);
@@ -799,7 +800,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             spin->setKeyboardTracking(false); // one change per typed value, not per digit
             spin->setAlignment(Qt::AlignCenter);
             spin->setFixedWidth(46);
-            spin->setToolTip(QStringLiteral("%1 de la caja, en píxeles (de %2 a %3)")
+            spin->setToolTip(Tr::tr("%1 de la caja, en píxeles (de %2 a %3)")
                 .arg(what).arg(static_cast<int>(min)).arg(static_cast<int>(max)));
             return spin;
         };
@@ -808,13 +809,13 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             label->setObjectName("previewUnit");
             return label;
         };
-        width_ = makeSpin(MIN_NODE_WIDTH, MAX_NODE_WIDTH, QStringLiteral("Ancho"));
-        height_ = makeSpin(MIN_NODE_HEIGHT, MAX_NODE_HEIGHT, QStringLiteral("Alto"));
+        width_ = makeSpin(MIN_NODE_WIDTH, MAX_NODE_WIDTH, Tr::tr("Ancho"));
+        height_ = makeSpin(MIN_NODE_HEIGHT, MAX_NODE_HEIGHT, Tr::tr("Alto"));
         reset_ = new QToolButton;
         reset_->setObjectName("previewReset");
         reset_->setText(QStringLiteral("↺"));
         reset_->setCursor(Qt::PointingHandCursor);
-        reset_->setToolTip(QStringLiteral("Volver al tamaño de la forma (y seguirlo si cambia)"));
+        reset_->setToolTip(Tr::tr("Volver al tamaño de la forma (y seguirlo si cambia)"));
         h->addWidget(width_);
         h->addWidget(makeUnit(QStringLiteral("×")));
         h->addWidget(height_);
@@ -834,16 +835,16 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         auto* a = new QHBoxLayout(ashes_row_);
         a->setContentsMargins(0, 0, 0, 0);
         a->setSpacing(2);
-        ashes_ = makeSpin(MIN_ASHES_SHARE * 100.0, MAX_ASHES_SHARE * 100.0, QStringLiteral("Altura de la banda negra"));
-        ashes_->setToolTip(QStringLiteral("Altura de la banda negra, en porcentaje de la caja (de %1 a %2)")
+        ashes_ = makeSpin(MIN_ASHES_SHARE * 100.0, MAX_ASHES_SHARE * 100.0, Tr::tr("Altura de la banda negra"));
+        ashes_->setToolTip(Tr::tr("Altura de la banda negra, en porcentaje de la caja (de %1 a %2)")
             .arg(qRound(MIN_ASHES_SHARE * 100.0)).arg(qRound(MAX_ASHES_SHARE * 100.0)));
         ashes_reset_ = new QToolButton;
         ashes_reset_->setObjectName("previewReset");
         ashes_reset_->setText(QStringLiteral("↺"));
         ashes_reset_->setCursor(Qt::PointingHandCursor);
-        ashes_reset_->setToolTip(QStringLiteral("Volver a la banda negra de la forma (y seguirla si cambia)"));
+        ashes_reset_->setToolTip(Tr::tr("Volver a la banda negra de la forma (y seguirla si cambia)"));
         a->addStretch();
-        a->addWidget(makeUnit(QStringLiteral("Banda negra")));
+        a->addWidget(makeUnit(Tr::tr("Banda negra")));
         a->addSpacing(4);
         a->addWidget(ashes_);
         a->addWidget(makeUnit(QStringLiteral("%")));
@@ -910,8 +911,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             p.setFont(small);
             p.setPen(MUTED);
             p.drawText(card.adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop, attributes_.hasAshes()
-                ? QStringLiteral("Arrastra los bordes o la línea de la banda negra")
-                : QStringLiteral("Arrastra los bordes de la caja para cambiar su tamaño"));
+                ? Tr::tr("Arrastra los bordes o la línea de la banda negra")
+                : Tr::tr("Arrastra los bordes de la caja para cambiar su tamaño"));
 
             if (own_size) {
                 // Legend of the shadow, level with the size fields.
@@ -926,7 +927,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 p.drawRoundedRect(swatch, 2, 2);
                 p.setPen(MUTED);
                 p.drawText(QRectF(swatch.right() + 6.0, y - 10.0, 160.0, 20.0), Qt::AlignLeft | Qt::AlignVCenter,
-                    QStringLiteral("Tamaño de la forma"));
+                    Tr::tr("Tamaño de la forma"));
             }
         }
 
@@ -1328,17 +1329,17 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             ++row;
         };
 
-        addSection(QStringLiteral("Identidad"));
-        addField(Name, QStringLiteral("Nombre"));
-        addField(Shape, QStringLiteral("Forma"));
-        if (merge) addField(Size, QStringLiteral("Tamaño"));
-        addSection(QStringLiteral("Apariencia"));
-        addField(Colour, QStringLiteral("Color de fondo"));
-        addField(FontColour, QStringLiteral("Color del texto"));
-        addField(FontSize, QStringLiteral("Tamaño de fuente"));
-        addSection(QStringLiteral("Estado"));
+        addSection(Tr::tr("Identidad"));
+        addField(Name, Tr::tr("Nombre"));
+        addField(Shape, Tr::tr("Forma"));
+        if (merge) addField(Size, Tr::tr("Tamaño"));
+        addSection(Tr::tr("Apariencia"));
+        addField(Colour, Tr::tr("Color de fondo"));
+        addField(FontColour, Tr::tr("Color del texto"));
+        addField(FontSize, Tr::tr("Tamaño de fuente"));
+        addSection(Tr::tr("Estado"));
         // The tick boxes already say it all, under their section; merging, there is none.
-        addField(Fire, merge ? QStringLiteral("Estado") : QString());
+        addField(Fire, merge ? Tr::tr("Estado") : QString());
     }
 
     void NodeAttributesForm::placeResultPreview(QWidget* preview) {
@@ -1382,7 +1383,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         switch (field) {
         case Name: {
             name_ = new QLineEdit;
-            name_->setPlaceholderText(QStringLiteral("Nombre de la caja"));
+            name_->setPlaceholderText(Tr::tr("Nombre de la caja"));
             name_->setClearButtonEnabled(true);
             name_->setMinimumWidth(220);
             connect(name_, &QLineEdit::textEdited, this, [this](const QString& text) {
@@ -1429,7 +1430,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         case Size: {
             // Only shown: the size is changed in the preview.
             size_ = new QLabel;
-            size_->setToolTip(QStringLiteral("Cambia el tamaño en la vista previa, arrastrando los bordes de la caja"));
+            size_->setToolTip(Tr::tr("Cambia el tamaño en la vista previa, arrastrando los bordes de la caja"));
             return size_;
         }
         case Colour: {
@@ -1439,9 +1440,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 rememberPicked(c);
                 setBackground(c);
             });
-            colour_default_ = new TickBox(QStringLiteral("Establecer por defecto en el esquema"));
-            colour_default_->setToolTip(QStringLiteral(
-                "Las cajas nuevas de este esquema tendrán este color de fondo"));
+            colour_default_ = new TickBox(Tr::tr("Establecer por defecto en el esquema"));
+            colour_default_->setToolTip(Tr::tr("Las cajas nuevas de este esquema tendrán este color de fondo"));
             colour_default_->setVisible(false);
             return withTicks(colour_, { colour_default_ });
         }
@@ -1454,9 +1454,8 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 setFontColourManual(c);
             });
             connect(font_colour_, &ColorPickerButton::automaticPicked, this, [this] { setFontColourAutomatic(); });
-            font_colour_default_ = new TickBox(QStringLiteral("Establecer por defecto en el esquema"));
-            font_colour_default_->setToolTip(QStringLiteral(
-                "Las cajas nuevas de este esquema tendrán este color de texto"));
+            font_colour_default_ = new TickBox(Tr::tr("Establecer por defecto en el esquema"));
+            font_colour_default_->setToolTip(Tr::tr("Las cajas nuevas de este esquema tendrán este color de texto"));
             font_colour_default_->setVisible(false);
             return withTicks(font_colour_, { font_colour_default_ });
         }
@@ -1468,13 +1467,11 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
                 sync();
                 emit attributesChanged();
             });
-            font_size_all_ = new TickBox(QStringLiteral("Aplicar a todas las cajas del esquema"));
-            font_size_all_->setToolTip(QStringLiteral(
-                "Las demás cajas del esquema tomarán también este tamaño de fuente"));
+            font_size_all_ = new TickBox(Tr::tr("Aplicar a todas las cajas del esquema"));
+            font_size_all_->setToolTip(Tr::tr("Las demás cajas del esquema tomarán también este tamaño de fuente"));
             font_size_all_->setVisible(false);
-            font_size_default_ = new TickBox(QStringLiteral("Establecer por defecto en el esquema"));
-            font_size_default_->setToolTip(QStringLiteral(
-                "Las cajas nuevas de este esquema tendrán este tamaño de fuente"));
+            font_size_default_ = new TickBox(Tr::tr("Establecer por defecto en el esquema"));
+            font_size_default_->setToolTip(Tr::tr("Las cajas nuevas de este esquema tendrán este tamaño de fuente"));
             font_size_default_->setVisible(false);
             // Stacked as before: giving the size to every box, then making it the default.
             QWidget* wrap = withTicks(font_size_, { font_size_all_, font_size_default_ });
@@ -1524,7 +1521,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         chip->setCursor(Qt::PointingHandCursor);
         chip->setAutoDefault(false);
         chip->setFixedWidth(CHIP_WIDTH);
-        chip->setToolTip(QStringLiteral("Quedarse con el valor de %1").arg(left ? left_title_ : right_title_));
+        chip->setToolTip(Tr::tr("Quedarse con el valor de %1").arg(left ? left_title_ : right_title_));
         auto* h = new QHBoxLayout(chip);
         h->setContentsMargins(8, 6, 8, 6);
         h->setSpacing(6);
@@ -1603,10 +1600,10 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         preview->setAlignment(Qt::AlignCenter);
         v->addWidget(preview);
 
-        auto* take_all = new QPushButton(left ? QStringLiteral("Conservar todo  →") : QStringLiteral("←  Conservar todo"));
+        auto* take_all = new QPushButton(left ? Tr::tr("Conservar todo  →") : Tr::tr("←  Conservar todo"));
         take_all->setObjectName("ghost");
         take_all->setCursor(Qt::PointingHandCursor);
-        take_all->setToolTip(QStringLiteral("Usar todos los valores de %1").arg(title));
+        take_all->setToolTip(Tr::tr("Usar todos los valores de %1").arg(title));
         connect(take_all, &QPushButton::clicked, this, [this, left] { takeAll(left ? *left_ : *right_); });
         v->addWidget(take_all, 0, Qt::AlignCenter);
         return frame;
@@ -1745,7 +1742,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
         // The colours a Capa negra or a Hogar imposes are not the project's choice.
         colour_default_->setEnabled(!fire);
         font_colour_default_->setEnabled(!fire);
-        const QString locked = QStringLiteral("Bloqueado mientras la caja sea capa negra u hogar");
+        const QString locked = Tr::tr("Bloqueado mientras la caja sea capa negra u hogar");
         if (fire) {
             colour_->setToolTip(locked);
             font_colour_->setToolTip(locked);

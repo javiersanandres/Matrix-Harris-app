@@ -23,6 +23,7 @@ add_executable(horizontalCoordinatesVisualization
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hyperedge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hypergraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../HypergraphEquivalences.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Text.cpp
 )
 
 target_include_directories(horizontalCoordinatesVisualization
@@ -58,6 +59,7 @@ add_executable(minCrossHorizCoord
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hyperedge.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../Hypergraph.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/../../HypergraphEquivalences.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/../../Text.cpp
 )
 
 target_include_directories(minCrossHorizCoord

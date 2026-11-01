@@ -1,4 +1,5 @@
 #include "SettingsWidgets.h"
+#include "Translation.h"
 #include "NodeVisuals.h"
 #include "UiStyle.h"
 
@@ -201,7 +202,11 @@ namespace ui {
 
     namespace {
         constexpr NodeShape SHAPES[] = { NodeShape::Rectangle, NodeShape::Circle, NodeShape::Rhombus };
-        const QString NAMES[] = { QStringLiteral("Rectángulo y redondeado"), QStringLiteral("Círculo"), QStringLiteral("Rombo") };
+        // In the current language, so not kept from start-up.
+        QString shapeName(int i) {
+            const QString names[] = { Tr::tr("Rectángulo y redondeado"), Tr::tr("Círculo"), Tr::tr("Rombo") };
+            return names[i];
+        }
         constexpr double SHAPE_GAP = 56.0;       // between two shapes, on screen
         constexpr double HANDLE_REACH = 7.0;
         constexpr double LABELS_HEIGHT = 40.0;   // the names and sizes under the shapes
@@ -353,8 +358,8 @@ namespace ui {
         p.setFont(small);
         p.setPen(style::palette::muted);
         p.drawText(QRectF(rect()).adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop, edit_ == Edit::Ashes
-            ? QStringLiteral("Arrastra la línea de un hogar para cambiar su banda negra por defecto")
-            : QStringLiteral("Arrastra los bordes de una forma para cambiar su tamaño por defecto"));
+            ? Tr::tr("Arrastra la línea de un hogar para cambiar su banda negra por defecto")
+            : Tr::tr("Arrastra los bordes de una forma para cambiar su tamaño por defecto"));
 
         p.save();
         p.setClipPath(card);
@@ -407,11 +412,11 @@ namespace ui {
             bold.setBold(true);
             p.setFont(bold);
             p.setPen(lit ? style::palette::accent_dark : QColor("#3A3F52"));
-            p.drawText(label, Qt::AlignHCenter | Qt::AlignTop, NAMES[i]);
+            p.drawText(label, Qt::AlignHCenter | Qt::AlignTop, shapeName(i));
             p.setFont(small);
             p.setPen(lit ? style::palette::accent : style::palette::muted);
             p.drawText(label.translated(0.0, 16.0), Qt::AlignHCenter | Qt::AlignTop, edit_ == Edit::Ashes
-                ? QStringLiteral("Banda negra %1 %").arg(qRound(ashes_[i] * 100.0))
+                ? Tr::tr("Banda negra %1 %").arg(qRound(ashes_[i] * 100.0))
                 : QStringLiteral("%1 × %2 px").arg(qRound(sizes[i].width())).arg(qRound(sizes[i].height())));
         }
         p.restore();

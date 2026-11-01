@@ -1,4 +1,5 @@
 #include "AddHypergraphDialog.h"
+#include "Translation.h"
 #include "UiStyle.h"
 
 #include <QListWidgetItem>
@@ -19,9 +20,9 @@ namespace {
 
 AddHypergraphDialog::AddHypergraphDialog(const std::vector<DiagramEntry>& entries,
                                          QWidget* parent)
-    : StyledDialog(Badge::Joint, QStringLiteral("Añadir al esquema conjunto"), parent)
+    : StyledDialog(Badge::Joint, Tr::tr("Añadir al esquema conjunto"), parent)
 {
-    setMessage(QStringLiteral("Elige el esquema que quieres incorporar."));
+    setMessage(Tr::tr("Elige el esquema que quieres incorporar."));
 
     list_ = new QListWidget(this);
     list_->setObjectName("diagramList");
@@ -39,7 +40,7 @@ QListWidget#diagramList::item:disabled { color: #A0A5B5; background: #F7F8FA; }
     const QIcon diagram_icon = style::icon(style::Icon::Joint);
     for (const auto& entry : entries) {
         QString text = QString::fromStdString(entry.name);
-        if (entry.already_incorporated) text += QStringLiteral("  ·  ya incorporado");
+        if (entry.already_incorporated) text += Tr::tr("  ·  ya incorporado");
         auto* item = new QListWidgetItem(diagram_icon, text);
         if (entry.already_incorporated)
             item->setFlags(item->flags() & ~Qt::ItemIsEnabled);
@@ -57,8 +58,8 @@ QListWidget#diagramList::item:disabled { color: #A0A5B5; background: #F7F8FA; }
     list_->setMinimumWidth(320);
     setBody(list_);
 
-    addButton(QStringLiteral("Cancelar"), CANCEL, ButtonStyle::Secondary, false, true);
-    add_button_ = addButton(QStringLiteral("Añadir"), ADD, ButtonStyle::Primary, true);
+    addButton(Tr::tr("Cancelar"), CANCEL, ButtonStyle::Secondary, false, true);
+    add_button_ = addButton(Tr::tr("Añadir"), ADD, ButtonStyle::Primary, true);
 
     // "Añadir" only makes sense once something that can be added is selected.
     auto refresh = [this] {

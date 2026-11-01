@@ -1,15 +1,16 @@
 #include "MainWindow.h"
 #include "GurobiNotice.h"
 #include "Updates.h"
+#include "Translation.h"
 #include <QApplication>
 #include <QIcon>
-#include <QLibraryInfo>
-#include <QLocale>
+#include <QPointer>
 #include <QSettings>
-#include <QTranslator>
+#include <string>
 
 int main(int argc, char* argv[]) {
     QApplication app(argc, argv);
+    // Also where the settings are kept: the same in every language.
     app.setApplicationName(QStringLiteral("Taller Matrix Harris"));
     app.setOrganizationName(QStringLiteral("Javier San Andrés"));
     app.setApplicationVersion(QStringLiteral(APP_VERSION)); // from CMake's project VERSION
@@ -17,25 +18,12 @@ int main(int argc, char* argv[]) {
     // all its sizes (read by Qt's ico plugin).
     app.setWindowIcon(QIcon(QStringLiteral(":/app/app.ico")));
 
-    // The app is in Spanish, so Qt's own dialogs (colour picker, file dialogs,
-    // message box buttons, ...) must be too. Look for Qt's Spanish translations
-    // next to the executable first (deployed builds), then in the Qt install.
-    // windeployqt merges them into qt_es.qm; the Qt install also has qtbase_es.qm.
-    QLocale::setDefault(QLocale(QLocale::Spanish, QLocale::Spain));
-    QTranslator qt_translator;
-    const QStringList dirs = {
-        QApplication::applicationDirPath() + "/translations",
-        QLibraryInfo::path(QLibraryInfo::TranslationsPath) };
-    bool translated = false;
-    for (const QString& dir : dirs) {
-        for (const char* catalog : { "qt", "qtbase" }) {
-            if (qt_translator.load(QLocale(), catalog, "_", dir)) {
-                app.installTranslator(&qt_translator);
-                translated = true;
-                break;
-            }
-        }
-        if (translated) break;
+    // The language chosen last; before any choice, the system's (Spanish for
+    // Spanish and close languages, English otherwise). Also Qt's own dialogs
+    // (colour picker, message box buttons, ...) follow it.
+    {
+        QSettings settings;
+        ui::i18n::apply(ui::i18n::saved(settings));
     }
 
     // The Gurobi developer options (see GurobiNotice.h) are taken out first,
@@ -53,27 +41,40 @@ int main(int argc, char* argv[]) {
         args.removeAt(i);
     }
 
-    ui::MainWindow window;
-    window.showMaximized();
+    // Changing the language replaces the window (see MainWindow::switchLanguage):
+    // `window` always points to the current one.
+    QPointer<ui::MainWindow> window = new ui::MainWindow;
+    window->setAttribute(Qt::WA_DeleteOnClose);
+    std::function<void(ui::MainWindow*)> follow = [&window, &follow](ui::MainWindow* w) {
+        QObject::connect(w, &ui::MainWindow::replaced, w, [&window, &follow](ui::MainWindow* next) {
+            window = next;
+            updates::follow(*next);
+            follow(next);
+        });
+    };
+    follow(window);
+    window->showMaximized();
 
     // "TallerMatrixHarris proyecto.json" (e.g. opening a project from the file
     // explorer) starts with that project open.
-    if (args.size() > 1) window.openProject(args.at(1));
+    if (args.size() > 1) window->openProject(args.at(1));
 
     // Whether Gurobi is installed and licensed; if not, a notice says how to
     // get it once the window is up. Then, on the first run, the introductory
-    // tour. A notice the user asked not to see again points to its guide in
-    // Ayuda.
-    ui::gurobi::checkAtStartup(&window, gurobi_options, [&window, force_tutorial](ui::gurobi::Notice silenced) {
+    // tour (at once when there was no notice), so the user can play with the
+    // app right after it. A notice the user asked not to see again points to
+    // its guide in Ayuda.
+    ui::gurobi::checkAtStartup(window, gurobi_options, [&window, force_tutorial](ui::gurobi::Notice silenced) {
+        if (!window) return;
         using Entry = ui::MainWindow::HelpEntry;
-        if (silenced == ui::gurobi::Notice::Install) window.pointToHelpEntry(Entry::GurobiInstall);
-        if (silenced == ui::gurobi::Notice::License) window.pointToHelpEntry(Entry::GurobiLicense);
-        window.startTutorialIfFirstRun(force_tutorial);
+        if (silenced == ui::gurobi::Notice::Install) window->pointToHelpEntry(Entry::GurobiInstall);
+        if (silenced == ui::gurobi::Notice::License) window->pointToHelpEntry(Entry::GurobiLicense);
+        window->startTutorialIfFirstRun(force_tutorial);
     });
 
     // Checks for a newer version (at most once a day) once the window is up;
     // Ayuda › Buscar actualizaciones… checks right away.
-    updates::start(window, appcast_url);
+    updates::start(*window, appcast_url);
 
     const int result = app.exec();
     updates::stop();

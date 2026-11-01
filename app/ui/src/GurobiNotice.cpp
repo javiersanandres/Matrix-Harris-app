@@ -1,9 +1,11 @@
 #include "GurobiNotice.h"
+#include "Translation.h"
 #include "AppDialogs.h"
 #include "GurobiGuide.h"
 #include "UiStyle.h"
 
 #include <QAbstractButton>
+#include <QElapsedTimer>
 #include <QPainter>
 #include <QPainterPath>
 #include <QPushButton>
@@ -12,6 +14,8 @@
 #include <QTimer>
 #include <QVBoxLayout>
 #include <QtDebug>
+
+#include <algorithm>
 
 namespace ui::gurobi {
 
@@ -94,6 +98,24 @@ namespace ui::gurobi {
         // The window has had time to appear before a notice covers it.
         constexpr int NOTICE_DELAY_MS = 450;
 
+        // present, once the window has been up NOTICE_DELAY_MS (counted from
+        // `since`); at once when there is no notice, so what comes after it
+        // (the first run's tour) does not wait.
+        void presentWhenUp(QWidget* window, GurobiStatus status, const QString& group, const AfterCheck& then,
+            const QElapsedTimer& since)
+        {
+            Notice notice;
+            {
+                QSettings settings;
+                notice = pendingNotice(status, settings, group);
+            }
+            const int wait = notice == Notice::None
+                ? 0 : std::max(0, NOTICE_DELAY_MS - static_cast<int>(since.elapsed()));
+            QTimer::singleShot(wait, window, [window, status, group, then] {
+                present(window, status, group, then);
+            });
+        }
+
     } // namespace
 
     Notice pendingNotice(GurobiStatus status, QSettings& settings, const QString& group) {
@@ -153,11 +175,10 @@ namespace ui::gurobi {
             resetReminders(settings, group);
         }
 
+        QElapsedTimer since;
+        since.start();
         if (options.simulated) {
-            const GurobiStatus status = *options.simulated;
-            QTimer::singleShot(NOTICE_DELAY_MS, window, [window, status, group, then] {
-                present(window, status, group, then);
-            });
+            presentWhenUp(window, *options.simulated, group, then, since);
             return;
         }
 
@@ -165,10 +186,8 @@ namespace ui::gurobi {
         // so it runs off the UI thread; its answer is cached for the solvers.
         QThread* check = QThread::create([] { hypergraph_logic::gurobiStatus(); });
         QObject::connect(check, &QThread::finished, check, &QObject::deleteLater);
-        QObject::connect(check, &QThread::finished, window, [window, group, then] {
-            QTimer::singleShot(NOTICE_DELAY_MS, window, [window, group, then] {
-                present(window, hypergraph_logic::gurobiStatus(), group, then);
-            });
+        QObject::connect(check, &QThread::finished, window, [window, group, then, since] {
+            presentWhenUp(window, hypergraph_logic::gurobiStatus(), group, then, since);
         });
         check->start();
     }
@@ -178,15 +197,15 @@ namespace ui::gurobi {
         const bool install = notice == Notice::Install;
 
         StyledDialog dlg(install ? StyledDialog::Badge::Info : StyledDialog::Badge::Warning,
-            install ? QStringLiteral("Gurobi no está instalado")
-                    : QStringLiteral("Falta la licencia de Gurobi"),
+            install ? Tr::tr("Gurobi no está instalado")
+                    : Tr::tr("Falta la licencia de Gurobi"),
             parent);
         dlg.setMessage(install
-            ? QStringLiteral("Esta aplicación funciona mejor con Gurobi instalado. Si eres estudiante, profesor "
+            ? Tr::tr("Esta aplicación funciona mejor con Gurobi instalado. Si eres estudiante, profesor "
                              "o investigador universitario, te recomendamos instalar el programa para una mejor "
                              "experiencia.")
-            : QStringLiteral("Esta aplicación funciona mejor con Gurobi. No se ha encontrado una licencia de Gurobi" 
-                             "válida. Si eres estudiante, profesor o investigador universitario puedes obtener una" 
+            : Tr::tr("Esta aplicación funciona mejor con Gurobi. No se ha encontrado una licencia de Gurobi "
+                             "válida. Si eres estudiante, profesor o investigador universitario puedes obtener una "
                              "licencia válida de manera gratuita. Te recomendamos hacerlo para una mejor experiencia."));
 
         auto* body = new QWidget;
@@ -195,8 +214,8 @@ namespace ui::gurobi {
         col->setSpacing(14);
 
         auto* link = new QPushButton(install
-            ? QStringLiteral("Haga clic aquí para más información sobre cómo instalar Gurobi  ›")
-            : QStringLiteral("Haga clic aquí para ver cómo instalar una licencia de Gurobi  ›"), body);
+            ? Tr::tr("Haga clic aquí para más información sobre cómo instalar Gurobi  ›")
+            : Tr::tr("Haga clic aquí para ver cómo instalar una licencia de Gurobi  ›"), body);
         link->setObjectName("guideLink");
         link->setCursor(Qt::PointingHandCursor);
         link->setAutoDefault(false);
@@ -207,14 +226,14 @@ namespace ui::gurobi {
             "QPushButton#guideLink:pressed { background: #D7DBFF; }"));
         col->addWidget(link);
 
-        auto* tick = new TickBox(QStringLiteral("No volver a recordármelo"), body);
+        auto* tick = new TickBox(Tr::tr("No volver a recordármelo"), body);
         col->addWidget(tick, 0, Qt::AlignLeft);
         dlg.setBody(body);
 
         QObject::connect(link, &QPushButton::clicked, &dlg, [&dlg, install] {
             showGuide(install ? Guide::Install : Guide::License, &dlg);
         });
-        dlg.addButton(QStringLiteral("Entendido"), 0, StyledDialog::ButtonStyle::Primary, true, true);
+        dlg.addButton(Tr::tr("Entendido"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();
 
         if (!tick->isChecked()) return false;

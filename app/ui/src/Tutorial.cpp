@@ -1,7 +1,9 @@
 #include "Tutorial.h"
+#include "Translation.h"
 #include "AppDialogs.h"
 #include "Project.h"
 #include "UiStyle.h"
+#include "LanguageButton.h"
 
 #include <QApplication>
 #include <QFrame>
@@ -35,7 +37,7 @@ namespace ui::tutorial {
         }
 
         QString picture(const char* name) {
-            return QStringLiteral(":/tutorial/%1.png").arg(QLatin1String(name));
+            return i18n::picture(QStringLiteral("tutorial/%1.png").arg(QLatin1String(name)));
         }
 
         const QString SEEN_KEY = QStringLiteral("tutorial/seen");
@@ -48,8 +50,8 @@ namespace ui::tutorial {
     std::vector<Step> introSteps() {
         using T = Target;
         return {
-            { QStringLiteral("¡Te damos la bienvenida al Taller Matrix Harris!"),
-              QStringLiteral("Aquí dibujas esquemas Matrix Harris y cualquier tipo de esquema jerárquico: <b>cajas</b> " 
+            { Tr::tr("¡Te damos la bienvenida al Taller Matrix Harris!"),
+              Tr::tr("Aquí dibujas esquemas Matrix Harris y cualquier tipo de esquema jerárquico: <b>cajas</b> " 
                              "colocadas en <b>niveles</b> y unidas "
                              "por <b>conexiones</b>. En un par de minutos verás lo esencial.<br><br>"
                              "Para que pruebes cada paso, hemos abierto un <b>proyecto de ejemplo</b>: la parte "
@@ -58,103 +60,103 @@ namespace ui::tutorial {
                              "Puedes saltar el recorrido cuando quieras y repetirlo más tarde desde <b>Ayuda</b>."),
               picture("welcome"), {} },
 
-            { QStringLiteral("El lienzo"),
-              QStringLiteral("Aquí se dibuja el esquema que tienes abierto. Para crear una caja suelta, haz %1 "
-                             "en el fondo y elige <b>Nueva caja</b>. Pruébalo.").arg(key(QStringLiteral("clic derecho"))),
+            { Tr::tr("El lienzo"),
+              Tr::tr("Aquí se dibuja el esquema que tienes abierto. Para crear una caja suelta, haz %1 "
+                             "en el fondo y elige <b>Nueva caja</b>. Pruébalo.").arg(key(Tr::tr("clic derecho"))),
               picture("new_box"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Todo empieza con un clic derecho"),
-              QStringLiteral("Haz %1 sobre una caja para crear otras arriba, abajo o a sus lados, conectarla con "
+            { Tr::tr("Todo empieza con un clic derecho"),
+              Tr::tr("Haz %1 sobre una caja para crear otras arriba, abajo o a sus lados, conectarla con "
                              "otra, fusionarlas, cambiar sus conexiones o eliminarla. Prueba a crear una caja "
-                             "debajo de la 4.").arg(key(QStringLiteral("clic derecho"))),
+                             "debajo de la 4.").arg(key(Tr::tr("clic derecho"))),
               picture("box_menu"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Operaciones con dos cajas"),
-              QStringLiteral("Algunas opciones, como <b>Caja actual por debajo de</b>, te piden elegir otra caja: "
+            { Tr::tr("Operaciones con dos cajas"),
+              Tr::tr("Algunas opciones, como <b>Caja actual por debajo de</b>, te piden elegir otra caja: "
                              "las que sirven quedan resaltadas y el resto se apaga. Haz clic en una, o pulsa %1 "
                              "para cancelar.").arg(key(QStringLiteral("Esc"))),
               picture("pick_second"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Las conexiones también tienen menú"),
-              QStringLiteral("Haz %1 sobre una línea para poner una caja en medio, bifurcarla, dibujarla discontinua "
-                             "o eliminarla.").arg(key(QStringLiteral("clic"))),
+            { Tr::tr("Las conexiones también tienen menú"),
+              Tr::tr("Haz %1 sobre una línea para poner una caja en medio, bifurcarla, dibujarla discontinua "
+                             "o eliminarla.").arg(key(Tr::tr("clic"))),
               picture("edge_menu"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Cambia el aspecto de una caja"),
-              QStringLiteral("Haz %1 sobre una caja para editar su nombre, su forma, sus colores y el tamaño de la "
+            { Tr::tr("Cambia el aspecto de una caja"),
+              Tr::tr("Haz %1 sobre una caja para editar su nombre, su forma, sus colores y el tamaño de la "
                              "letra. Sus colores y su letra pueden quedar como los <b>predeterminados del "
                              "esquema</b>, los que tendrán sus cajas nuevas. Si el nombre no cabe, la rueda del ratón sobre la caja lo "
                              "desplaza.")
-                  .arg(key(QStringLiteral("doble clic"))),
+                  .arg(key(Tr::tr("doble clic"))),
               picture("properties"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Mueve las cajas"),
-              QStringLiteral("%1 una caja para cambiarla de sitio dentro de su nivel o llevarla a otro: las guías te "
+            { Tr::tr("Mueve las cajas"),
+              Tr::tr("%1 una caja para cambiarla de sitio dentro de su nivel o llevarla a otro: las guías te "
                              "muestran dónde caerá. Si la sueltas más allá del primer o del último nivel, se abre "
-                             "uno nuevo. Prueba a llevar la 6 junto a la 4.").arg(key(QStringLiteral("Arrastra"))),
+                             "uno nuevo. Prueba a llevar la 6 junto a la 4.").arg(key(Tr::tr("Arrastra"))),
               picture("drag_box"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Mueve bloques enteros"),
-              QStringLiteral("Con clic derecho sobre una caja › <b>Mover bloque</b> te llevas todo su grupo de cajas "
+            { Tr::tr("Mueve bloques enteros"),
+              Tr::tr("Con clic derecho sobre una caja › <b>Mover bloque</b> te llevas todo su grupo de cajas "
                              "conectadas colgando del ratón: haz clic donde quieras dejarlo (clic derecho lo devuelve "
                              "a su sitio). <b>Eliminar bloque</b> lo borra entero. Tiene que haber <b>varias</b> piezas "
                              "para que se muestre esta opción."),
               picture("move_block"), { T::Canvas }, View::FirstDiagram },
 
-            { QStringLiteral("Muévete por el esquema"),
-              QStringLiteral("%1 para desplazarte y usa %2 para acercar o alejar. %3 ajusta todo el esquema a la "
+            { Tr::tr("Muévete por el esquema"),
+              Tr::tr("%1 para desplazarte y usa %2 para acercar o alejar. %3 ajusta todo el esquema a la "
                              "ventana. Abajo a la derecha ves el zoom actual.")
-                  .arg(key(QStringLiteral("Arrastra el fondo")), key(QStringLiteral("Ctrl + rueda")),
+                  .arg(key(Tr::tr("Arrastra el fondo")), key(Tr::tr("Ctrl + rueda")),
                       key(QStringLiteral("Ctrl+0"))),
               {}, { T::Canvas, T::ZoomLabel }, View::FirstDiagram },
 
-            { QStringLiteral("Un proyecto, varios esquemas"),
-              QStringLiteral("Cada esquema del proyecto tiene aquí su pestaña, con una miniatura. Haz %1 "
+            { Tr::tr("Un proyecto, varios esquemas"),
+              Tr::tr("Cada esquema del proyecto tiene aquí su pestaña, con una miniatura. Haz %1 "
                              "fuera de la miniatura para abrirla. %2 pasa a la siguiente. Prueba a abrir el «Esquema 2».")
-                  .arg(key(QStringLiteral("clic en una pestaña")))
+                  .arg(key(Tr::tr("clic en una pestaña")))
                   .arg(key(QStringLiteral("Ctrl+Tab"))),
               {}, { T::TabStrip } },
 
-            { QStringLiteral("Las miniaturas también se exploran"),
-              QStringLiteral("Sobre una miniatura, %1 la acerca o la aleja y %2 la desplaza, sin cambiar de esquema.")
-                  .arg(key(QStringLiteral("Ctrl + rueda")), key(QStringLiteral("arrastrar"))),
+            { Tr::tr("Las miniaturas también se exploran"),
+              Tr::tr("Sobre una miniatura, %1 la acerca o la aleja y %2 la desplaza, sin cambiar de esquema.")
+                  .arg(key(Tr::tr("Ctrl + rueda")), key(Tr::tr("arrastrar"))),
               {}, { T::FirstTabMiniature } },
 
-            { QStringLiteral("Renombra, duplica o elimina un esquema"),
-              QStringLiteral("Haz %1 sobre el nombre para cambiarlo (o pulsa %2). Al pasar el ratón por la pestaña "
-                             "aparece una papelera para eliminar el esquema. Haciendo %3 se accede a las dos opciones"
+            { Tr::tr("Renombra, duplica o elimina un esquema"),
+              Tr::tr("Haz %1 sobre el nombre para cambiarlo (o pulsa %2). Al pasar el ratón por la pestaña "
+                             "aparece una papelera para eliminar el esquema. Haciendo %3 se accede a las dos opciones "
                              "anteriores y a la de duplicar.")
-                  .arg(key(QStringLiteral("doble clic")), key(QStringLiteral("F2")), key(QStringLiteral("clic derecho"))),
+                  .arg(key(Tr::tr("doble clic")), key(QStringLiteral("F2")), key(Tr::tr("clic derecho"))),
               {}, { T::FirstTabName } },
 
-            { QStringLiteral("Nuevo esquema"),
-              QStringLiteral("Este botón añade un esquema vacío al proyecto (también con %1).")
+            { Tr::tr("Nuevo esquema"),
+              Tr::tr("Este botón añade un esquema vacío al proyecto (también con %1).")
                   .arg(key(QStringLiteral("Ctrl+T"))),
               {}, { T::AddTab } },
 
-            { QStringLiteral("El esquema conjunto"),
-              QStringLiteral("Reúne varios esquemas, uno al lado de otro, para relacionarlos: en él puedes conectar o "
+            { Tr::tr("El esquema conjunto"),
+              Tr::tr("Reúne varios esquemas, uno al lado de otro, para relacionarlos: en él puedes conectar o "
                              "fusionar cajas de esquemas distintos. Cada esquema entra como una copia, así que los "
                              "cambios que hagas aquí no afectan a los originales. Ábrelo con %1 o haciendo %2 fuera de la miniatura.")
                     .arg(key(QStringLiteral("Ctrl+J")))
-                    .arg(key(QStringLiteral("clic en su pestaña"))),
+                    .arg(key(Tr::tr("clic en su pestaña"))),
               {}, { T::JointTab } },
 
-            { QStringLiteral("Administra el esquema conjunto"),
-              QStringLiteral("En el esquema conjunto, haz clic derecho en el fondo › <b>Administrar esquemas</b>: "
+            { Tr::tr("Administra el esquema conjunto"),
+              Tr::tr("En el esquema conjunto, haz clic derecho en el fondo › <b>Administrar esquemas</b>: "
                              "con <b>+</b> añades un esquema y con la papelera lo quitas. Sobre una caja, "
                              "<b>Mover bloque</b>, <b>Mover esquema</b> y <b>Quitar bloque</b> lo recolocan o sacan sus piezas. Pruébalo: "
                              "añade el «Esquema 2»."),
               picture("joint_manage"), { T::JointTab, T::Canvas }, View::Joint },
 
-            { QStringLiteral("Menos cruces, más claridad"),
-              QStringLiteral("<b>Minimizar cruces</b> reordena las cajas para que las líneas se crucen lo menos "
+            { Tr::tr("Menos cruces, más claridad"),
+              Tr::tr("<b>Minimizar cruces</b> reordena las cajas para que las líneas se crucen lo menos "
                              "posible. El rayo es el modo rápido; la tortuga, uno más lento y exhaustivo que puedes "
                              "pausar. Arrastra el panel por su asa para apartarlo."),
               {}, { T::MinimizePanel } },
 
-            { QStringLiteral("Deshaz, guarda y comparte"),
-              QStringLiteral("Cualquier cambio en un esquema se deshace con %1 y se rehace con %2 (menú <b>Editar</b>). "
+            { Tr::tr("Deshaz, guarda y comparte"),
+              Tr::tr("Cualquier cambio en un esquema se deshace con %1 y se rehace con %2 (menú <b>Editar</b>). "
                              "Los cambios del proyecto (añadir, duplicar o eliminar un esquema, cambiar los ajustes) "
                              "tienen su propio %5 y %6, en el menú <b>Proyecto</b>. Guarda el proyecto con %3 y "
                              "exporta tus esquemas como PDF o imágenes con %4 (menú <b>Archivo</b>).")
@@ -163,8 +165,8 @@ namespace ui::tutorial {
                       key(QStringLiteral("Ctrl+Alt+Z")), key(QStringLiteral("Ctrl+Alt+Y"))),
               {}, { T::FileMenu, T::EditMenu, T::ProjectMenu } },
 
-            { QStringLiteral("Ajusta tu proyecto"),
-              QStringLiteral("En <b>Proyecto › Ajustes del proyecto…</b> (%1) eliges cómo empiezan las cajas y las "
+            { Tr::tr("Ajusta tu proyecto"),
+              Tr::tr("En <b>Proyecto › Ajustes del proyecto…</b> (%1) eliges cómo empiezan las cajas y las "
                              "equivalencias nuevas, el tamaño por defecto de cada forma y las distancias del dibujo. "
                              "Arrastra el punto de cada distancia y un pequeño ejemplo se redibuja con ella; "
                              "las formas se comparan una al lado de otra y se ajustan arrastrando sus bordes. "
@@ -172,8 +174,8 @@ namespace ui::tutorial {
                   .arg(key(QStringLiteral("Ctrl+Alt+S"))),
               picture("project_settings"), { T::ProjectMenu } },
 
-            { QStringLiteral("¡Listo para empezar!"),
-              QStringLiteral("En <b>Ayuda</b> tienes todos los atajos de teclado y puedes repetir este recorrido "
+            { Tr::tr("¡Listo para empezar!"),
+              Tr::tr("En <b>Ayuda</b> tienes todos los atajos de teclado y puedes repetir este recorrido "
                              "cuando quieras. Al terminar se cierra el proyecto de ejemplo y vuelves a tu proyecto "
                              "(o a uno nuevo)."),
               {}, { T::HelpMenu } },
@@ -188,10 +190,10 @@ namespace ui::tutorial {
         {
             // Built, then saved and loaded back: what building it did is then
             // not in its history (nothing to undo, nothing unsaved).
-            Project project("Proyecto de ejemplo");
+            Project project(Tr::tr("Proyecto de ejemplo").toStdString());
             {
                 auto& ed = project.getEditor(0);
-                ed.setName("Esquema 1");
+                ed.setName(Tr::tr("Esquema %1").arg(1).toStdString());
                 auto n1 = ed.createNode(NodeAttributes("1"), 0, -1, nullptr);
                 auto n2 = ed.createNode(NodeAttributes("2"), 1, -1, n1);
                 auto n3 = ed.createNode(NodeAttributes("3"), 1, -1, n1);
@@ -203,7 +205,7 @@ namespace ui::tutorial {
             project.addDiagram();
             {
                 auto& ed = project.getEditor(1);
-                ed.setName("Esquema 2");
+                ed.setName(Tr::tr("Esquema %1").arg(2).toStdString());
                 auto n7 = ed.createNode(NodeAttributes("7"), 0, -1, nullptr);
                 ed.createNode(NodeAttributes("8"), 1, -1, n7);
                 ed.createNode(NodeAttributes("9"), 1, -1, n7);
@@ -350,7 +352,7 @@ QPushButton#skip:hover { color: #4F46E5; }
         counter_->setObjectName("counter");
         head->addWidget(counter_);
         head->addStretch();
-        auto* skip = new QPushButton(QStringLiteral("Saltar tutorial"), card_);
+        auto* skip = new QPushButton(Tr::tr("Saltar tutorial"), card_);
         skip->setObjectName("skip");
         skip->setCursor(Qt::PointingHandCursor);
         skip->setFocusPolicy(Qt::NoFocus);
@@ -376,8 +378,14 @@ QPushButton#skip:hover { color: #4F46E5; }
 
         auto* buttons = new QHBoxLayout;
         buttons->setSpacing(8);
+        // The language, on the first step: whoever does not read it can
+        // change it before going on.
+        auto* language = new LanguageButton(card_);
+        connect(language, &LanguageButton::languageChosen, this, &TutorialOverlay::languageChosen);
+        language_ = language;
+        buttons->addWidget(language_);
         buttons->addStretch();
-        prev_ = new QPushButton(QStringLiteral("‹  Anterior"), card_);
+        prev_ = new QPushButton(Tr::tr("‹  Anterior"), card_);
         prev_->setObjectName("secondary");
         next_ = new QPushButton(card_);
         next_->setObjectName("primary");
@@ -483,7 +491,7 @@ QPushButton#skip:hover { color: #4F46E5; }
 
         // ── The card ──────────────────────────────────────────────────────────
         static_cast<Progress*>(progress_)->setFraction((current_ + 1) / static_cast<double>(n));
-        counter_->setText(QStringLiteral("%1 de %2").arg(current_ + 1).arg(n));
+        counter_->setText(Tr::tr("%1 de %2").arg(current_ + 1).arg(n));
         title_->setText(step.title);
         text_->setText(step.text);
         const QPixmap source = step.image.isEmpty() ? QPixmap() : QPixmap(step.image);
@@ -495,7 +503,8 @@ QPushButton#skip:hover { color: #4F46E5; }
             picture_->setPixmap(roundedPicture(source, CARD_WIDTH - 2 * CARD_PADDING, max_height, devicePixelRatioF()));
         }
         prev_->setEnabled(current_ > 0);
-        next_->setText(current_ + 1 < n ? QStringLiteral("Siguiente  ›") : QStringLiteral("Terminar"));
+        language_->setVisible(current_ == 0);
+        next_->setText(current_ + 1 < n ? Tr::tr("Siguiente  ›") : Tr::tr("Terminar"));
         // The wrapped labels need their height for the card's width.
         card_->layout()->activate();
         card_->resize(CARD_WIDTH, card_->layout()->totalHeightForWidth(CARD_WIDTH));

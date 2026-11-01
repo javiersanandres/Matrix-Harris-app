@@ -4,6 +4,7 @@
 #include <map>
 #include <set>
 #include <tuple>
+#include "Text.h"
 
 namespace hypergraph_logic {
 	// The layer the depth rule gives node on its own: one below its deepest parent.
@@ -312,11 +313,11 @@ namespace hypergraph_logic {
 
 	NodePtr Hypergraph::createNode(const NodeAttributes& attributes, int layer, int layer_position, const NodePtr& parent, std::set<int>* out_altered_layers) {
 		if (layer < -1) {
-			throw std::invalid_argument("El nivel indicado no es válido.");
+			throw std::invalid_argument(text(LogicText::tr("El nivel indicado no es válido.")));
 		}
 		const int depth_rule_layer = parent ? parent->getLayer() + 1 : 0;
 		if (parent && layer < depth_rule_layer) {
-			throw std::logic_error("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.");
+			throw std::logic_error(text(LogicText::tr("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.")));
 		}
 
 		NodePtr node = std::make_shared<Node>(attributes);
@@ -367,7 +368,7 @@ namespace hypergraph_logic {
 
 	NodePtr Hypergraph::createParent(const NodeAttributes& attributes, const NodePtr& child, std::set<int>* out_altered_layers) {
 		if (!child) {
-			throw std::invalid_argument("La caja hija no puede ser nula al crear una caja padre.");
+			throw std::invalid_argument(text(LogicText::tr("La caja hija no puede ser nula al crear una caja padre.")));
 		}
 		NodePtr node = std::make_shared<Node>(attributes);
 		all_nodes_.push_back(node);
@@ -548,7 +549,7 @@ namespace hypergraph_logic {
 	HyperedgePtr Hypergraph::addConnection(const NodePtr& parent, const NodePtr& child, std::set<int>* out_altered_layers) {
 		if (!child || !parent) return nullptr;
 		if (child == parent) {
-			throw std::invalid_argument("Una caja no puede conectarse consigo misma.");
+			throw std::invalid_argument(text(LogicText::tr("Una caja no puede conectarse consigo misma.")));
 		}
 
 		// Check for possible regroupings, that is, the parent and child are 
@@ -584,7 +585,7 @@ namespace hypergraph_logic {
 
 				if (remaining_sources.empty() && remaining_targets.empty()) {
 					// Nothing to do, the connection already exists in the diagram
-					throw std::logic_error("Esta conexión ya existe en el esquema.");
+					throw std::logic_error(text(LogicText::tr("Esta conexión ya existe en el esquema.")));
 				}
 				else if (remaining_sources.empty()) {
 					// Remove target from edge and create a new one that links parent and child
@@ -613,7 +614,7 @@ namespace hypergraph_logic {
 
 		//  Check for redundancy connections (the child already has this parent in its ancestry)
 		if (parentIsInAncestors({ child }, parent)) {
-			throw std::logic_error("Esta conexión ya existe en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Esta conexión ya existe en el esquema.")));
 		}
 		// Temporarily add the connection and check for cycles
 		child->addParent(parent);
@@ -624,7 +625,7 @@ namespace hypergraph_logic {
 			child->removeParent(parent);
 			parent->removeChild(child);
 
-			throw std::logic_error("Añadir esta conexión crearía un ciclo en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Añadir esta conexión crearía un ciclo en el esquema.")));
 		}
 
 		// Now, after we know that no cycles are added, we can safely add the connection.
@@ -693,11 +694,11 @@ namespace hypergraph_logic {
 		const auto targets = edge->getTargets();
 		for (const auto& t : targets) {
 			if (t == source) {
-				throw std::logic_error("Una caja no puede conectarse consigo misma.");
+				throw std::logic_error(text(LogicText::tr("Una caja no puede conectarse consigo misma.")));
 			}
 		}
 		if (edge->containsSource(source)) {
-			throw std::logic_error("La caja ya está por encima en esta conexión.");
+			throw std::logic_error(text(LogicText::tr("La caja ya está por encima en esta conexión.")));
 		}
 
 		// Even though some connections might be redundant, they can also encode an intention
@@ -719,7 +720,7 @@ namespace hypergraph_logic {
 		}
 
 		if (affected_edges.empty() && parentIsInAncestors(targets, source)) {
-			throw std::logic_error("Esta conexión ya existe en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Esta conexión ya existe en el esquema.")));
 		}
 
 		// Temporarily add the source and check for cycles
@@ -738,7 +739,7 @@ namespace hypergraph_logic {
 					t->removeParent(source);
 				}
 			}
-			throw std::logic_error("Añadir esta conexión crearía un ciclo en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Añadir esta conexión crearía un ciclo en el esquema.")));
 		}
 
 		// Tracks the shallowest layer touched by any node placement (new dummies, relocations)
@@ -840,14 +841,14 @@ namespace hypergraph_logic {
 		int parents_layer = 0;
 		for (const auto& s : sources) {
 			if (s == target) {
-				throw std::logic_error("Una caja no puede conectarse consigo misma.");
+				throw std::logic_error(text(LogicText::tr("Una caja no puede conectarse consigo misma.")));
 			}
 			if (s->getLayer() > parents_layer) {
 				parents_layer = s->getLayer();
 			}
 		}
 		if (edge->containsTarget(target)) {
-			throw std::logic_error("La caja ya está por debajo en esta conexión.");
+			throw std::logic_error(text(LogicText::tr("La caja ya está por debajo en esta conexión.")));
 		}
 
 		// Even though some connections might be redundant, they can also encode an
@@ -869,7 +870,7 @@ namespace hypergraph_logic {
 		}
 
 		if (affected_edges.empty() && childIsInDescendants(sources, target)) {
-			throw std::logic_error("Esta conexión ya existe en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Esta conexión ya existe en el esquema.")));
 		}
 
 		// Temporarily add the target and check for cycles
@@ -893,7 +894,7 @@ namespace hypergraph_logic {
 					target->removeParent(s);
 				}
 			}
-			throw std::logic_error("Añadir esta conexión crearía un ciclo en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Añadir esta conexión crearía un ciclo en el esquema.")));
 		}
 
 		// Tracks the shallowest layer touched by any node placement across this whole operation.
@@ -1076,7 +1077,7 @@ namespace hypergraph_logic {
 		}
 
 		if (!is_parent) {
-			throw std::logic_error("La conexión indicada no existe en el esquema.");
+			throw std::logic_error(text(LogicText::tr("La conexión indicada no existe en el esquema.")));
 		}
 
 		// Snapshot before modifying
@@ -1127,7 +1128,7 @@ namespace hypergraph_logic {
 
 		for (Node* s : sources_to_remove) {
 			if (!original_edge->containsSource(s->shared_from_this())) {
-				throw std::logic_error("La conexión indicada no existe en el esquema.");
+				throw std::logic_error(text(LogicText::tr("La conexión indicada no existe en el esquema.")));
 			}
 		}
 
@@ -1264,7 +1265,7 @@ namespace hypergraph_logic {
 
 		for (Node* t : targets_to_remove) {
 			if (!original_edge->containsTarget(t->shared_from_this())) {
-				throw std::logic_error("La conexión indicada no existe en el esquema.");
+				throw std::logic_error(text(LogicText::tr("La conexión indicada no existe en el esquema.")));
 			}
 		}
 
@@ -1402,7 +1403,7 @@ namespace hypergraph_logic {
 	void Hypergraph::fuseNodes(const NodePtr& node1, const NodePtr& node2, const NodeAttributes& new_attributes, std::set<int>* out_altered_layers) {
 		if (!node1 || !node2) return;
 		if (node1 == node2) {
-			throw std::invalid_argument("Una caja no puede fusionarse consigo misma.");
+			throw std::invalid_argument(text(LogicText::tr("Una caja no puede fusionarse consigo misma.")));
 		}
 
 		// Always keep the shallower node as the surviving object, and absorb the deeper one.
@@ -1415,7 +1416,7 @@ namespace hypergraph_logic {
 		const int chain1 = chainIndexOf(node1.get());
 		if ((chain1 < 0 || chain1 != chainIndexOf(node2.get())) &&
 			(classReaches(node1.get(), node2.get()) || classReaches(node2.get(), node1.get()))) {
-			throw std::logic_error("Fusionar estas cajas crearía un ciclo en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Fusionar estas cajas crearía un ciclo en el esquema.")));
 		}
 
 		// Store the previous configuration of the nodes to be able to rollback in case of cycle creation.
@@ -1468,7 +1469,7 @@ namespace hypergraph_logic {
 					c->addParent(absorbed);
 				}
 			}
-			throw std::logic_error("Fusionar estas cajas crearía un ciclo en el esquema.");
+			throw std::logic_error(text(LogicText::tr("Fusionar estas cajas crearía un ciclo en el esquema.")));
 		}
 
 		// Now we know that no cycles are added, we can safely fuse the nodes.
@@ -1658,12 +1659,12 @@ namespace hypergraph_logic {
 			// and place the node in it. All layer numbers need to be incremented by 1.
 
 			if (!no_parents) {
-				throw std::logic_error("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.");
+				throw std::logic_error(text(LogicText::tr("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.")));
 			}
 
 			if (onlyTheChainIn(0)) {
 				// Moving the node could potentially cause a gap, so we do not allow it.
-				throw std::logic_error("La caja ya está en el nivel más alto.");
+				throw std::logic_error(text(LogicText::tr("La caja ya está en el nivel más alto.")));
 			}
 
 			// Shift all layer numbers by 1.
@@ -1683,7 +1684,7 @@ namespace hypergraph_logic {
 
 			if (no_parents && onlyTheChainIn(last_layer)) {
 				// Moving the node could potentially originate a gap, so we do not allow it.
-				throw std::logic_error("La caja ya está en el nivel más bajo.");
+				throw std::logic_error(text(LogicText::tr("La caja ya está en el nivel más bajo.")));
 			}
 
 			node->setDesiredLayer(last_layer + 1);
@@ -1693,13 +1694,13 @@ namespace hypergraph_logic {
 		else {
 			if (desired_layer < depth_rule_layer) {
 				throw std::logic_error(members.size() > 1
-					? "Las cajas equivalentes no pueden quedar al mismo nivel ni por encima de una caja de la que cuelgue alguna."
-					: "La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.");
+					? text(LogicText::tr("Las cajas equivalentes no pueden quedar al mismo nivel ni por encima de una caja de la que cuelgue alguna."))
+					: text(LogicText::tr("La caja no puede quedar al mismo nivel ni por encima de una caja de la que cuelga.")));
 			}
 
 			// Checked before touching anything, so a refused move leaves the node as it was.
 			if (desired_layer == node->getLayer()) {
-				throw std::invalid_argument("La caja ya está en ese nivel.");
+				throw std::invalid_argument(text(LogicText::tr("La caja ya está en ese nivel.")));
 			}
 
 			node->setDesiredLayer(desired_layer == depth_rule_layer ? -1 : desired_layer);

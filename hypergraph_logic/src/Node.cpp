@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cmath>
 #include <stdexcept>
+#include "Text.h"
 
 namespace hypergraph_logic {
 
@@ -115,7 +116,7 @@ namespace hypergraph_logic {
 
 	void Node::setAttributes(NodeAttributes attributes) {
 		if (isDummy()) {
-			throw std::logic_error("No se pueden asignar atributos a una caja auxiliar.");
+			throw std::logic_error(text(LogicText::tr("No se pueden asignar atributos a una caja auxiliar.")));
 		}
 		attributes_ = std::move(attributes);
 	}
@@ -126,7 +127,7 @@ namespace hypergraph_logic {
 
 	void Node::setName(const std::string& name) {
 		if (isDummy()) {
-			throw std::logic_error("No se puede renombrar una caja auxiliar.");
+			throw std::logic_error(text(LogicText::tr("No se puede renombrar una caja auxiliar.")));
 		}
 		attributes_->name = name;
 	}

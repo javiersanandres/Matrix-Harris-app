@@ -13,6 +13,7 @@ namespace ui {
 
     namespace {
         const QString FLAGS_KEY = QStringLiteral("help/flaggedEntries");
+        const QString TITLE_KEY = QStringLiteral("help/flaggedTitle");
     }
 
     // ============================================================================
@@ -72,11 +73,18 @@ namespace ui {
     {
         QSettings settings;
         flagged_ = storedFlags(settings);
+        title_flagged_ = storedTitleFlag(settings);
 
         bar_->installEventFilter(this);
         menu_->installEventFilter(this);
-        connect(menu_, &QMenu::aboutToShow, this, [this] { bar_dot_->hide(); });
-        connect(menu_, &QMenu::aboutToHide, this, [this] { clear(); });
+        // Opening the menu is seeing its title's news; each entry keeps its
+        // own until it is chosen.
+        connect(menu_, &QMenu::aboutToShow, this, [this] {
+            bar_dot_->hide();
+            if (!title_flagged_) return;
+            title_flagged_ = false;
+            save();
+        });
     }
 
     QStringList HelpNotifier::storedFlags(QSettings& settings) {
@@ -88,27 +96,40 @@ namespace ui {
         else                settings.setValue(FLAGS_KEY, keys);
     }
 
+    bool HelpNotifier::storedTitleFlag(QSettings& settings) {
+        // Settings from before the title had its own flag: it had one
+        // whenever an entry had.
+        if (!settings.contains(TITLE_KEY)) return !storedFlags(settings).isEmpty();
+        return settings.value(TITLE_KEY).toBool();
+    }
+
+    void HelpNotifier::storeTitleFlag(QSettings& settings, bool flagged) {
+        settings.setValue(TITLE_KEY, flagged);
+    }
+
     void HelpNotifier::addEntry(const QString& key, QAction* action) {
         entries_[key] = action;
+        connect(action, &QAction::triggered, this, [this, key] { unflag(key); });
         placeBarDot();
     }
 
     void HelpNotifier::flag(const QString& key) {
         if (!flagged_.contains(key)) flagged_.append(key);
+        title_flagged_ = true;
         save();
         placeBarDot();
+    }
+
+    void HelpNotifier::unflag(const QString& key) {
+        if (auto it = entry_dots_.find(key); it != entry_dots_.end()) it->second->hide();
+        if (!flagged_.removeAll(key)) return;
+        save();
     }
 
     void HelpNotifier::save() const {
         QSettings settings;
         storeFlags(settings, flagged_);
-    }
-
-    void HelpNotifier::clear() {
-        for (auto& [key, dot] : entry_dots_) dot->hide();
-        if (flagged_.isEmpty()) return;
-        flagged_.clear();
-        save();
+        storeTitleFlag(settings, title_flagged_);
     }
 
     void HelpNotifier::placeBarDot() {
@@ -116,7 +137,7 @@ namespace ui {
         // longer exists).
         bool any = false;
         for (const QString& key : flagged_) any = any || entries_.count(key);
-        if (!any || menu_->isVisible()) {
+        if (!any || !title_flagged_ || menu_->isVisible()) {
             bar_dot_->hide();
             return;
         }

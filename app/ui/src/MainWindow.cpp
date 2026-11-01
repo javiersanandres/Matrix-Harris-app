@@ -1,4 +1,5 @@
 #include "MainWindow.h"
+#include "Translation.h"
 #include "AppDialogs.h"
 #include "NodeDialogs.h"
 #include "NodeVisuals.h"
@@ -14,6 +15,8 @@
 #include "Tutorial.h"
 #include "PieceClipboard.h"
 #include "ProjectSettingsDialog.h"
+#include "LanguageButton.h"
+#include "NativeWindow.h"
 
 #include <QApplication>
 #include <QButtonGroup>
@@ -41,6 +44,8 @@
 #include <QSettings>
 #include <QStatusBar>
 #include <QTimer>
+#include <QWindow>
+#include <QElapsedTimer>
 #include <QVBoxLayout>
 #include <QWidget>
 
@@ -52,7 +57,7 @@ namespace ui {
     namespace {
         constexpr int MAX_RECENT_PROJECTS = 8;
         const char* const RECENT_KEY = "recentProjects";
-        const char* const PROJECT_FILTER = "Proyectos de Taller Matrix Harris (*.json)";
+        QString projectFilter() { return Tr::tr("Proyectos de Taller Matrix Harris (*.json)"); }
 
         // "1 caja" / "3 cajas".
         QString count(qsizetype n, const QString& one, const QString& many) {
@@ -65,13 +70,18 @@ namespace ui {
     // ============================================================================
 
     MainWindow::MainWindow(QWidget* parent)
-        : MainWindow(Project("Nuevo proyecto", app_defaults::load()), parent)
+        : MainWindow(Project(Tr::tr("Nuevo proyecto").toStdString(), app_defaults::load()), parent)
     {
     }
 
     MainWindow::MainWindow(Project&& project, QWidget* parent)
+        : MainWindow(std::make_unique<Project>(std::move(project)), parent)
+    {
+    }
+
+    MainWindow::MainWindow(std::unique_ptr<Project> project, QWidget* parent)
         : QMainWindow(parent)
-        , project_(std::make_unique<Project>(std::move(project)))
+        , project_(std::move(project))
     {
         setAcceptDrops(true);
         setupMenuBar();
@@ -79,6 +89,18 @@ namespace ui {
         setupStatusBar();
         buildFromProject();
         updateWindowTitle();
+    }
+
+    MainWindow::~MainWindow() {
+        // The scenes show the project's editors: they go first (children are
+        // deleted after the members). A window that handed its project over
+        // (see switchLanguage) has nothing left to tell its tabs.
+        tab_bar_->blockSignals(true);
+        central_view_->setScene(nullptr);
+        for (auto* s : scenes_) delete s;
+        scenes_.clear();
+        delete joint_scene_;
+        joint_scene_ = nullptr;
     }
 
     // ============================================================================
@@ -108,97 +130,97 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         };
 
         // ── Archivo ──────────────────────────────────────────────────────────────
-        QMenu* archivo = addMenu(QStringLiteral("Archivo"));
-        add(archivo, QStringLiteral("Nuevo proyecto"), QKeySequence::New, this, &MainWindow::onNuevoProyecto);
-        add(archivo, QStringLiteral("Abrir proyecto…"), QKeySequence::Open, this, &MainWindow::onAbrirProyecto);
+        QMenu* archivo = addMenu(Tr::tr("Archivo"));
+        add(archivo, Tr::tr("Nuevo proyecto"), QKeySequence::New, this, &MainWindow::onNuevoProyecto);
+        add(archivo, Tr::tr("Abrir proyecto…"), QKeySequence::Open, this, &MainWindow::onAbrirProyecto);
         recent_menu_ = style::createMenu(archivo);
-        recent_menu_->setTitle(QStringLiteral("Abrir reciente"));
+        recent_menu_->setTitle(Tr::tr("Abrir reciente"));
         recent_menu_->setToolTipsVisible(true);
         archivo->addMenu(recent_menu_);
         connect(recent_menu_, &QMenu::aboutToShow, this, &MainWindow::rebuildRecentMenu);
         archivo->addSeparator();
-        add(archivo, QStringLiteral("Guardar"), QKeySequence::Save, this, &MainWindow::onGuardarProyecto);
-        add(archivo, QStringLiteral("Guardar como…"), QKeySequence(QStringLiteral("Ctrl+Shift+S")),
+        add(archivo, Tr::tr("Guardar"), QKeySequence::Save, this, &MainWindow::onGuardarProyecto);
+        add(archivo, Tr::tr("Guardar como…"), QKeySequence(QStringLiteral("Ctrl+Shift+S")),
             this, &MainWindow::onGuardarComo);
         archivo->addSeparator();
-        add(archivo, QStringLiteral("Exportar esquema como imagen…"), QKeySequence(QStringLiteral("Ctrl+E")),
+        add(archivo, Tr::tr("Exportar esquema como imagen…"), QKeySequence(QStringLiteral("Ctrl+E")),
             this, &MainWindow::onExportarImagen);
-        add(archivo, QStringLiteral("Exportar proyecto…"), QKeySequence(QStringLiteral("Ctrl+Shift+E")),
+        add(archivo, Tr::tr("Exportar proyecto…"), QKeySequence(QStringLiteral("Ctrl+Shift+E")),
             this, &MainWindow::onExportarProyecto);
         archivo->addSeparator();
-        add(archivo, QStringLiteral("Salir"), QKeySequence(QStringLiteral("Ctrl+Q")), this, &MainWindow::onSalir);
+        add(archivo, Tr::tr("Salir"), QKeySequence(QStringLiteral("Ctrl+Q")), this, &MainWindow::onSalir);
 
         // ── Editar ────────────────────────────────────────────────────────────────
-        QMenu* editar = addMenu(QStringLiteral("Editar"));
-        action_deshacer_ = add(editar, QStringLiteral("Deshacer"), QKeySequence::Undo, this, &MainWindow::onDeshacer);
+        QMenu* editar = addMenu(Tr::tr("Editar"));
+        action_deshacer_ = add(editar, Tr::tr("Deshacer"), QKeySequence::Undo, this, &MainWindow::onDeshacer);
         action_deshacer_->setEnabled(false);
-        action_rehacer_ = add(editar, QStringLiteral("Rehacer"), QKeySequence(QStringLiteral("Ctrl+Y")),
+        action_rehacer_ = add(editar, Tr::tr("Rehacer"), QKeySequence(QStringLiteral("Ctrl+Y")),
             this, &MainWindow::onRehacer);
         action_rehacer_->setShortcuts({ QKeySequence(QStringLiteral("Ctrl+Y")), QKeySequence(QStringLiteral("Ctrl+Shift+Z")) });
         action_rehacer_->setEnabled(false);
         editar->addSeparator();
-        QAction* copiar = add(editar, QStringLiteral("Copiar"), QKeySequence::Copy, this, &MainWindow::onCopiar);
+        QAction* copiar = add(editar, Tr::tr("Copiar"), QKeySequence::Copy, this, &MainWindow::onCopiar);
         copiar->setIcon(style::icon(style::Icon::Copy));
-        copiar->setToolTip(QStringLiteral("Copia el bloque que está bajo el ratón, o el esquema entero"));
-        action_pegar_ = add(editar, QStringLiteral("Pegar"), QKeySequence::Paste, this, &MainWindow::onPegar);
+        copiar->setToolTip(Tr::tr("Copia el bloque que está bajo el ratón, o el esquema entero"));
+        action_pegar_ = add(editar, Tr::tr("Pegar"), QKeySequence::Paste, this, &MainWindow::onPegar);
         action_pegar_->setIcon(style::icon(style::Icon::Paste));
-        action_pegar_->setToolTip(QStringLiteral("Pega lo copiado donde está el ratón"));
+        action_pegar_->setToolTip(Tr::tr("Pega lo copiado donde está el ratón"));
         action_pegar_->setEnabled(false);
         // Also when something is copied in another window or program.
         connect(QGuiApplication::clipboard(), &QClipboard::dataChanged, this, &MainWindow::updatePasteAction);
 
         // ── Ver ───────────────────────────────────────────────────────────────────
-        QMenu* ver = addMenu(QStringLiteral("Ver"));
-        QAction* acercar = add(ver, QStringLiteral("Acercar"), QKeySequence::ZoomIn, this, &MainWindow::onAcercar);
+        QMenu* ver = addMenu(Tr::tr("Ver"));
+        QAction* acercar = add(ver, Tr::tr("Acercar"), QKeySequence::ZoomIn, this, &MainWindow::onAcercar);
         acercar->setShortcuts({ QKeySequence(QStringLiteral("Ctrl++")), QKeySequence(QStringLiteral("Ctrl+=")) });
-        add(ver, QStringLiteral("Alejar"), QKeySequence::ZoomOut, this, &MainWindow::onAlejar);
-        add(ver, QStringLiteral("Ajustar a la ventana"), QKeySequence(QStringLiteral("Ctrl+0")),
+        add(ver, Tr::tr("Alejar"), QKeySequence::ZoomOut, this, &MainWindow::onAlejar);
+        add(ver, Tr::tr("Ajustar a la ventana"), QKeySequence(QStringLiteral("Ctrl+0")),
             this, &MainWindow::onAjustarVentana);
-        add(ver, QStringLiteral("Tamaño real (100 %)"), QKeySequence(QStringLiteral("Ctrl+1")),
+        add(ver, Tr::tr("Tamaño real (100 %)"), QKeySequence(QStringLiteral("Ctrl+1")),
             this, &MainWindow::onTamanoReal);
         ver->addSeparator();
-        action_panel_ = ver->addAction(QStringLiteral("Panel «Minimizar cruces»"));
+        action_panel_ = ver->addAction(Tr::tr("Panel «Minimizar cruces»"));
         action_panel_->setCheckable(true);
         action_panel_->setChecked(true);
         connect(action_panel_, &QAction::toggled, this, [this](bool on) { minimize_panel_->setVisible(on); });
-        QAction* barra = ver->addAction(QStringLiteral("Barra de estado"));
+        QAction* barra = ver->addAction(Tr::tr("Barra de estado"));
         barra->setCheckable(true);
         barra->setChecked(true);
         connect(barra, &QAction::toggled, this, [this](bool on) { statusBar()->setVisible(on); });
         ver->addSeparator();
-        action_pantalla_completa_ = ver->addAction(QStringLiteral("Pantalla completa"));
+        action_pantalla_completa_ = ver->addAction(Tr::tr("Pantalla completa"));
         action_pantalla_completa_->setShortcut(QKeySequence(QStringLiteral("F11")));
         action_pantalla_completa_->setCheckable(true);
         connect(action_pantalla_completa_, &QAction::toggled, this, &MainWindow::onPantallaCompleta);
 
         // ── Esquema ───────────────────────────────────────────────────────────────
-        QMenu* esquema = addMenu(QStringLiteral("Esquema"));
-        QAction* nuevo = add(esquema, QStringLiteral("Nuevo esquema"), QKeySequence(QStringLiteral("Ctrl+T")),
+        QMenu* esquema = addMenu(Tr::tr("Esquema"));
+        QAction* nuevo = add(esquema, Tr::tr("Nuevo esquema"), QKeySequence(QStringLiteral("Ctrl+T")),
             this, &MainWindow::onNuevoDiagrama);
         nuevo->setIcon(style::icon(style::Icon::NewBox));
-        action_renombrar_ = add(esquema, QStringLiteral("Renombrar esquema"), QKeySequence(QStringLiteral("F2")),
+        action_renombrar_ = add(esquema, Tr::tr("Renombrar esquema"), QKeySequence(QStringLiteral("F2")),
             this, &MainWindow::onRenombrarEsquema);
-        action_eliminar_esquema_ = add(esquema, QStringLiteral("Eliminar esquema"), QKeySequence(),
+        action_eliminar_esquema_ = add(esquema, Tr::tr("Eliminar esquema"), QKeySequence(),
             this, &MainWindow::onEliminarEsquemaActivo);
         action_eliminar_esquema_->setIcon(style::icon(style::Icon::RemoveBox));
-        action_duplicar_esquema_ = add(esquema, QStringLiteral("Duplicar esquema"), QKeySequence(QStringLiteral("Ctrl+D")),
+        action_duplicar_esquema_ = add(esquema, Tr::tr("Duplicar esquema"), QKeySequence(QStringLiteral("Ctrl+D")),
             this, [this] { duplicateDiagram(project_->getActiveIndex()); });
         action_duplicar_esquema_->setIcon(style::icon(style::Icon::Duplicate));
         esquema->addSeparator();
-        add(esquema, QStringLiteral("Esquema siguiente"), QKeySequence(QStringLiteral("Ctrl+Tab")),
+        add(esquema, Tr::tr("Esquema siguiente"), QKeySequence(QStringLiteral("Ctrl+Tab")),
             this, &MainWindow::onEsquemaSiguiente);
-        add(esquema, QStringLiteral("Esquema anterior"), QKeySequence(QStringLiteral("Ctrl+Shift+Tab")),
+        add(esquema, Tr::tr("Esquema anterior"), QKeySequence(QStringLiteral("Ctrl+Shift+Tab")),
             this, &MainWindow::onEsquemaAnterior);
-        QAction* conjunto = add(esquema, QStringLiteral("Ir al esquema conjunto"), QKeySequence(QStringLiteral("Ctrl+J")),
+        QAction* conjunto = add(esquema, Tr::tr("Ir al esquema conjunto"), QKeySequence(QStringLiteral("Ctrl+J")),
             this, &MainWindow::onJointTabClicked);
         conjunto->setIcon(style::icon(style::Icon::Joint));
         esquema->addSeparator();
-        add(esquema, QStringLiteral("Minimizar cruces"), QKeySequence(QStringLiteral("Ctrl+M")),
+        add(esquema, Tr::tr("Minimizar cruces"), QKeySequence(QStringLiteral("Ctrl+M")),
             this, &MainWindow::onMinimizeCrossings);
         auto* modes = new QActionGroup(this);
         // No icons here: the check mark is what shows the current mode.
-        action_menu_fast_ = esquema->addAction(QStringLiteral("Modo rápido"));
-        action_menu_slow_ = esquema->addAction(QStringLiteral("Modo lento"));
+        action_menu_fast_ = esquema->addAction(Tr::tr("Modo rápido"));
+        action_menu_slow_ = esquema->addAction(Tr::tr("Modo lento"));
         for (QAction* a : { action_menu_fast_, action_menu_slow_ }) {
             a->setCheckable(true);
             modes->addAction(a);
@@ -208,50 +230,61 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         connect(action_menu_slow_, &QAction::triggered, this, [this] { mode_slow_btn_->setChecked(true); });
 
         // ── Proyecto ──────────────────────────────────────────────────────────────
-        QMenu* proyecto = addMenu(QStringLiteral("Proyecto"));
-        action_deshacer_proyecto_ = add(proyecto, QStringLiteral("Deshacer"), QKeySequence(QStringLiteral("Ctrl+Alt+Z")),
+        QMenu* proyecto = addMenu(Tr::tr("Proyecto"));
+        action_deshacer_proyecto_ = add(proyecto, Tr::tr("Deshacer"), QKeySequence(QStringLiteral("Ctrl+Alt+Z")),
             this, [this] { onProjectHistory(true); });
         action_deshacer_proyecto_->setIcon(style::icon(style::Icon::ProjectUndo));
-        action_deshacer_proyecto_->setToolTip(QStringLiteral(
-            "Deshace el último cambio del proyecto: añadir, duplicar o eliminar un esquema, o cambiar los ajustes"));
-        action_rehacer_proyecto_ = add(proyecto, QStringLiteral("Rehacer"), QKeySequence(QStringLiteral("Ctrl+Alt+Y")),
+        action_deshacer_proyecto_->setToolTip(Tr::tr("Deshace el último cambio del proyecto: añadir, duplicar o eliminar un esquema, o cambiar los ajustes"));
+        action_rehacer_proyecto_ = add(proyecto, Tr::tr("Rehacer"), QKeySequence(QStringLiteral("Ctrl+Alt+Y")),
             this, [this] { onProjectHistory(false); });
-        action_rehacer_proyecto_->setToolTip(QStringLiteral("Rehace el último cambio del proyecto deshecho"));
+        action_rehacer_proyecto_->setToolTip(Tr::tr("Rehace el último cambio del proyecto deshecho"));
         action_deshacer_proyecto_->setEnabled(false);
         action_rehacer_proyecto_->setEnabled(false);
         proyecto->addSeparator();
-        QAction* ajustes = add(proyecto, QStringLiteral("Ajustes del proyecto…"), QKeySequence(QStringLiteral("Ctrl+Alt+S")),
+        QAction* ajustes = add(proyecto, Tr::tr("Ajustes del proyecto…"), QKeySequence(QStringLiteral("Ctrl+Alt+S")),
             this, &MainWindow::onAjustesProyecto);
         ajustes->setIcon(style::icon(style::Icon::Settings));
-        ajustes->setToolTip(QStringLiteral("Lo que este proyecto decide para todos sus esquemas: cajas nuevas, "
+        ajustes->setToolTip(Tr::tr("Lo que este proyecto decide para todos sus esquemas: cajas nuevas, "
                                            "equivalencias nuevas, distancias y tamaños por defecto"));
-        QAction* predeterminados = add(proyecto, QStringLiteral("Aplicar los ajustes predeterminados de la aplicación"),
+        QAction* predeterminados = add(proyecto, Tr::tr("Aplicar los ajustes predeterminados de la aplicación"),
             QKeySequence(), this, &MainWindow::onAplicarPredeterminados);
-        predeterminados->setToolTip(QStringLiteral("El proyecto toma los ajustes con los que empiezan los proyectos nuevos"));
+        predeterminados->setToolTip(Tr::tr("El proyecto toma los ajustes con los que empiezan los proyectos nuevos"));
 
         // ── Ayuda ─────────────────────────────────────────────────────────────────
-        QMenu* ayuda = addMenu(QStringLiteral("Ayuda"));
-        QAction* tutorial = add(ayuda, QStringLiteral("Tutorial de introducción"), QKeySequence(), this,
+        QMenu* ayuda = addMenu(Tr::tr("Ayuda"));
+        QAction* tutorial = add(ayuda, Tr::tr("Tutorial de introducción"), QKeySequence(), this,
             [this] { runTutorial(false); });
-        add(ayuda, QStringLiteral("Atajos y controles"), QKeySequence(QStringLiteral("F1")), this, &MainWindow::onAtajos);
-        add(ayuda, QStringLiteral("Ayuda de las opciones"), QKeySequence(), this,
+        add(ayuda, Tr::tr("Atajos y controles"), QKeySequence(QStringLiteral("F1")), this, &MainWindow::onAtajos);
+        add(ayuda, Tr::tr("Ayuda de las opciones"), QKeySequence(), this,
             [this] { help::showOptionsHelp(this); });
         ayuda->addSeparator();
-        QAction* install = add(ayuda, QStringLiteral("Cómo instalar Gurobi"), QKeySequence(), this,
+        QAction* install = add(ayuda, Tr::tr("Cómo instalar Gurobi"), QKeySequence(), this,
             [this] { gurobi::showGuide(gurobi::Guide::Install, this); });
-        QAction* license = add(ayuda, QStringLiteral("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
+        QAction* license = add(ayuda, Tr::tr("Cómo obtener una licencia de Gurobi"), QKeySequence(), this,
             [this] { gurobi::showGuide(gurobi::Guide::License, this); });
         ayuda->addSeparator();
         // Shown once there is something to check with (setUpdateChecker).
-        action_actualizaciones_ = add(ayuda, QStringLiteral("Buscar actualizaciones…"), QKeySequence(), this,
+        action_actualizaciones_ = add(ayuda, Tr::tr("Buscar actualizaciones…"), QKeySequence(), this,
             [this] { if (update_checker_) update_checker_(); });
         action_actualizaciones_->setVisible(false);
-        add(ayuda, QStringLiteral("Acerca de Taller Matrix Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
+        add(ayuda, Tr::tr("Acerca de Taller Matrix Harris"), QKeySequence(), this, &MainWindow::onAcercaDe);
 
         help_notifier_ = new HelpNotifier(menuBar(), ayuda, this);
         help_notifier_->addEntry(QStringLiteral("tutorial"), tutorial);
         help_notifier_->addEntry(QStringLiteral("gurobiInstall"), install);
         help_notifier_->addEntry(QStringLiteral("gurobiLicense"), license);
+
+        // ── Language ──────────────────────────────────────────────────────────
+        // Always in sight at the end of the menu bar, for whoever does not
+        // read the current language.
+        auto* corner = new QWidget(menuBar());
+        auto* corner_layout = new QHBoxLayout(corner);
+        corner_layout->setContentsMargins(0, 2, 8, 2);
+        auto* language = new LanguageButton(corner);
+        corner_layout->addWidget(language);
+        connect(language, &LanguageButton::languageChosen, this,
+            [this](i18n::Language chosen) { switchLanguage(chosen); });
+        menuBar()->setCornerWidget(corner, Qt::TopRightCorner);
     }
 
     // ============================================================================
@@ -269,8 +302,8 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
     void MainWindow::startTutorialIfFirstRun(bool force) {
         QSettings settings;
         if (!force && !tutorial::pendingAtStartup(settings)) return;
-        // A moment for the window to settle on screen first.
-        QTimer::singleShot(300, this, [this] { runTutorial(true); });
+        // As soon as the window is on screen.
+        QTimer::singleShot(0, this, [this] { runTutorial(true); });
     }
 
     void MainWindow::runTutorial(bool first_run) {
@@ -290,15 +323,30 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         }
         catch (const std::exception&) {
             // Without the example the tour still explains everything.
-            adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
+            adoptProject(std::make_unique<Project>(Tr::tr("Nuevo proyecto").toStdString(), app_defaults::load()));
         }
+        startTour({ first_run, own_file });
+    }
+
+    void MainWindow::startTour(const Tour& state) {
         tutorial_running_ = true;
+        const bool first_run = state.first_run;
+        const std::filesystem::path own_file = state.own_file;
 
         auto* tour = new tutorial::TutorialOverlay(this, tutorial::introSteps(),
             [this](tutorial::Target target) { return tutorialTarget(target); },
             [this](tutorial::View view) {
                 if (view == tutorial::View::Joint) switchToTab(-1);
                 else if (view == tutorial::View::FirstDiagram && project_->getDiagramCount() > 0) switchToTab(0);
+            });
+        connect(tour, &tutorial::TutorialOverlay::languageChosen, this,
+            [this, tour, first_run, own_file](i18n::Language language) {
+                // The example goes to the new window, where the tour starts
+                // again at once; the user's project comes back when it ends.
+                // This tour stays on screen until the new window covers it,
+                // and goes with this window.
+                tutorial_running_ = false;
+                switchLanguage(language, Tour{ first_run, own_file });
             });
         connect(tour, &tutorial::TutorialOverlay::finished, this, [this, first_run, own_file](bool completed) {
             tutorial_running_ = false;
@@ -324,13 +372,13 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
                 // Moved or broken meanwhile: a new project instead.
             }
         }
-        adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
+        adoptProject(std::make_unique<Project>(Tr::tr("Nuevo proyecto").toStdString(), app_defaults::load()));
     }
 
     bool MainWindow::refuseDuringTutorial() {
         if (!tutorial_running_) return false;
         statusBar()->showMessage(
-            QStringLiteral("Termina o salta el tutorial para cambiar de proyecto"), 4000);
+            Tr::tr("Termina o salta el tutorial para cambiar de proyecto"), 4000);
         return true;
     }
 
@@ -361,10 +409,10 @@ QMenuBar::item:pressed { background: #E2E4FF; color: #312E81; }
         case T::JointTab:          return area(tab_bar_->jointTab());
         case T::MinimizePanel:     return area(minimize_panel_);
         case T::ZoomLabel:         return area(zoom_label_);
-        case T::FileMenu:          return menuTitle(QStringLiteral("Archivo"));
-        case T::EditMenu:          return menuTitle(QStringLiteral("Editar"));
-        case T::ProjectMenu:       return menuTitle(QStringLiteral("Proyecto"));
-        case T::HelpMenu:          return menuTitle(QStringLiteral("Ayuda"));
+        case T::FileMenu:          return menuTitle(Tr::tr("Archivo"));
+        case T::EditMenu:          return menuTitle(Tr::tr("Editar"));
+        case T::ProjectMenu:       return menuTitle(Tr::tr("Proyecto"));
+        case T::HelpMenu:          return menuTitle(Tr::tr("Ayuda"));
         }
         return QRect();
     }
@@ -425,7 +473,7 @@ QStatusBar QLabel { color: #4B5068; padding: 1px 10px; }
         statusBar()->setSizeGripEnabled(false);
         stats_label_ = new QLabel(statusBar());
         zoom_label_ = new QLabel(statusBar());
-        zoom_label_->setToolTip(QStringLiteral("Zoom (Ctrl+rueda para cambiarlo, Ctrl+0 para ajustar)"));
+        zoom_label_->setToolTip(Tr::tr("Zoom (Ctrl+rueda para cambiarlo, Ctrl+0 para ajustar)"));
         statusBar()->addWidget(stats_label_, 1);
         statusBar()->addPermanentWidget(zoom_label_);
     }
@@ -455,7 +503,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
 
         minimize_crossings_btn_ = new QToolButton(minimize_panel_);
         minimize_crossings_btn_->setObjectName("minimizeButton");
-        minimize_crossings_btn_->setText(QStringLiteral("Minimizar cruces"));
+        minimize_crossings_btn_->setText(Tr::tr("Minimizar cruces"));
         minimize_crossings_btn_->setToolButtonStyle(Qt::ToolButtonTextBesideIcon);
         minimize_crossings_btn_->setIconSize(QSize(18, 18));
         minimize_crossings_btn_->setCursor(Qt::PointingHandCursor);
@@ -482,9 +530,9 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             return b;
         };
         mode_fast_btn_ = makeModeButton(style::Icon::Fast,
-            QStringLiteral("Rápido: el mejor dibujo en 5 segundos como máximo"));
+            Tr::tr("Rápido: el mejor dibujo en 5 segundos como máximo"));
         mode_slow_btn_ = makeModeButton(style::Icon::Slow,
-            QStringLiteral("Lento: sin límite de tiempo; se puede pausar"));
+            Tr::tr("Lento: sin límite de tiempo; se puede pausar"));
         auto* modes = new QButtonGroup(this);
         modes->setExclusive(true);
         modes->addButton(mode_fast_btn_);
@@ -501,8 +549,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         minimize_help_btn_->setObjectName("helpButton");
         minimize_help_btn_->setText("?");
         minimize_help_btn_->setFixedSize(22, 22);
-        minimize_help_btn_->setToolTip(QStringLiteral(
-            "<div style=\"color:#1F2330; font-size:10.5pt;\"><b>Minimizar cruces</b></div>"
+        minimize_help_btn_->setToolTip(Tr::tr("<div style=\"color:#1F2330; font-size:10.5pt;\"><b>Minimizar cruces</b></div>"
             "<div style=\"color:#4B5068; margin-top:4px;\">Reordena las cajas de cada nivel para que las "
             "conexiones se crucen lo menos posible. Hay dos modos:</div>"
             "<table cellspacing=\"0\" cellpadding=\"4\" style=\"margin-top:6px;\">"
@@ -527,8 +574,8 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         const bool fast = mode == MinimizeMode::Fast;
         minimize_crossings_btn_->setIcon(style::icon(fast ? style::Icon::Fast : style::Icon::Slow));
         minimize_crossings_btn_->setToolTip(fast
-            ? QStringLiteral("Minimizar cruces en modo rápido (Ctrl+M)")
-            : QStringLiteral("Minimizar cruces en modo lento (Ctrl+M)"));
+            ? Tr::tr("Minimizar cruces en modo rápido (Ctrl+M)")
+            : Tr::tr("Minimizar cruces en modo lento (Ctrl+M)"));
         if (action_menu_fast_) action_menu_fast_->setChecked(fast);
         if (action_menu_slow_) action_menu_slow_->setChecked(!fast);
     }
@@ -592,7 +639,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
                         onGraphChanged();
                     }
                     catch (const std::exception& e) {
-                        dialogs::showError(this, QStringLiteral("No se ha podido añadir el esquema"),
+                        dialogs::showError(this, Tr::tr("No se ha podido añadir el esquema"),
                             QString::fromStdString(e.what()));
                     }
                     return;
@@ -662,19 +709,19 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         if (!applyProjectSettings(settings)) return;
         if (dlg.saveAsAppDefaults()) app_defaults::save(settings);
         statusBar()->showMessage(dlg.saveAsAppDefaults()
-            ? QStringLiteral("Ajustes guardados en el proyecto y para los proyectos nuevos")
-            : QStringLiteral("Ajustes del proyecto actualizados"), 4000);
+            ? Tr::tr("Ajustes guardados en el proyecto y para los proyectos nuevos")
+            : Tr::tr("Ajustes del proyecto actualizados"), 4000);
     }
 
     void MainWindow::onAplicarPredeterminados() {
         const ProjectSettings defaults = app_defaults::load();
         if (defaults == project_->getSettings()) {
-            dialogs::showInfo(this, QStringLiteral("Nada que cambiar"),
-                QStringLiteral("Este proyecto ya usa los ajustes predeterminados de la aplicación."));
+            dialogs::showInfo(this, Tr::tr("Nada que cambiar"),
+                Tr::tr("Este proyecto ya usa los ajustes predeterminados de la aplicación."));
             return;
         }
         if (applyProjectSettings(defaults))
-            statusBar()->showMessage(QStringLiteral("El proyecto usa ahora los ajustes predeterminados de la aplicación"), 4000);
+            statusBar()->showMessage(Tr::tr("El proyecto usa ahora los ajustes predeterminados de la aplicación"), 4000);
     }
 
     bool MainWindow::applyProjectSettings(const ProjectSettings& settings) {
@@ -823,7 +870,7 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         updateProjectHistoryActions(); // every change of the project ends up here
         QString title = QString::fromStdString(project_->getName());
         if (project_->hasUnsavedChanges()) title += QStringLiteral(" *");
-        setWindowTitle(title + QStringLiteral(" — Taller Matrix Harris"));
+        setWindowTitle(title + Tr::tr(" — Taller Matrix Harris"));
     }
 
     void MainWindow::updateStatusBar() {
@@ -837,10 +884,10 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         qsizetype boxes = 0, connections = 0;
         for (const auto& n : g->getAllNodes()) if (!n->isDummy()) ++boxes;
         for (const auto& e : g->getAllHyperedges()) if (!e->isSegment()) ++connections;
-        stats_label_->setText(QStringLiteral("%1   ·   %2   ·   %3").arg(
-            count(boxes, QStringLiteral("caja"), QStringLiteral("cajas")),
-            count(connections, QStringLiteral("conexión"), QStringLiteral("conexiones")),
-            count(g->getLayerCount(), QStringLiteral("nivel"), QStringLiteral("niveles"))));
+        stats_label_->setText(Tr::tr("%1   ·   %2   ·   %3").arg(
+            count(boxes, Tr::tr("caja"), Tr::tr("cajas")),
+            count(connections, Tr::tr("conexión"), Tr::tr("conexiones")),
+            count(g->getLayerCount(), Tr::tr("nivel"), Tr::tr("niveles"))));
     }
 
     void MainWindow::updateZoomLabel() {
@@ -867,8 +914,8 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         if (!mayContinue()) return;
         teardownProject();
         project_.reset(); // only one project (and joint graph) may exist at a time
-        adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
-        statusBar()->showMessage(QStringLiteral("Nuevo proyecto creado"), 3000);
+        adoptProject(std::make_unique<Project>(Tr::tr("Nuevo proyecto").toStdString(), app_defaults::load()));
+        statusBar()->showMessage(Tr::tr("Nuevo proyecto creado"), 3000);
     }
 
     void MainWindow::onNuevoDiagrama() {
@@ -890,15 +937,15 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         const QString start = project_->getFilePath().empty() ? QString()
             : QFileInfo(QString::fromStdString(project_->getFilePath().string())).absolutePath();
         const QString path = QFileDialog::getOpenFileName(
-            this, QStringLiteral("Abrir proyecto"), start, QString::fromUtf8(PROJECT_FILTER));
+            this, Tr::tr("Abrir proyecto"), start, projectFilter());
         if (!path.isEmpty()) openProject(path);
     }
 
     void MainWindow::openProject(const QString& path) {
         if (refuseDuringTutorial()) return;
         if (!QFileInfo::exists(path)) {
-            dialogs::showError(this, QStringLiteral("No se encuentra el proyecto"),
-                QStringLiteral("El archivo «%1» ya no existe o se ha movido.").arg(path));
+            dialogs::showError(this, Tr::tr("No se encuentra el proyecto"),
+                Tr::tr("El archivo «%1» ya no existe o se ha movido.").arg(path));
             forgetRecentProject(path);
             return;
         }
@@ -909,12 +956,12 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         try {
             adoptProject(Project::load(path.toStdString()));
             rememberRecentProject(path);
-            statusBar()->showMessage(QStringLiteral("Proyecto abierto: %1").arg(QFileInfo(path).fileName()), 3000);
+            statusBar()->showMessage(Tr::tr("Proyecto abierto: %1").arg(QFileInfo(path).fileName()), 3000);
         }
         catch (const std::exception& e) {
-            adoptProject(std::make_unique<Project>("Nuevo proyecto", app_defaults::load()));
-            dialogs::showError(this, QStringLiteral("No se ha podido abrir el proyecto"),
-                QStringLiteral("«%1» no es un proyecto válido del Taller Matrix Harris.\n\n%2")
+            adoptProject(std::make_unique<Project>(Tr::tr("Nuevo proyecto").toStdString(), app_defaults::load()));
+            dialogs::showError(this, Tr::tr("No se ha podido abrir el proyecto"),
+                Tr::tr("«%1» no es un proyecto válido del Taller Matrix Harris.\n\n%2")
                     .arg(QFileInfo(path).fileName(), QString::fromStdString(e.what())));
         }
     }
@@ -933,18 +980,18 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             ? QString::fromStdString(project_->getName()) + ".json"
             : QString::fromStdString(project_->getFilePath().string());
         const QString path = QFileDialog::getSaveFileName(
-            this, QStringLiteral("Guardar proyecto"), suggested, QString::fromUtf8(PROJECT_FILTER));
+            this, Tr::tr("Guardar proyecto"), suggested, projectFilter());
         if (path.isEmpty()) return false;
         try {
             project_->setName(QFileInfo(path).completeBaseName().toStdString());
             project_->save(path.toStdString());
             rememberRecentProject(path);
             updateWindowTitle();
-            statusBar()->showMessage(QStringLiteral("Proyecto guardado en %1").arg(QFileInfo(path).fileName()), 3000);
+            statusBar()->showMessage(Tr::tr("Proyecto guardado en %1").arg(QFileInfo(path).fileName()), 3000);
             return true;
         }
         catch (const std::exception& e) {
-            dialogs::showError(this, QStringLiteral("No se ha podido guardar el proyecto"),
+            dialogs::showError(this, Tr::tr("No se ha podido guardar el proyecto"),
                 QString::fromStdString(e.what()));
             return false;
         }
@@ -954,11 +1001,11 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         try {
             project_->save();
             updateWindowTitle();
-            statusBar()->showMessage(QStringLiteral("Proyecto guardado"), 2500);
+            statusBar()->showMessage(Tr::tr("Proyecto guardado"), 2500);
             return true;
         }
         catch (const std::exception& e) {
-            dialogs::showError(this, QStringLiteral("No se ha podido guardar el proyecto"),
+            dialogs::showError(this, Tr::tr("No se ha podido guardar el proyecto"),
                 QString::fromStdString(e.what()));
             return false;
         }
@@ -967,18 +1014,18 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
     void MainWindow::onExportarImagen() {
         DiagramScene* scene = activeScene();
         if (!scene || scene->items().isEmpty()) {
-            dialogs::showInfo(this, QStringLiteral("No hay nada que exportar"),
-                QStringLiteral("Este esquema está vacío. Añade alguna caja y vuelve a intentarlo."));
+            dialogs::showInfo(this, Tr::tr("No hay nada que exportar"),
+                Tr::tr("Este esquema está vacío. Añade alguna caja y vuelve a intentarlo."));
             return;
         }
 
         const int idx = project_->getActiveIndex();
-        const QString name = idx == -1 ? QStringLiteral("Esquema conjunto")
+        const QString name = idx == -1 ? Tr::tr("Esquema conjunto")
                                        : QString::fromStdString(project_->getDiagramName(idx));
         QString selected;
-        QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Exportar esquema"),
+        QString path = QFileDialog::getSaveFileName(this, Tr::tr("Exportar esquema"),
             QDir(defaultExportFolder()).filePath(exporting::safeFileName(name) + QStringLiteral(".png")),
-            QStringLiteral("Imagen PNG (*.png);;Imagen JPEG (*.jpg *.jpeg);;Documento PDF (*.pdf)"),
+            Tr::tr("Imagen PNG (*.png);;Imagen JPEG (*.jpg *.jpeg);;Documento PDF (*.pdf)"),
             &selected);
         if (path.isEmpty()) return;
         if (QFileInfo(path).suffix().isEmpty())
@@ -990,9 +1037,9 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
             ? exporting::writePdf(path, QString::fromStdString(project_->getName()), { { name, scene } })
             : exporting::writeImage(path, scene);
 
-        if (ok) statusBar()->showMessage(QStringLiteral("Esquema exportado a %1").arg(QFileInfo(path).fileName()), 4000);
-        else    dialogs::showError(this, QStringLiteral("No se ha podido exportar el esquema"),
-                    QStringLiteral("No se ha podido escribir el archivo «%1».").arg(path));
+        if (ok) statusBar()->showMessage(Tr::tr("Esquema exportado a %1").arg(QFileInfo(path).fileName()), 4000);
+        else    dialogs::showError(this, Tr::tr("No se ha podido exportar el esquema"),
+                    Tr::tr("No se ha podido escribir el archivo «%1».").arg(path));
     }
 
     void MainWindow::onExportarProyecto() {
@@ -1000,13 +1047,13 @@ QToolButton#helpButton:hover { background: #EEF0FF; border-color: #6366F1; }
         std::vector<exporting::Page> pages;
         for (int i = 0; i < project_->getDiagramCount(); ++i)
             pages.push_back({ QString::fromStdString(project_->getDiagramName(i)), scenes_[i] });
-        pages.push_back({ QStringLiteral("Esquema conjunto"), joint_scene_ });
+        pages.push_back({ Tr::tr("Esquema conjunto"), joint_scene_ });
         const QString project_name = QString::fromStdString(project_->getName());
 
         // ── Choose the format ────────────────────────────────────────────────
-        StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Exportar proyecto"), this);
-        dlg.setMessage(QStringLiteral("Incluye %1 de «%2» y el esquema conjunto. ¿En qué formato quieres exportarlo?")
-            .arg(count(project_->getDiagramCount(), QStringLiteral("esquema"), QStringLiteral("esquemas")),
+        StyledDialog dlg(StyledDialog::Badge::App, Tr::tr("Exportar proyecto"), this);
+        dlg.setMessage(Tr::tr("Incluye %1 de «%2» y el esquema conjunto. ¿En qué formato quieres exportarlo?")
+            .arg(count(project_->getDiagramCount(), Tr::tr("esquema"), Tr::tr("esquemas")),
                  project_name));
 
         auto* options = new QWidget;
@@ -1036,17 +1083,17 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             return b;
         };
         QToolButton* as_pdf = option(style::Icon::PdfDocument,
-            QStringLiteral("Documento PDF\nUna página por esquema y el esquema conjunto al final"));
+            Tr::tr("Documento PDF\nUna página por esquema y el esquema conjunto al final"));
         QToolButton* as_png = option(style::Icon::ImageFolder,
-            QStringLiteral("Imágenes PNG\nUna carpeta «%1» con una imagen por esquema").arg(project_name));
+            Tr::tr("Imágenes PNG\nUna carpeta «%1» con una imagen por esquema").arg(project_name));
         auto* group = new QButtonGroup(options);
         group->addButton(as_pdf);
         group->addButton(as_png);
         QSettings settings;
         (settings.value("exportFormat").toString() == "png" ? as_png : as_pdf)->setChecked(true);
         dlg.setBody(options);
-        dlg.addButton(QStringLiteral("Cancelar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
-        dlg.addButton(QStringLiteral("Exportar"), 1, StyledDialog::ButtonStyle::Primary, true);
+        dlg.addButton(Tr::tr("Cancelar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
+        dlg.addButton(Tr::tr("Exportar"), 1, StyledDialog::ButtonStyle::Primary, true);
         dlg.exec();
         if (dlg.choice() != 1) return;
         const bool pdf = as_pdf->isChecked();
@@ -1057,9 +1104,9 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         joint_scene_->cancelInteraction();
 
         if (pdf) {
-            QString path = QFileDialog::getSaveFileName(this, QStringLiteral("Exportar proyecto como PDF"),
+            QString path = QFileDialog::getSaveFileName(this, Tr::tr("Exportar proyecto como PDF"),
                 QDir(defaultExportFolder()).filePath(exporting::safeFileName(project_name) + QStringLiteral(".pdf")),
-                QStringLiteral("Documento PDF (*.pdf)"));
+                Tr::tr("Documento PDF (*.pdf)"));
             if (path.isEmpty()) return;
             if (QFileInfo(path).suffix().isEmpty()) path += QStringLiteral(".pdf");
 
@@ -1067,21 +1114,21 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             const bool ok = exporting::writePdf(path, project_name, pages);
             QApplication::restoreOverrideCursor();
             if (!ok) {
-                dialogs::showError(this, QStringLiteral("No se ha podido exportar el proyecto"),
-                    QStringLiteral("No se ha podido escribir el archivo «%1».").arg(path));
+                dialogs::showError(this, Tr::tr("No se ha podido exportar el proyecto"),
+                    Tr::tr("No se ha podido escribir el archivo «%1».").arg(path));
                 return;
             }
-            showExportDone(QStringLiteral("Proyecto exportado"),
-                QStringLiteral("«%1» tiene %2, una por esquema.")
+            showExportDone(Tr::tr("Proyecto exportado"),
+                Tr::tr("«%1» tiene %2, una por esquema.")
                     .arg(QFileInfo(path).fileName(), count(static_cast<qsizetype>(pages.size()),
-                        QStringLiteral("página"), QStringLiteral("páginas"))),
-                QStringLiteral("Abrir PDF"), path);
+                        Tr::tr("página"), Tr::tr("páginas"))),
+                Tr::tr("Abrir PDF"), path);
             return;
         }
 
         // ── PNG: a new folder named after the project ─────────────────────────
         const QString parent_dir = QFileDialog::getExistingDirectory(this,
-            QStringLiteral("Elige dónde crear la carpeta «%1»").arg(project_name), defaultExportFolder());
+            Tr::tr("Elige dónde crear la carpeta «%1»").arg(project_name), defaultExportFolder());
         if (parent_dir.isEmpty()) return;
 
         // Never mix with an earlier export: "Proyecto", "Proyecto (2)", ...
@@ -1090,8 +1137,8 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         for (int n = 2; QFileInfo::exists(folder); ++n)
             folder = QDir(parent_dir).filePath(QStringLiteral("%1 (%2)").arg(base).arg(n));
         if (!QDir().mkpath(folder)) {
-            dialogs::showError(this, QStringLiteral("No se ha podido exportar el proyecto"),
-                QStringLiteral("No se ha podido crear la carpeta «%1».").arg(folder));
+            dialogs::showError(this, Tr::tr("No se ha podido exportar el proyecto"),
+                Tr::tr("No se ha podido crear la carpeta «%1».").arg(folder));
             return;
         }
 
@@ -1110,18 +1157,18 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         QApplication::restoreOverrideCursor();
 
         if (!failed.isEmpty()) {
-            dialogs::showError(this, QStringLiteral("No se han podido exportar todas las imágenes"),
-                QStringLiteral("No se han podido escribir: %1.").arg(failed.join(QStringLiteral(", "))));
+            dialogs::showError(this, Tr::tr("No se han podido exportar todas las imágenes"),
+                Tr::tr("No se han podido escribir: %1.").arg(failed.join(QStringLiteral(", "))));
             return;
         }
         QString text = written.isEmpty()
-            ? QStringLiteral("Todos los esquemas están vacíos, así que la carpeta «%1» no contiene imágenes.")
+            ? Tr::tr("Todos los esquemas están vacíos, así que la carpeta «%1» no contiene imágenes.")
                   .arg(QFileInfo(folder).fileName())
-            : QStringLiteral("La carpeta «%1» contiene %2.").arg(QFileInfo(folder).fileName(),
-                  count(written.size(), QStringLiteral("imagen"), QStringLiteral("imágenes")));
+            : Tr::tr("La carpeta «%1» contiene %2.").arg(QFileInfo(folder).fileName(),
+                  count(written.size(), Tr::tr("imagen"), Tr::tr("imágenes")));
         if (!empty.isEmpty() && !written.isEmpty())
-            text += QStringLiteral("\n\nSin imagen por estar vacíos: %1.").arg(empty.join(QStringLiteral(", ")));
-        showExportDone(QStringLiteral("Proyecto exportado"), text, QStringLiteral("Abrir carpeta"), folder);
+            text += Tr::tr("\n\nSin imagen por estar vacíos: %1.").arg(empty.join(QStringLiteral(", ")));
+        showExportDone(Tr::tr("Proyecto exportado"), text, Tr::tr("Abrir carpeta"), folder);
     }
 
     void MainWindow::showExportDone(const QString& title, const QString& text,
@@ -1129,7 +1176,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
     {
         StyledDialog done(StyledDialog::Badge::Success, title, this);
         done.setMessage(text);
-        done.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
+        done.addButton(Tr::tr("Cerrar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
         done.addButton(open_text, 1, StyledDialog::ButtonStyle::Primary, true);
         done.exec();
         if (done.choice() == 1) QDesktopServices::openUrl(QUrl::fromLocalFile(target));
@@ -1172,7 +1219,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         recent_menu_->clear();
         const QStringList list = recentProjects();
         if (list.isEmpty()) {
-            recent_menu_->addAction(QStringLiteral("No hay proyectos recientes"))->setEnabled(false);
+            recent_menu_->addAction(Tr::tr("No hay proyectos recientes"))->setEnabled(false);
             return;
         }
         int n = 1;
@@ -1182,7 +1229,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             connect(a, &QAction::triggered, this, [this, path] { openProject(path); });
         }
         recent_menu_->addSeparator();
-        connect(recent_menu_->addAction(QStringLiteral("Borrar la lista")), &QAction::triggered, this, [] {
+        connect(recent_menu_->addAction(Tr::tr("Borrar la lista")), &QAction::triggered, this, [] {
             QSettings().remove(RECENT_KEY);
         });
     }
@@ -1204,7 +1251,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             onGraphChanged();
         }
         catch (const std::exception& e) {
-            dialogs::showWarning(this, QStringLiteral("No se puede deshacer"), QString::fromStdString(e.what()));
+            dialogs::showWarning(this, Tr::tr("No se puede deshacer"), QString::fromStdString(e.what()));
         }
     }
 
@@ -1218,7 +1265,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             ? scene->copyAt(central_view_->mapToScene(local))
             : scene->copyAt(scene->sceneRect().topLeft() - QPointF(1e6, 1e6));
         if (copied.isEmpty())
-            statusBar()->showMessage(QStringLiteral("No hay nada que copiar"), 3000);
+            statusBar()->showMessage(Tr::tr("No hay nada que copiar"), 3000);
     }
 
     void MainWindow::onPegar() {
@@ -1234,8 +1281,8 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         if (!action_pegar_ || !project_) return;
         const bool regular = project_->getActiveIndex() >= 0;
         action_pegar_->setEnabled(regular && clipboard::hasPiece());
-        action_pegar_->setToolTip(regular ? QStringLiteral("Pega lo copiado donde está el ratón")
-                                          : QStringLiteral("No se puede pegar en el esquema conjunto"));
+        action_pegar_->setToolTip(regular ? Tr::tr("Pega lo copiado donde está el ratón")
+                                          : Tr::tr("No se puede pegar en el esquema conjunto"));
     }
 
     void MainWindow::onRehacer() {
@@ -1251,7 +1298,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             onGraphChanged();
         }
         catch (const std::exception& e) {
-            dialogs::showWarning(this, QStringLiteral("No se puede rehacer"), QString::fromStdString(e.what()));
+            dialogs::showWarning(this, Tr::tr("No se puede rehacer"), QString::fromStdString(e.what()));
         }
     }
 
@@ -1309,18 +1356,18 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         tab_bar_->addTab(scene, name);
         switchToTab(new_index);
         updateWindowTitle();
-        statusBar()->showMessage(QStringLiteral("«%1» duplicado como «%2»").arg(original, name), 4000);
+        statusBar()->showMessage(Tr::tr("«%1» duplicado como «%2»").arg(original, name), 4000);
     }
 
     void MainWindow::showTabMenu(int index, const QPoint& global_pos) {
         if (index < 0 || index >= project_->getDiagramCount()) return;
         QMenu* menu = style::createMenu();
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        menu->addAction(QStringLiteral("Renombrar"), this, [this, index] { tab_bar_->startRename(index); });
-        menu->addAction(style::icon(style::Icon::Duplicate), QStringLiteral("Duplicar esquema"),
+        menu->addAction(Tr::tr("Renombrar"), this, [this, index] { tab_bar_->startRename(index); });
+        menu->addAction(style::icon(style::Icon::Duplicate), Tr::tr("Duplicar esquema"),
             this, [this, index] { duplicateDiagram(index); });
         menu->addSeparator();
-        menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar esquema"),
+        menu->addAction(style::icon(style::Icon::RemoveBox), Tr::tr("Eliminar esquema"),
             this, [this, index] { onRemoveDiagram(index); });
         help::addHelpButtons(menu, this);
         menu->popup(global_pos);
@@ -1341,8 +1388,8 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             }
 
             if (nothing_to_minimize) {
-                dialogs::showInfo(this, QStringLiteral("No hay cruces que minimizar"),
-                    QStringLiteral("En este esquema ninguna conexión puede cruzarse con otra, "
+                dialogs::showInfo(this, Tr::tr("No hay cruces que minimizar"),
+                    Tr::tr("En este esquema ninguna conexión puede cruzarse con otra, "
                                    "así que ya está dibujado de la mejor forma posible."));
                 return;
             }
@@ -1403,7 +1450,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             onGraphChanged();
         }
         catch (const std::exception& e) {
-            dialogs::showError(this, QStringLiteral("No se han podido minimizar los cruces"),
+            dialogs::showError(this, Tr::tr("No se han podido minimizar los cruces"),
                 QString::fromStdString(e.what()));
         }
     }
@@ -1436,7 +1483,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
             updateUndoRedoActions();
         }
         updateWindowTitle();
-        statusBar()->showMessage(QStringLiteral("Esquema «%1» eliminado (Ctrl+Alt+Z lo recupera)").arg(name), 5000);
+        statusBar()->showMessage(Tr::tr("Esquema «%1» eliminado (Ctrl+Alt+Z lo recupera)").arg(name), 5000);
     }
 
     // ============================================================================
@@ -1450,11 +1497,11 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         action_deshacer_proyecto_->setEnabled(can_undo);
         action_rehacer_proyecto_->setEnabled(can_redo);
         action_deshacer_proyecto_->setText(can_undo
-            ? QStringLiteral("Deshacer: %1").arg(QString::fromStdString(project_->projectUndoLabel()))
-            : QStringLiteral("Deshacer"));
+            ? Tr::tr("Deshacer: %1").arg(QString::fromStdString(project_->projectUndoLabel()))
+            : Tr::tr("Deshacer"));
         action_rehacer_proyecto_->setText(can_redo
-            ? QStringLiteral("Rehacer: %1").arg(QString::fromStdString(project_->projectRedoLabel()))
-            : QStringLiteral("Rehacer"));
+            ? Tr::tr("Rehacer: %1").arg(QString::fromStdString(project_->projectRedoLabel()))
+            : Tr::tr("Rehacer"));
     }
 
     void MainWindow::onProjectHistory(bool undo) {
@@ -1474,7 +1521,7 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
         }
         updateWindowTitle();
         updateStatusBar();
-        statusBar()->showMessage((undo ? QStringLiteral("Deshecho: %1") : QStringLiteral("Rehecho: %1")).arg(what), 5000);
+        statusBar()->showMessage((undo ? Tr::tr("Deshecho: %1") : Tr::tr("Rehecho: %1")).arg(what), 5000);
     }
 
     void MainWindow::syncDiagramTabs() {
@@ -1523,8 +1570,8 @@ QToolButton#exportOption:checked { border: 2px solid #6366F1; background: #EEF0F
     // ============================================================================
 
     void MainWindow::onAtajos() {
-        StyledDialog dlg(StyledDialog::Badge::Info, QStringLiteral("Atajos y controles"), this);
-        dlg.setMessage(QStringLiteral("Todo lo que puedes hacer con el teclado y el ratón."));
+        StyledDialog dlg(StyledDialog::Badge::Info, Tr::tr("Atajos y controles"), this);
+        dlg.setMessage(Tr::tr("Todo lo que puedes hacer con el teclado y el ratón."));
 
         auto* body = new QWidget;
         body->setStyleSheet(QStringLiteral(R"(
@@ -1563,64 +1610,63 @@ QLabel#what { color: #3A4050; }
         };
 
         column({
-            { QStringLiteral("Proyecto"), {
-                { QStringLiteral("Ctrl+N"), QStringLiteral("Nuevo proyecto") },
-                { QStringLiteral("Ctrl+O"), QStringLiteral("Abrir proyecto") },
-                { QStringLiteral("Ctrl+S"), QStringLiteral("Guardar") },
-                { QStringLiteral("Ctrl+Mayús+S"), QStringLiteral("Guardar como") },
-                { QStringLiteral("Ctrl+E"), QStringLiteral("Exportar el esquema") },
-                { QStringLiteral("Ctrl+Mayús+E"), QStringLiteral("Exportar el proyecto") },
-                { QStringLiteral("Ctrl+Alt+Z"), QStringLiteral("Deshacer un cambio del proyecto") },
-                { QStringLiteral("Ctrl+Alt+Y"), QStringLiteral("Rehacerlo") },
-                { QStringLiteral("Ctrl+Alt+S"), QStringLiteral("Ajustes del proyecto") } } },
-            { QStringLiteral("Edición"), {
-                { QStringLiteral("Ctrl+Z"), QStringLiteral("Deshacer") },
-                { QStringLiteral("Ctrl+Y"), QStringLiteral("Rehacer") },
-                { QStringLiteral("Ctrl+C"), QStringLiteral("Copiar el bloque bajo el ratón (o el esquema)") },
-                { QStringLiteral("Ctrl+V"), QStringLiteral("Pegar donde está el ratón") },
-                { QStringLiteral("Esc"), QStringLiteral("Cancelar la selección en curso") } } },
-            { QStringLiteral("Esquemas"), {
-                { QStringLiteral("Ctrl+T"), QStringLiteral("Nuevo esquema") },
-                { QStringLiteral("F2"), QStringLiteral("Renombrar esquema") },
-                { QStringLiteral("Ctrl+D"), QStringLiteral("Duplicar esquema") },
-                { QStringLiteral("Ctrl+Tab"), QStringLiteral("Esquema siguiente") },
-                { QStringLiteral("Ctrl+J"), QStringLiteral("Esquema conjunto") },
-                { QStringLiteral("Ctrl+M"), QStringLiteral("Minimizar cruces") } } },
+            { Tr::tr("Proyecto"), {
+                { QStringLiteral("Ctrl+N"), Tr::tr("Nuevo proyecto") },
+                { QStringLiteral("Ctrl+O"), Tr::tr("Abrir proyecto") },
+                { QStringLiteral("Ctrl+S"), Tr::tr("Guardar") },
+                { Tr::tr("Ctrl+Mayús+S"), Tr::tr("Guardar como") },
+                { QStringLiteral("Ctrl+E"), Tr::tr("Exportar el esquema") },
+                { Tr::tr("Ctrl+Mayús+E"), Tr::tr("Exportar el proyecto") },
+                { QStringLiteral("Ctrl+Alt+Z"), Tr::tr("Deshacer un cambio del proyecto") },
+                { QStringLiteral("Ctrl+Alt+Y"), Tr::tr("Rehacerlo") },
+                { QStringLiteral("Ctrl+Alt+S"), Tr::tr("Ajustes del proyecto") } } },
+            { Tr::tr("Edición"), {
+                { QStringLiteral("Ctrl+Z"), Tr::tr("Deshacer") },
+                { QStringLiteral("Ctrl+Y"), Tr::tr("Rehacer") },
+                { QStringLiteral("Ctrl+C"), Tr::tr("Copiar el bloque bajo el ratón (o el esquema)") },
+                { QStringLiteral("Ctrl+V"), Tr::tr("Pegar donde está el ratón") },
+                { QStringLiteral("Esc"), Tr::tr("Cancelar la selección en curso") } } },
+            { Tr::tr("Esquemas"), {
+                { QStringLiteral("Ctrl+T"), Tr::tr("Nuevo esquema") },
+                { QStringLiteral("F2"), Tr::tr("Renombrar esquema") },
+                { QStringLiteral("Ctrl+D"), Tr::tr("Duplicar esquema") },
+                { QStringLiteral("Ctrl+Tab"), Tr::tr("Esquema siguiente") },
+                { QStringLiteral("Ctrl+J"), Tr::tr("Esquema conjunto") },
+                { QStringLiteral("Ctrl+M"), Tr::tr("Minimizar cruces") } } },
         });
         column({
-            { QStringLiteral("Vista"), {
-                { QStringLiteral("Ctrl+rueda"), QStringLiteral("Acercar / alejar") },
-                { QStringLiteral("Ctrl+0"), QStringLiteral("Ajustar a la ventana") },
-                { QStringLiteral("Ctrl+1"), QStringLiteral("Tamaño real") },
-                { QStringLiteral("Arrastrar fondo"), QStringLiteral("Desplazar la vista") },
-                { QStringLiteral("F11"), QStringLiteral("Pantalla completa") } } },
-            { QStringLiteral("Cajas y conexiones"), {
-                { QStringLiteral("Clic derecho"), QStringLiteral("Menú de la caja o del fondo") },
-                { QStringLiteral("Clic en conexión"), QStringLiteral("Menú de la conexión") },
-                { QStringLiteral("Doble clic"), QStringLiteral("Propiedades de la caja") },
-                { QStringLiteral("Arrastrar caja"), QStringLiteral("Moverla de posición o nivel") },
-                { QStringLiteral("Rueda sobre caja"), QStringLiteral("Desplazar un texto largo") } } },
-            { QStringLiteral("Pestañas"), {
-                { QStringLiteral("Doble clic"), QStringLiteral("Renombrar (sobre el nombre)") },
-                { QStringLiteral("Clic derecho"), QStringLiteral("Renombrar, duplicar o eliminar") },
-                { QStringLiteral("Ctrl+rueda"), QStringLiteral("Zoom en la miniatura") } } },
+            { Tr::tr("Vista"), {
+                { Tr::tr("Ctrl+rueda"), Tr::tr("Acercar / alejar") },
+                { QStringLiteral("Ctrl+0"), Tr::tr("Ajustar a la ventana") },
+                { QStringLiteral("Ctrl+1"), Tr::tr("Tamaño real") },
+                { Tr::tr("Arrastrar fondo"), Tr::tr("Desplazar la vista") },
+                { QStringLiteral("F11"), Tr::tr("Pantalla completa") } } },
+            { Tr::tr("Cajas y conexiones"), {
+                { Tr::tr("Clic derecho"), Tr::tr("Menú de la caja o del fondo") },
+                { Tr::tr("Clic en conexión"), Tr::tr("Menú de la conexión") },
+                { Tr::tr("Doble clic"), Tr::tr("Propiedades de la caja") },
+                { Tr::tr("Arrastrar caja"), Tr::tr("Moverla de posición o nivel") },
+                { Tr::tr("Rueda sobre caja"), Tr::tr("Desplazar un texto largo") } } },
+            { Tr::tr("Pestañas"), {
+                { Tr::tr("Doble clic"), Tr::tr("Renombrar (sobre el nombre)") },
+                { Tr::tr("Clic derecho"), Tr::tr("Renombrar, duplicar o eliminar") },
+                { Tr::tr("Ctrl+rueda"), Tr::tr("Zoom en la miniatura") } } },
         });
 
         dlg.setBody(body);
-        dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
+        dlg.addButton(Tr::tr("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();
     }
 
     void MainWindow::onAcercaDe() {
-        StyledDialog dlg(StyledDialog::Badge::App, QStringLiteral("Taller Matrix Harris"), this);
+        StyledDialog dlg(StyledDialog::Badge::App, Tr::tr("Taller Matrix Harris"), this);
         // The version is the project's (CMakeLists.txt), set by main().
-        dlg.setMessage(QStringLiteral(
-            "Versión %1\n\n"
+        dlg.setMessage(Tr::tr("Versión %1\n\n"
             "Herramienta para crear, organizar y dibujar esquemas Matrix Harris, "
             "así como cualquier otro tipo de esquema jerárquico, "
             "con un dibujo automático que minimiza los cruces.\n\n"
             "Desarrollado por Javier San Andrés.\n").arg(QCoreApplication::applicationVersion()));
-        dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
+        dlg.addButton(Tr::tr("Cerrar"), 0, StyledDialog::ButtonStyle::Primary, true, true);
         dlg.exec();
     }
 
@@ -1631,7 +1677,7 @@ QLabel#what { color: #3A4050; }
     void MainWindow::closeEvent(QCloseEvent* event) {
         // During the tour the open project is the example: nothing to keep
         // (the user's own was saved or dropped when the tour began).
-        if (tutorial_running_ || closing_for_update_) { // nothing to keep / already asked
+        if (tutorial_running_ || closing_for_update_ || replaced_) { // nothing to keep / already asked / handed over
             event->accept();
             return;
         }
@@ -1653,6 +1699,99 @@ QLabel#what { color: #3A4050; }
         QMetaObject::invokeMethod(this, [this, path] { openProject(path); }, Qt::QueuedConnection);
     }
 
+    void MainWindow::switchLanguage(i18n::Language language) {
+        switchLanguage(language, std::nullopt);
+    }
+
+    void MainWindow::switchLanguage(i18n::Language language, std::optional<Tour> tour) {
+        if (language == i18n::language() || replaced_) return;
+        if (tutorial_running_) return; // the tour hands the project back first (see runTutorial)
+        QSettings settings;
+        i18n::save(settings, language);
+
+        // The names the app gave, before and after: the new project's, a new
+        // diagram's and, while touring, the example's.
+        auto names = [this] {
+            std::vector<std::string> diagrams{ hypergraph_logic::text(LogicText::tr("Esquema nuevo")) };
+            for (int i = 1; i <= project_->getDiagramCount(); ++i)
+                diagrams.push_back(Tr::tr("Esquema %1").arg(i).toStdString());
+            return std::pair{ std::vector<std::string>{ Tr::tr("Nuevo proyecto").toStdString(),
+                                                        Tr::tr("Proyecto de ejemplo").toStdString() },
+                              diagrams };
+        };
+        const auto before = names();
+        i18n::apply(language);
+        const auto after = names();
+        std::vector<std::pair<std::string, std::string>> project_names, diagram_names;
+        for (std::size_t i = 0; i < before.first.size(); ++i) project_names.emplace_back(before.first[i], after.first[i]);
+        for (std::size_t i = 0; i < before.second.size(); ++i) diagram_names.emplace_back(before.second[i], after.second[i]);
+        translateDefaultNames(project_names, diagram_names, tour.has_value());
+
+        if (auto* scene = activeScene()) scene->cancelInteraction();
+        const bool panel = action_panel_->isChecked();
+
+        // The new window covers this one, already painted and without the
+        // system's animations, before this one goes: the swap shows no flash.
+        // This one keeps showing its diagram meanwhile (its scenes go with it;
+        // they only touch the editors when the user acts on them).
+        auto* next = new MainWindow(std::move(project_));
+        next->setAttribute(Qt::WA_DeleteOnClose);
+        next->setUpdateChecker(update_checker_);
+        next->action_panel_->setChecked(panel);
+        native::disableTransitions(this);
+        native::disableTransitions(next);
+        // A new window shows before it has painted: it starts invisible and
+        // appears once painted, all at once.
+        next->setWindowOpacity(0.0);
+        if (isFullScreen()) next->action_pantalla_completa_->setChecked(true);
+        else if (isMaximized()) next->showMaximized();
+        else {
+            next->setGeometry(geometry());
+            next->show();
+        }
+        QElapsedTimer waited;
+        waited.start();
+        while (waited.elapsed() < 500) {
+            QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+            if (next->windowHandle() && next->windowHandle()->isExposed()) break;
+        }
+        // Built before it had its size: the diagram is fitted to the view now.
+        next->onAjustarVentana();
+        // The tour, if it was on, shows with the window.
+        if (tour) next->startTour(*tour);
+        next->repaint();
+        QCoreApplication::processEvents(QEventLoop::ExcludeUserInputEvents);
+        next->setWindowOpacity(1.0);
+        next->raise();
+        next->activateWindow();
+        emit replaced(next);
+
+        replaced_ = true;
+        close();
+    }
+
+    void MainWindow::translateDefaultNames(const std::vector<std::pair<std::string, std::string>>& project_names,
+        const std::vector<std::pair<std::string, std::string>>& diagram_names, bool touring)
+    {
+        // The project's, while it has no file (the user has not named it).
+        if (project_->getFilePath().empty() || touring)
+            for (const auto& [from, to] : project_names)
+                if (project_->getName() == from) project_->setName(to);
+        // A diagram's: "Esquema nuevo", whatever it holds; while touring, also
+        // the example's "Esquema 1", "Esquema 2"…
+        for (int i = 0; i < project_->getDiagramCount(); ++i) {
+            auto& editor = project_->getEditor(i);
+            for (std::size_t k = 0; k < diagram_names.size(); ++k) {
+                const auto& [from, to] = diagram_names[k];
+                const bool default_name = k == 0;
+                if (editor.getName() != from || from == to) continue;
+                if (default_name || touring) editor.setNameOutsideHistory(to);
+                break;
+            }
+        }
+        project_->syncJointNames();
+    }
+
     void MainWindow::setUpdateChecker(std::function<void()> check) {
         update_checker_ = std::move(check);
         action_actualizaciones_->setVisible(static_cast<bool>(update_checker_));
@@ -1667,7 +1806,7 @@ QLabel#what { color: #3A4050; }
     bool MainWindow::mayContinue() {
         if (!project_->hasUnsavedChanges()) return true;
         const auto choice = dialogs::askToSave(this,
-            QStringLiteral("«%1» tiene cambios sin guardar. Si continúas sin guardarlos, se perderán.")
+            Tr::tr("«%1» tiene cambios sin guardar. Si continúas sin guardarlos, se perderán.")
                 .arg(QString::fromStdString(project_->getName())));
 
         if (choice == dialogs::SaveChoice::Save)

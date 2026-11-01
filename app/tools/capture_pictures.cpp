@@ -7,10 +7,12 @@
 // dialog on it (they flash on screen for a moment), or drags the box with
 // mouse events, and saves what it looks like.
 //
-//   capture_pictures <resources folder> [shot]     (app/ui/resources)
+//   capture_pictures <resources folder> [--lang=en] [shot]     (app/ui/resources)
 //
 // Only the pictures listed below are written; every other one is left as is.
 // With `shot`, only those of the shots whose name contains it (e.g. "resize").
+// They are taken in Spanish into <resources>/es, or with --lang=en in English
+// into <resources>/en (the app shows the Spanish one where there is none).
 // Run it on the screen the pictures are meant for: they are taken at its
 // device pixel ratio. The diagram is drawn `zoom` times larger than the menus,
 // and a picture with a menu is at least as wide as it is tall, so the menu's
@@ -28,6 +30,7 @@
 #include "AppDialogs.h"
 #include "HyperedgeItem.h"
 #include "MainWindow.h"
+#include "Translation.h"
 #include "DiagramTabBar.h"
 #include "DiagramTabWidget.h"
 #include "NodeItem.h"
@@ -181,8 +184,9 @@ namespace {
         return image;
     }
 
+    // The pictures of the language they are taken in: <resources>/<es|en>/<path>.
     void save(const QImage& image, const QString& path) {
-        const QString file = resources.filePath(path);
+        const QString file = resources.filePath(ui::i18n::code(ui::i18n::language()) + QLatin1Char('/') + path);
         QDir().mkpath(QFileInfo(file).path());
         if (!image.save(file)) throw std::runtime_error("Cannot write " + file.toStdString());
         std::printf("  %s\n", qPrintable(path));
@@ -419,7 +423,7 @@ namespace {
     // ── The examples ──────────────────────────────────────────────────────────
 
     std::unique_ptr<HypergraphEditor> editor() {
-        return std::make_unique<HypergraphEditor>(GraphicalHypergraph("Esquema"));
+        return std::make_unique<HypergraphEditor>(GraphicalHypergraph(Tr::tr("Esquema").toStdString()));
     }
 
     // 1 with 2 and 3 below, each through a connection of its own.
@@ -566,6 +570,9 @@ namespace {
 
     QString only; // when given, only the shots whose name contains it are taken
 
+    // "Esquema 1" in Spanish, "Diagram 1" in English.
+    QString diagramName(int n) { return Tr::tr("Esquema %1").arg(n); }
+
     void run(const char* what, const std::function<void()>& shot) {
         if (!only.isEmpty() && !QString::fromUtf8(what).contains(only)) return;
         try { shot(); }
@@ -581,9 +588,16 @@ int main(int argc, char* argv[]) {
         return 1;
     }
     resources = QDir(QString::fromLocal8Bit(argv[1]));
-    if (argc > 2) only = QString::fromLocal8Bit(argv[2]);
-    if (!resources.exists("information")) {
-        std::fprintf(stderr, "%s has no information folder\n", argv[1]);
+    // --lang=en: the English pictures (Spanish by default).
+    ui::i18n::Language language = ui::i18n::Language::Spanish;
+    for (int i = 2; i < argc; ++i) {
+        const QString arg = QString::fromLocal8Bit(argv[i]);
+        if (arg == QStringLiteral("--lang=en")) language = ui::i18n::Language::English;
+        else if (arg != QStringLiteral("--lang=es")) only = arg;
+    }
+    ui::i18n::apply(language);
+    if (!resources.exists("es/information")) {
+        std::fprintf(stderr, "%s has no es/information folder\n", argv[1]);
         return 1;
     }
     std::printf("Device pixel ratio %.2f\n", pixelRatio());
@@ -592,73 +606,73 @@ int main(int argc, char* argv[]) {
     run("fork", [] {
         auto ed = fork();
         DiagramScene scene(ed.get());
-        save(boxMenuPicture(scene, "3", QStringLiteral("Crear caja arriba")), "information/createAbove/01.png");
-        save(boxMenuPicture(scene, "2", QStringLiteral("Crear caja debajo")), "information/createBelow/01.png");
-        save(boxMenuPicture(scene, "2", QStringLiteral("Crear caja a la derecha")), "information/createSide/01.png");
-        save(boxMenuPicture(scene, "2", {}, QStringLiteral("Conexiones hipotéticas")), "information/uncertain/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Crear caja arriba")), "information/createAbove/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Crear caja debajo")), "information/createBelow/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Crear caja a la derecha")), "information/createSide/01.png");
+        save(boxMenuPicture(scene, "2", {}, Tr::tr("Conexiones hipotéticas")), "information/uncertain/01.png");
     });
     run("loose", [] {
         auto ed = loose();
         DiagramScene scene(ed.get());
-        save(boxMenuPicture(scene, "2", QStringLiteral("Caja «2» por debajo de")), "information/addChildConnection/01.png");
-        save(boxMenuPicture(scene, "2", QStringLiteral("Caja «2» por encima de")), "information/addParentConnection/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Caja «%1» por debajo de").arg(QStringLiteral("2"))), "information/addChildConnection/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Caja «%1» por encima de").arg(QStringLiteral("2"))), "information/addParentConnection/01.png");
     });
     run("two blocks", [] {
         auto ed = twoBlocks();
         DiagramScene scene(ed.get());
-        save(boxMenuPicture(scene, "2", QStringLiteral("Fusionar")), "information/fuse/01.png");
-        save(boxMenuPicture(scene, "3", QStringLiteral("Mover bloque")), "information/moveBlock/01.png");
-        save(boxMenuPicture(scene, "3", QStringLiteral("Copiar bloque")), "information/copyPiece/01.png");
-        save(boxMenuPicture(scene, "3", QStringLiteral("Eliminar bloque")), "information/removeBlock/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Fusionar")), "information/fuse/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Mover bloque")), "information/moveBlock/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Copiar bloque")), "information/copyPiece/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Eliminar bloque")), "information/removeBlock/01.png");
     });
     run("column", [] {
         auto ed = column();
         DiagramScene scene(ed.get());
-        save(boxMenuPicture(scene, "2", QStringLiteral("Eliminar caja")), "information/removeBox/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Eliminar caja")), "information/removeBox/01.png");
     });
     run("joined", [] {
         auto ed = joined();
         DiagramScene scene(ed.get());
-        save(boxMenuPicture(scene, "2", QStringLiteral("Eliminar conexión parcial")), "information/removePartial/01.png");
+        save(boxMenuPicture(scene, "2", Tr::tr("Eliminar conexión parcial")), "information/removePartial/01.png");
     });
 
     // ── The connection menu ───────────────────────────────────────────────────
     run("fan", [] {
         auto ed = fan();
         DiagramScene scene(ed.get());
-        save(edgeMenuPicture(scene, "3", QStringLiteral("Crear caja entre")), "information/createBetween/01.png");
-        save(edgeMenuPicture(scene, "3", QStringLiteral("Bifurcar arriba con caja nueva")), "information/forkUpNew/01.png");
-        save(edgeMenuPicture(scene, "3", QStringLiteral("Bifurcar abajo con caja nueva")), "information/forkDownNew/01.png");
-        save(edgeMenuPicture(scene, "3", QStringLiteral("Usar línea discontinua")), "information/lineStyle/01.png");
-        save(edgeMenuPicture(scene, "3", QStringLiteral("Simplificar conexión")), "information/simplify/01.png");
-        save(edgeMenuPicture(scene, "3", QStringLiteral("Eliminar conexión")), "information/removeConnection/01.png");
+        save(edgeMenuPicture(scene, "3", Tr::tr("Crear caja entre")), "information/createBetween/01.png");
+        save(edgeMenuPicture(scene, "3", Tr::tr("Bifurcar arriba con caja nueva")), "information/forkUpNew/01.png");
+        save(edgeMenuPicture(scene, "3", Tr::tr("Bifurcar abajo con caja nueva")), "information/forkDownNew/01.png");
+        save(edgeMenuPicture(scene, "3", Tr::tr("Usar línea discontinua")), "information/lineStyle/01.png");
+        save(edgeMenuPicture(scene, "3", Tr::tr("Simplificar conexión")), "information/simplify/01.png");
+        save(edgeMenuPicture(scene, "3", Tr::tr("Eliminar conexión")), "information/removeConnection/01.png");
     });
     run("add source", [] {
         auto ed = pairAndLoose(true);
         DiagramScene scene(ed.get());
-        save(edgeMenuPicture(scene, "2", QStringLiteral("Bifurcar arriba con caja existente")), "information/addSource/01.png");
+        save(edgeMenuPicture(scene, "2", Tr::tr("Bifurcar arriba con caja existente")), "information/addSource/01.png");
     });
     run("add target", [] {
         auto ed = pairAndLoose(false);
         DiagramScene scene(ed.get());
-        save(edgeMenuPicture(scene, "2", QStringLiteral("Bifurcar abajo con caja existente")), "information/addTarget/01.png");
+        save(edgeMenuPicture(scene, "2", Tr::tr("Bifurcar abajo con caja existente")), "information/addTarget/01.png");
     });
 
     // ── Equivalences ──────────────────────────────────────────────────────────
     run("equivalences", [] {
         auto ed = twoDepths();
         DiagramScene scene(ed.get());
-        save(boxMenuPicture(scene, "5", QStringLiteral("Hacer equivalente a…")), "information/addEquivalence/01.png");
-        save(selectionPicture(scene, "5", QStringLiteral("Hacer equivalente a…")), "information/addEquivalence/02.png");
+        save(boxMenuPicture(scene, "5", Tr::tr("Establecer equivalencia entre…")), "information/addEquivalence/01.png");
+        save(selectionPicture(scene, "5", Tr::tr("Establecer equivalencia entre…")), "information/addEquivalence/02.png");
         ed->addEquivalence(named(ed->getGraph(), "5"), named(ed->getGraph(), "3"));
         save(scenePicture(scene), "information/addEquivalence/03.png");
 
-        save(lineMenuPicture(scene, QStringLiteral("Usar línea discontinua")), "information/equivalenceStyle/01.png");
+        save(lineMenuPicture(scene, Tr::tr("Usar línea discontinua")), "information/equivalenceStyle/01.png");
         ed->setEquivalenceContinuous(named(ed->getGraph(), "3"), named(ed->getGraph(), "5"), false);
         save(scenePicture(scene), "information/equivalenceStyle/02.png");
         ed->setEquivalenceContinuous(named(ed->getGraph(), "3"), named(ed->getGraph(), "5"), true);
 
-        save(boxMenuPicture(scene, "3", QStringLiteral("Quitar equivalencia con «5»")), "information/removeEquivalence/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Quitar equivalencia con «%1»").arg(QStringLiteral("5"))), "information/removeEquivalence/01.png");
         ed->removeEquivalence(named(ed->getGraph(), "3"), named(ed->getGraph(), "5"));
         save(scenePicture(scene), "information/removeEquivalence/02.png");
     });
@@ -727,7 +741,7 @@ int main(int argc, char* argv[]) {
         // A Hogar's preview, the mouse on the line between its two parts (found
         // by moving down the middle, from below the box's top edge, until the
         // preview offers to drag it).
-        NodeAttributes hogar("Hogar");
+        NodeAttributes hogar(Tr::tr("Hogar").toStdString());
         hogar.fire = FireState::FireWithAshes;
         hogar.applyFireColours();
         hogar.ashes = 0.4;
@@ -771,7 +785,7 @@ int main(int argc, char* argv[]) {
         settle(200);
         QLabel* title = nullptr;
         for (auto* label : dialog.findChildren<QLabel*>(QStringLiteral("sectionTitle")))
-            if (label->text() == QStringLiteral("DISTANCIAS")) title = label;
+            if (label->text() == Tr::tr("Distancias").toUpper()) title = label;
         if (!title) throw std::runtime_error("No distances in the settings");
         auto* card = preview->parentWidget();
         const QRect distances(QPoint(0, title->mapTo(card, QPoint(0, 0)).y() - 4),
@@ -806,10 +820,10 @@ int main(int argc, char* argv[]) {
 
     // ── The joint diagram's box menu ──────────────────────────────────────────
     run("joint", [] {
-        Project project("Proyecto");
+        Project project(Tr::tr("Proyecto").toStdString());
         {
             auto& ed = project.getEditor(0);
-            ed.setName("Esquema 1");
+            ed.setName(diagramName(1).toStdString());
             auto n1 = ed.createNode(NodeAttributes("1"), 0, -1, nullptr);
             ed.createNode(NodeAttributes("2"), 1, -1, n1);
             auto n3 = ed.createNode(NodeAttributes("3"), 0, -1, nullptr);
@@ -818,7 +832,7 @@ int main(int argc, char* argv[]) {
         project.addDiagram();
         {
             auto& ed = project.getEditor(1);
-            ed.setName("Esquema 2");
+            ed.setName(diagramName(2).toStdString());
             auto n5 = ed.createNode(NodeAttributes("5"), 0, -1, nullptr);
             ed.createNode(NodeAttributes("6"), 1, -1, n5);
         }
@@ -828,8 +842,8 @@ int main(int argc, char* argv[]) {
             const_cast<GraphicalHypergraph&>(project.getEditor(1).getGraph()), false);
         project.syncJointNames();
         DiagramScene scene(&project.getJointEditor());
-        save(boxMenuPicture(scene, "3", QStringLiteral("Mover esquema «Esquema 1»")), "information/moveDiagram/01.png");
-        save(boxMenuPicture(scene, "3", QStringLiteral("Quitar esquema «Esquema 1»")), "information/removeDiagram/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Mover esquema «%1»").arg(diagramName(1))), "information/moveDiagram/01.png");
+        save(boxMenuPicture(scene, "3", Tr::tr("Quitar esquema «%1»").arg(diagramName(1))), "information/removeDiagram/01.png");
         project.getJointEditor().removeHypergraph(project.getEditor(0).getId());
         save(scenePicture(scene), "information/removeDiagram/02.png");
     });
@@ -947,13 +961,13 @@ int main(int argc, char* argv[]) {
             save(selectionAt(scene, click, option), path);
         });
     };
-    choosing(twoBlocks, "information/fuse/02.png", "2", "", QStringLiteral("Fusionar"));
-    choosing(joined, "information/removePartial/02.png", "2", "", QStringLiteral("Eliminar conexión parcial"));
-    choosing(fan, "information/simplify/02.png", "1", "3", QStringLiteral("Simplificar conexión"));
-    choosing(fan, "information/addChildConnection/04.png", "2", "", QStringLiteral("Caja «2» por debajo de"));
-    choosing(fan, "information/addParentConnection/04.png", "1", "", QStringLiteral("Caja «1» por encima de"));
-    choosing(twoParents, "information/addSource/04.png", "1", "3", QStringLiteral("Bifurcar arriba con caja existente"));
-    choosing(fork, "information/addTarget/04.png", "1", "2", QStringLiteral("Bifurcar abajo con caja existente"));
+    choosing(twoBlocks, "information/fuse/02.png", "2", "", Tr::tr("Fusionar"));
+    choosing(joined, "information/removePartial/02.png", "2", "", Tr::tr("Eliminar conexión parcial"));
+    choosing(fan, "information/simplify/02.png", "1", "3", Tr::tr("Simplificar conexión"));
+    choosing(fan, "information/addChildConnection/04.png", "2", "", Tr::tr("Caja «%1» por debajo de").arg(QStringLiteral("2")));
+    choosing(fan, "information/addParentConnection/04.png", "1", "", Tr::tr("Caja «%1» por encima de").arg(QStringLiteral("1")));
+    choosing(twoParents, "information/addSource/04.png", "1", "3", Tr::tr("Bifurcar arriba con caja existente"));
+    choosing(fork, "information/addTarget/04.png", "1", "2", Tr::tr("Bifurcar abajo con caja existente"));
 
     // ── The background menu, where the click was ──────────────────────────────
     run("new box", [] {
@@ -984,7 +998,7 @@ int main(int argc, char* argv[]) {
         scene.copyAt(itemOf(scene, "1")->sceneBoundingRect().center()); // the block 1-2
         const QRectF four = itemOf(scene, "4")->sceneBoundingRect();
         const QPointF right(four.right() + 170.0, itemOf(scene, "3")->sceneBoundingRect().center().y());
-        save(menuPicture(scene, right, QStringLiteral("Pegar"), {}, true), "information/paste/01.png");
+        save(menuPicture(scene, right, Tr::tr("Pegar"), {}, true), "information/paste/01.png");
         scene.pasteAt(right);
         save(scenePicture(scene), "information/paste/02.png");
     });
@@ -998,16 +1012,16 @@ int main(int argc, char* argv[]) {
         const QRectF before = diagramArea(scene);
         const QRectF one = itemOf(scene, "1")->sceneBoundingRect();
         const QPointF left(one.left() - 190.0, one.center().y());
-        movePiece(scene, "3", QStringLiteral("Mover bloque"), left);
+        movePiece(scene, "3", Tr::tr("Mover bloque"), left);
         save(compose(scene, before | diagramArea(scene), {}), "information/moveBlock/02.png");
         dropPiece(scene, left);
         save(scenePicture(scene), "information/moveBlock/03.png");
     });
     run("move diagram", [] {
-        Project project("Proyecto");
+        Project project(Tr::tr("Proyecto").toStdString());
         {
             auto& ed = project.getEditor(0);
-            ed.setName("Esquema 1");
+            ed.setName(diagramName(1).toStdString());
             auto n1 = ed.createNode(NodeAttributes("1"), 0, -1, nullptr);
             ed.createNode(NodeAttributes("2"), 1, -1, n1);
             auto n3 = ed.createNode(NodeAttributes("3"), 0, -1, nullptr);
@@ -1016,7 +1030,7 @@ int main(int argc, char* argv[]) {
         project.addDiagram();
         {
             auto& ed = project.getEditor(1);
-            ed.setName("Esquema 2");
+            ed.setName(diagramName(2).toStdString());
             auto n5 = ed.createNode(NodeAttributes("5"), 0, -1, nullptr);
             ed.createNode(NodeAttributes("6"), 1, -1, n5);
         }
@@ -1030,7 +1044,7 @@ int main(int argc, char* argv[]) {
         settle();
         const QRectF six = itemOf(scene, "6")->sceneBoundingRect();
         const QPointF right(six.right() + 260.0, itemOf(scene, "5")->sceneBoundingRect().center().y());
-        movePiece(scene, "3", QStringLiteral("Mover esquema «Esquema 1»"), right);
+        movePiece(scene, "3", Tr::tr("Mover esquema «%1»").arg(diagramName(1)), right);
         // Only what is on show: the whole diagram left, so its old place is empty.
         save(compose(scene, diagramArea(scene), {}), "information/moveDiagram/02.png");
         dropPiece(scene, right);
@@ -1039,10 +1053,10 @@ int main(int argc, char* argv[]) {
 
     // ── The tabs: a real main window ──────────────────────────────────────────
     run("tabs", [] {
-        Project project("Proyecto");
+        Project project(Tr::tr("Proyecto").toStdString());
         {
             auto& ed = project.getEditor(0);
-            ed.setName("Esquema");
+            ed.setName(Tr::tr("Esquema").toStdString());
             auto n1 = ed.createNode(NodeAttributes("1"), 0, -1, nullptr);
             ed.createNode(NodeAttributes("2"), 1, -1, n1);
             auto n3 = ed.createNode(NodeAttributes("3"), 0, -1, nullptr);
@@ -1070,7 +1084,7 @@ int main(int argc, char* argv[]) {
         if (!menu) throw std::runtime_error("No tab menu");
         menu->move(-20000, -20000);
         settle(40);
-        QAction* duplicate = actionNamed(menu, QStringLiteral("Duplicar esquema"));
+        QAction* duplicate = actionNamed(menu, Tr::tr("Duplicar esquema"));
         menu->setActiveAction(duplicate);
         settle(60);
         const QPixmap menu_pm = menu->grab();
@@ -1088,10 +1102,10 @@ int main(int argc, char* argv[]) {
     // ── The project's history ────────────────────────────────────────────────
     run("project history", [] {
         // Esquema 2 just removed: the Proyecto menu offers to bring it back.
-        Project project("Proyecto");
-        project.getEditor(0).setName("Esquema 1");
+        Project project(Tr::tr("Proyecto").toStdString());
+        project.getEditor(0).setName(diagramName(1).toStdString());
         project.addDiagram();
-        project.getEditor(1).setName("Esquema 2");
+        project.getEditor(1).setName(diagramName(2).toStdString());
         project.removeDiagram(1);
         MainWindow window(std::move(project));
         window.resize(900, 600);
@@ -1099,7 +1113,7 @@ int main(int argc, char* argv[]) {
         settle(400);
         QMenu* menu = nullptr;
         for (QAction* a : window.menuBar()->actions())
-            if (a->text() == QStringLiteral("Proyecto")) menu = a->menu();
+            if (a->text() == Tr::tr("Proyecto")) menu = a->menu();
         if (!menu) throw std::runtime_error("No Proyecto menu");
         menu->popup(window.mapToGlobal(QPoint(40, 40)));
         settle(400);
@@ -1120,11 +1134,11 @@ int main(int argc, char* argv[]) {
             // The background menu, opened right of the 3, on its level.
             const QRectF three = itemOf(scene, "3")->sceneBoundingRect();
             const QPointF empty(three.right() + 90.0, three.center().y());
-            save(menuPicture(scene, empty, QStringLiteral("Nueva caja"), {}, true), "tutorial/new_box.png");
+            save(menuPicture(scene, empty, Tr::tr("Nueva caja"), {}, true), "tutorial/new_box.png");
         }
         // The 6 has nothing to its right, so its menu hides none of the diagram.
         save(boxMenuPicture(scene, "6", {}), "tutorial/box_menu.png");
-        save(selectionPicture(scene, "4", QStringLiteral("Caja «4» por debajo de")), "tutorial/pick_second.png");
+        save(selectionPicture(scene, "4", Tr::tr("Caja «%1» por debajo de").arg(QStringLiteral("4"))), "tutorial/pick_second.png");
         save(edgeMenuPicture(scene, "6", {}), "tutorial/edge_menu.png");
         {
             // The 6 on its way to the 4 (the step asks to try just that).
@@ -1154,6 +1168,23 @@ int main(int argc, char* argv[]) {
         }
         save(dialog.grab().toImage(), "tutorial/properties.png");
         dialog.close();
+
+        // The joint diagram's background menu, with the project's diagrams
+        // (the first one already in), opened right of the diagram.
+        DiagramScene joint(&example->getJointEditor());
+        joint.setDiagramCatalog([&example] {
+            std::vector<DiagramScene::DiagramInfo> diagrams;
+            for (int i = 0; i < example->getDiagramCount(); ++i)
+                diagrams.push_back({ example->getEditor(i).getId(), QString::fromStdString(example->getDiagramName(i)) });
+            return diagrams;
+        });
+        joint.rebuild();
+        settle();
+        {
+            const QRectF three = itemOf(joint, "3")->sceneBoundingRect();
+            const QPointF empty(three.right() + 90.0, three.center().y());
+            save(menuPicture(joint, empty, {}, {}, true), "tutorial/joint_manage.png");
+        }
     });
     run("tour, moving a block", [] {
         // The example's first diagram with the second's block beside it, as the
@@ -1175,7 +1206,7 @@ int main(int argc, char* argv[]) {
         const QRectF before = diagramArea(scene);
         const QRectF seven = itemOf(scene, "7")->sceneBoundingRect();
         QMenu* menu = openMenuAt(scene, seven.center());
-        QAction* move = actionNamed(menu, QStringLiteral("Mover bloque"));
+        QAction* move = actionNamed(menu, Tr::tr("Mover bloque"));
         menu->close();
         move->trigger();
         settle(200);

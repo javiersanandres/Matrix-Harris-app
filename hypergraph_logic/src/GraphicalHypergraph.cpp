@@ -5,6 +5,7 @@
 #include <climits>
 #include <limits>
 #include <unordered_set>
+#include "Text.h"
 
 namespace hypergraph_logic {
 
@@ -266,15 +267,15 @@ namespace hypergraph_logic {
 	void GraphicalHypergraph::setHyperedgeOrder(int layer, const std::vector<HyperedgePtr>& order) {
 		auto it = layers_.find(layer);
 		if (it == layers_.end())
-			throw std::invalid_argument("setHyperedgeOrder: la capa no existe.");
+			throw std::invalid_argument(text(LogicText::tr("setHyperedgeOrder: la capa no existe.")));
 		auto& current = it->second.outgoing_edges;
 		std::unordered_set<Hyperedge*> remaining;
 		for (const auto& e : current) remaining.insert(e.get());
 		if (order.size() != current.size())
-			throw std::invalid_argument("setHyperedgeOrder: el orden no contiene las mismas conexiones.");
+			throw std::invalid_argument(text(LogicText::tr("setHyperedgeOrder: el orden no contiene las mismas conexiones.")));
 		for (const auto& e : order)
 			if (!e || remaining.erase(e.get()) == 0)
-				throw std::invalid_argument("setHyperedgeOrder: el orden no contiene las mismas conexiones.");
+				throw std::invalid_argument(text(LogicText::tr("setHyperedgeOrder: el orden no contiene las mismas conexiones.")));
 		current = order;
 	}
 
@@ -370,7 +371,7 @@ namespace hypergraph_logic {
 			}
 		}
 		else {
-			throw std::invalid_argument("La nueva posición no cambia el orden de la caja en su nivel.");
+			throw std::invalid_argument(text(LogicText::tr("La nueva posición no cambia el orden de la caja en su nivel.")));
 		}
 	}
 

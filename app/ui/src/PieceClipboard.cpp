@@ -1,4 +1,5 @@
 #include "PieceClipboard.h"
+#include "Translation.h"
 
 #include <QClipboard>
 #include <QGuiApplication>
@@ -64,7 +65,7 @@ namespace ui::clipboard {
         if (!payload || !readGraph(*payload)) return QString();
         const QString what = QString::fromStdString(payload->value("description", std::string()));
         const int boxes = payload->value("boxes", 0);
-        const QString count = boxes == 1 ? QStringLiteral("1 caja") : QStringLiteral("%1 cajas").arg(boxes);
+        const QString count = boxes == 1 ? Tr::tr("1 caja") : Tr::tr("%1 cajas").arg(boxes);
         return what.isEmpty() ? count : QStringLiteral("%1 (%2)").arg(what, count);
     }
 

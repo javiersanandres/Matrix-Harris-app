@@ -12,6 +12,7 @@
 #include <string>
 #include <variant>
 #include <vector>
+#include "Text.h"
 
 
 using json = nlohmann::json;
@@ -214,11 +215,20 @@ namespace app_logic {
 				[name](GraphicalHypergraph& g) { g.setName(name); } });
 		}
 
+		// ── setNameOutsideHistory ─────────────────────────────────────────────────
+		//
+		// Renames the diagram without a step in its history: for a name the app
+		// gave it and changes on its own (a default name put in another
+		// language), which the user has nothing to undo about.
+		void setNameOutsideHistory(const std::string& name) {
+			derived().graph().setName(name);
+		}
+
 		// ── renameNode ────────────────────────────────────────────────────────────
 		//
 		// Renames the node. Local change: undone without copying the graph.
 		void renameNode(const NodePtr& node, const std::string& new_name) {
-			if (!node) throw std::invalid_argument("La caja no puede ser nula.");
+			if (!node) throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La caja no puede ser nula.")));
 			const std::string old_name = node->getName();
 			if (old_name == new_name) return;
 			const NodeLocator at = locate(derived().graph(), node);
@@ -248,7 +258,7 @@ namespace app_logic {
 		// size, so all the labels can be adjusted at once. Font sizes do not change
 		// the layout. One step of the history: undone without copying the graph.
 		void setNodeAttributesWithFontSizeForAll(const NodePtr& node, const NodeAttributes& attributes) {
-			if (!node) throw std::invalid_argument("La caja no puede ser nula.");
+			if (!node) throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La caja no puede ser nula.")));
 			auto& graph = derived().graph();
 
 			// The other boxes whose font size changes, and the size each one had.
@@ -324,7 +334,7 @@ namespace app_logic {
 		// Applies the attributes to the node and returns how to undo and redo it,
 		// or nothing if they were already the node's (see setNodeAttributes).
 		std::optional<LocalChange> applyNodeAttributes(const NodePtr& node, const NodeAttributes& attributes) {
-			if (!node) throw std::invalid_argument("La caja no puede ser nula.");
+			if (!node) throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La caja no puede ser nula.")));
 			auto& graph = derived().graph();
 			const NodeAttributes old_attributes = node->getAttributes();
 			if (old_attributes == attributes) return std::nullopt;
@@ -396,8 +406,8 @@ namespace app_logic {
 		// layout is untouched. Local change: undone without copying the graph.
 		// edge must be an original hyperedge (a segment throws).
 		void setHyperedgeContinuous(const HyperedgePtr& edge, bool continuous) {
-			if (!edge) throw std::invalid_argument("La conexión no puede ser nula.");
-			if (edge->isSegment()) throw std::logic_error("Solo se puede cambiar la línea de la conexión completa.");
+			if (!edge) throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La conexión no puede ser nula.")));
+			if (edge->isSegment()) throw std::logic_error(hypergraph_logic::text(LogicText::tr("Solo se puede cambiar la línea de la conexión completa.")));
 			if (continuous ? edge->isContinuous() : edge->allEndsUncertain()) return;
 
 			const EdgeLocator at = locate(derived().graph(), edge);
@@ -424,11 +434,11 @@ namespace app_logic {
 		// at every end, so unmarking one end of it keeps the others marked; and
 		// marking every end is stored as "discontinuous as a whole". Undoable.
 		void setConnectionEndUncertain(const HyperedgePtr& edge, const NodePtr& node, bool uncertain) {
-			if (!edge || !node) throw std::invalid_argument("La conexión y la caja no pueden ser nulas.");
-			if (edge->isSegment()) throw std::logic_error("Solo se puede marcar como dudosa la conexión completa.");
+			if (!edge || !node) throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La conexión y la caja no pueden ser nulas.")));
+			if (edge->isSegment()) throw std::logic_error(hypergraph_logic::text(LogicText::tr("Solo se puede marcar como dudosa la conexión completa.")));
 			const bool as_source = edge->containsSource(node);
 			if (!as_source && !edge->containsTarget(node))
-				throw std::invalid_argument("La caja no forma parte de esta conexión.");
+				throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La caja no forma parte de esta conexión.")));
 			if (isConnectionEndUncertain(edge, node) == uncertain) return;
 
 			auto& graph = derived().graph();
@@ -853,14 +863,14 @@ namespace app_logic {
 			const auto& nodes = g.getLayerData(node->getLayer()).nodes;
 			const auto it = std::find(nodes.begin(), nodes.end(), node);
 			if (it == nodes.end())
-				throw std::invalid_argument("La caja no forma parte de este esquema.");
+				throw std::invalid_argument(hypergraph_logic::text(LogicText::tr("La caja no forma parte de este esquema.")));
 			return { node->getLayer(), static_cast<int>(it - nodes.begin()) };
 		}
 
 		static NodePtr resolve(const GraphicalHypergraph& g, const NodeLocator& at) {
 			const auto& nodes = g.getLayerData(at.layer).nodes;
 			if (at.index < 0 || at.index >= static_cast<int>(nodes.size()))
-				throw std::logic_error("El historial de cambios no coincide con el esquema.");
+				throw std::logic_error(hypergraph_logic::text(LogicText::tr("El historial de cambios no coincide con el esquema.")));
 			return nodes[at.index];
 		}
 
@@ -883,7 +893,7 @@ namespace app_logic {
 				for (const auto& t : targets) same = same && e->containsTarget(t);
 				if (same) return e;
 			}
-			throw std::logic_error("El historial de cambios no coincide con el esquema.");
+			throw std::logic_error(hypergraph_logic::text(LogicText::tr("El historial de cambios no coincide con el esquema.")));
 		}
 
 		// ── Line style of a connection ────────────────────────────────────────────
@@ -945,7 +955,7 @@ namespace app_logic {
 		template <typename Stack>
 		void step(Stack& from, Stack& to, bool undoing) {
 			if (from.empty())
-				throw std::logic_error(undoing ? "No hay nada que deshacer." : "No hay nada que rehacer.");
+				throw std::logic_error(undoing ? hypergraph_logic::text(LogicText::tr("No hay nada que deshacer.")) : hypergraph_logic::text(LogicText::tr("No hay nada que rehacer.")));
 			auto& entry = from.back();
 			if (auto* local = std::get_if<LocalChange>(&entry.change)) {
 				GraphicalHypergraph& g = derived().graph();

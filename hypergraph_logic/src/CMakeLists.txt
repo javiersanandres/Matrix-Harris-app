@@ -6,10 +6,11 @@ add_library(node)
 target_sources(node
     PRIVATE
         Node.cpp
+        Text.cpp
     PUBLIC
         FILE_SET HEADERS
         BASE_DIRS ${CMAKE_CURRENT_SOURCE_DIR}/../include
-        FILES ../include/Node.h)
+        FILES ../include/Node.h ../include/Text.h)
 
 target_include_directories(node
     PUBLIC

@@ -340,7 +340,7 @@ namespace app_logic {
 		// held by the step while it is out of the project.
 		struct ProjectStep {
 			enum class Kind { AddDiagram, RemoveDiagram, Settings } kind;
-			std::string verb;                          // "añadir", "duplicar", "eliminar"
+			std::string verb;                          // "añadir «%1»", ... (%1: the diagram), translated when shown
 			int index = -1;                            // where the diagram is (or was)
 			std::unique_ptr<HypergraphEditor> held;
 			ProjectSettings before, after;

@@ -1,7 +1,9 @@
 #include "DiagramTabWidget.h"
+#include "Translation.h"
 #include "DiagramView.h"
 #include "UiStyle.h"
 
+#include <QGraphicsItem>
 #include <QContextMenuEvent>
 #include <QGraphicsScene>
 #include <QHBoxLayout>
@@ -98,7 +100,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         trash_btn_->setIcon(style::icon(style::Icon::Trash));
         trash_btn_->setIconSize(QSize(16, 16));
         trash_btn_->setFixedSize(NAME_HEIGHT, NAME_HEIGHT);
-        trash_btn_->setToolTip(QStringLiteral("Eliminar esquema"));
+        trash_btn_->setToolTip(Tr::tr("Eliminar esquema"));
         QSizePolicy keep = trash_btn_->sizePolicy();
         keep.setRetainSizeWhenHidden(true);
         trash_btn_->setSizePolicy(keep);
@@ -149,7 +151,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         // slots, spacing and, on the joint tab, its glyph.
         const int room = TAB_WIDTH - 16 - 2 * NAME_HEIGHT - 16 - (is_joint_ ? 21 : 0);
         name_label_->setText(name_label_->fontMetrics().elidedText(name_, Qt::ElideRight, room));
-        name_label_->setToolTip(is_joint_ ? name_ : name_ + QStringLiteral("\nDoble clic para renombrar"));
+        name_label_->setToolTip(is_joint_ ? name_ : name_ + Tr::tr("\nDoble clic para renombrar"));
     }
 
     void DiagramTabWidget::refitMiniature() {
@@ -225,6 +227,24 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
             refitMiniature();
             return false;
         }
+        if (watched == miniature_view_->viewport()) {
+            // An empty diagram has nothing to pan or zoom: there the miniature
+            // is one more part of the card, and a click on it selects the tab.
+            const QGraphicsScene* scene = miniature_view_->scene();
+            const QList<QGraphicsItem*> items = scene ? scene->items() : QList<QGraphicsItem*>();
+            const bool empty = std::none_of(items.begin(), items.end(),
+                [](const QGraphicsItem* item) { return item->isVisible(); });
+            // (Not while dragging: the view shows a closed hand then.)
+            const bool hovering = event->type() == QEvent::Enter || (event->type() == QEvent::MouseMove
+                && static_cast<QMouseEvent*>(event)->buttons() == Qt::NoButton);
+            if (hovering)
+                miniature_view_->viewport()->setCursor(empty ? Qt::PointingHandCursor : Qt::OpenHandCursor);
+            if (empty && event->type() == QEvent::MouseButtonPress
+                && static_cast<QMouseEvent*>(event)->button() == Qt::LeftButton) {
+                emit clicked();
+                return true;
+            }
+        }
         if (watched == name_label_ && event->type() == QEvent::MouseButtonDblClick && !is_joint_) {
             startRename();
             return true;
@@ -253,7 +273,7 @@ QToolButton#tabTrash:hover { background: #FDECEC; }
         name_box_->show();
         if (commit) {
             QString new_name = name_edit_->text().trimmed();
-            if (new_name.isEmpty()) new_name = QStringLiteral("Esquema nuevo");
+            if (new_name.isEmpty()) new_name = Tr::tr("Esquema nuevo");
             if (new_name != name_) {
                 name_ = new_name;
                 emit renamed(new_name);

@@ -1,4 +1,5 @@
 #include "MinimizingProgressDialog.h"
+#include "Translation.h"
 #include "BusySpinner.h"
 #include "UiStyle.h"
 
@@ -95,7 +96,7 @@ namespace ui {
             icon->setPixmap(style::icon(fast ? style::Icon::Fast : style::Icon::Slow)
                 .pixmap(QSize(14, 14), chip->devicePixelRatioF()));
             row->addWidget(icon);
-            row->addWidget(new QLabel(fast ? QStringLiteral("Modo rápido") : QStringLiteral("Modo lento"), chip));
+            row->addWidget(new QLabel(fast ? Tr::tr("Modo rápido") : Tr::tr("Modo lento"), chip));
             return chip;
         }
 
@@ -110,7 +111,7 @@ namespace ui {
     // ============================================================================
 
     MinimizingProgressDialog::MinimizingProgressDialog(QWidget* parent, const Options& options)
-        : StyledDialog(Badge::Info, QStringLiteral("Minimizando cruces"), parent)
+        : StyledDialog(Badge::Info, Tr::tr("Minimizando cruces"), parent)
         , options_(options)
     {
         setWindowModality(Qt::ApplicationModal);
@@ -118,9 +119,9 @@ namespace ui {
 
         const bool fast = options_.countdown_seconds > 0;
         setMessage(fast
-            ? QStringLiteral("Reordenando las cajas para que las conexiones se crucen lo menos "
+            ? Tr::tr("Reordenando las cajas para que las conexiones se crucen lo menos "
                              "posible. Tardará %1 segundos como máximo.").arg(options_.countdown_seconds)
-            : QStringLiteral("Buscando el orden de las cajas con el menor número de cruces, sin "
+            : Tr::tr("Buscando el orden de las cajas con el menor número de cruces, sin "
                              "límite de tiempo. Puedes pausar cuando quieras: se usará el mejor "
                              "dibujo encontrado hasta entonces."));
 
@@ -142,9 +143,9 @@ namespace ui {
         setBody(body);
 
         if (options_.show_pausar) {
-            pausar_btn_ = addActionButton(QStringLiteral("Pausar"), ButtonStyle::Secondary);
+            pausar_btn_ = addActionButton(Tr::tr("Pausar"), ButtonStyle::Secondary);
             pausar_btn_->setIcon(style::icon(style::Icon::Pause));
-            pausar_btn_->setToolTip(QStringLiteral("Detiene la búsqueda y usa el mejor dibujo encontrado hasta ahora"));
+            pausar_btn_->setToolTip(Tr::tr("Detiene la búsqueda y usa el mejor dibujo encontrado hasta ahora"));
             connect(pausar_btn_, &QPushButton::clicked,
                 this, &MinimizingProgressDialog::onPausarClicked);
         }
@@ -165,22 +166,22 @@ namespace ui {
 
         if (stopping_) {
             track_->setIndeterminate(t);
-            caption_->setText(QStringLiteral("Deteniendo la búsqueda…"));
+            caption_->setText(Tr::tr("Deteniendo la búsqueda…"));
         }
         else if (budget > 0 && t < budget) {
             track_->setFraction(t / budget);
             const int left = static_cast<int>(std::ceil(budget - t));
-            caption_->setText(left == 1 ? QStringLiteral("Queda 1 segundo")
-                                        : QStringLiteral("Quedan %1 segundos").arg(left));
+            caption_->setText(left == 1 ? Tr::tr("Queda 1 segundo")
+                                        : Tr::tr("Quedan %1 segundos").arg(left));
         }
         else if (budget > 0) {
             // The budget is only the solver's: applying the result takes a moment more.
             track_->setIndeterminate(t);
-            caption_->setText(QStringLiteral("Aplicando el resultado…"));
+            caption_->setText(Tr::tr("Aplicando el resultado…"));
         }
         else {
             track_->setIndeterminate(t);
-            caption_->setText(QStringLiteral("Tiempo transcurrido: %1").arg(clock(static_cast<int>(t))));
+            caption_->setText(Tr::tr("Tiempo transcurrido: %1").arg(clock(static_cast<int>(t))));
         }
     }
 
@@ -202,7 +203,7 @@ namespace ui {
         token_.cancel();
         stopping_ = true;
         pausar_btn_->setEnabled(false);
-        pausar_btn_->setText(QStringLiteral("Deteniendo…"));
+        pausar_btn_->setText(Tr::tr("Deteniendo…"));
         onFrame();
     }
 

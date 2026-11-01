@@ -17,6 +17,7 @@ add_executable(app_logic_tests
     test_layout_preview.cpp
     test_project_history_window.cpp
     test_fuse_dialog.cpp
+    test_translation.cpp
 )
 
 target_include_directories(app_logic_tests
@@ -32,6 +33,10 @@ target_link_libraries(app_logic_tests
         GTest::gtest
         GTest::gtest_main
 )
+
+# The English translation, checked for untranslated texts.
+target_compile_definitions(app_logic_tests PRIVATE
+    TRANSLATIONS_TS="${CMAKE_CURRENT_SOURCE_DIR}/../translations/matrix_harris_en.ts")
 
 # Discover and register all tests
 include(GoogleTest)

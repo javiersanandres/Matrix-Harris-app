@@ -57,6 +57,7 @@ set(BENCHMARK_COMMON_SOURCES
     ${UI_DIR}/src/HypergraphRenderer.cpp
     ${UI_DIR}/src/NodeVisuals.cpp
     ${HYPERGRAPH_SRC_DIR}/horizontalOrder.cpp
+    ${HYPERGRAPH_SRC_DIR}/Text.cpp
 )
 
 # ── add_benchmark_executable(<name> <main .cpp>) ─────────────────────────

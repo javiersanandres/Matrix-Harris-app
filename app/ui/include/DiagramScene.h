@@ -51,7 +51,7 @@ namespace ui {
         WaitingForSecondNode_AddSource,             // "Bifurcar arriba con caja existente"
         WaitingForSecondNode_AddTarget,             // "Bifurcar abajo con caja existente"
         WaitingForSecondNode_SimplifyConnection,    // "Simplificar conexión"
-        WaitingForSecondNode_AddEquivalence,        // "Hacer equivalente a"
+        WaitingForSecondNode_AddEquivalence,        // "Establecer equivalencia entre"
     };
 
     // ============================================================================
@@ -75,7 +75,7 @@ namespace ui {
     // are dimmed. Clicks on anything that is not a candidate are ignored. A menu
     // entry whose operation has no candidate at all is disabled.
     //
-    // Equivalences: "Hacer equivalente a…" in a box's menu is one more two-step
+    // Equivalences: "Establecer equivalencia entre…" in a box's menu is one more two-step
     // operation (its candidates are the boxes canAddEquivalence accepts); the
     // line between two equivalent boxes has a menu of its own (its style and
     // removing it), and the box menu offers the same for its own lines. While a

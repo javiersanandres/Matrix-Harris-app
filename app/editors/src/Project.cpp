@@ -4,6 +4,7 @@
 #include <fstream>
 #include <stdexcept>
 #include <algorithm>
+#include "Text.h"
 
 using json = nlohmann::json;
 
@@ -38,7 +39,7 @@ namespace app_logic {
 	// ============================================================================
 
 	int Project::addDiagram() {
-		std::string diagram_name("Esquema nuevo");
+		std::string diagram_name(hypergraph_logic::text(LogicText::tr("Esquema nuevo")));
 		// unique_ptr: push_back never invalidates existing pointed-to objects,
 		// only the pointers stored inside the vector itself — which we never
 		// hold across a push_back.
@@ -46,7 +47,7 @@ namespace app_logic {
 			std::make_unique<HypergraphEditor>(GraphicalHypergraph(diagram_name)));
 		follow(*editors_.back());
 		active_index_ = static_cast<int>(editors_.size()) - 1;
-		ProjectStep step{ ProjectStep::Kind::AddDiagram, "añadir" };
+		ProjectStep step{ ProjectStep::Kind::AddDiagram, LogicText::tr("añadir «%1»") };
 		step.index = active_index_;
 		record(std::move(step));
 		return active_index_;
@@ -56,20 +57,20 @@ namespace app_logic {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::duplicateDiagram: index out of bounds.");
 
-		const std::string base = editors_[index]->getName() + " (copia";
+		const std::string& original = editors_[index]->getName();
 		auto taken = [this](const std::string& name) {
 			return std::any_of(editors_.begin(), editors_.end(),
 				[&](const auto& e) { return e->getName() == name; });
 		};
-		std::string name = base + ")";
-		for (int n = 2; taken(name); ++n) name = base + " " + std::to_string(n) + ")";
+		std::string name = hypergraph_logic::text(LogicText::tr("%1 (copia)"), original);
+		for (int n = 2; taken(name); ++n) name = hypergraph_logic::text(LogicText::tr("%1 (copia %2)"), original, n);
 
 		GraphicalHypergraph copy = editors_[index]->getGraph().duplicate();
 		copy.setName(name);
 		editors_.push_back(std::make_unique<HypergraphEditor>(std::move(copy), InitialLayout::Keep));
 		follow(*editors_.back());
 		active_index_ = static_cast<int>(editors_.size()) - 1;
-		ProjectStep step{ ProjectStep::Kind::AddDiagram, "duplicar" };
+		ProjectStep step{ ProjectStep::Kind::AddDiagram, LogicText::tr("duplicar «%1»") };
 		step.index = active_index_;
 		record(std::move(step));
 		return active_index_;
@@ -79,7 +80,7 @@ namespace app_logic {
 		if (index < 0 || index >= static_cast<int>(editors_.size()))
 			throw std::out_of_range("Project::removeDiagram: index out of bounds.");
 
-		ProjectStep step{ ProjectStep::Kind::RemoveDiagram, "eliminar" };
+		ProjectStep step{ ProjectStep::Kind::RemoveDiagram, LogicText::tr("eliminar «%1»") };
 		step.index = index;
 		step.held = takeEditor(index);
 		record(std::move(step));
@@ -202,11 +203,11 @@ namespace app_logic {
 	}
 
 	std::string Project::label(const ProjectStep& step, bool undone) const {
-		if (step.kind == ProjectStep::Kind::Settings) return "cambiar los ajustes del proyecto";
+		if (step.kind == ProjectStep::Kind::Settings) return hypergraph_logic::text(LogicText::tr("cambiar los ajustes del proyecto"));
 		// The diagram as it is called now: in the project, or held by the step.
 		const bool in_project = (step.kind == ProjectStep::Kind::AddDiagram) != undone;
 		const HypergraphEditor* editor = in_project ? editors_[step.index].get() : step.held.get();
-		return step.verb + " «" + (editor ? editor->getName() : std::string()) + "»";
+		return hypergraph_logic::text(step.verb.c_str(), editor ? editor->getName() : std::string());
 	}
 
 	std::string Project::projectUndoLabel() const {
@@ -466,7 +467,7 @@ namespace app_logic {
 		std::ofstream out(path);
 		if (!out.is_open())
 			throw std::runtime_error(
-				"No se puede abrir el archivo: " + path.string());
+				hypergraph_logic::text(LogicText::tr("No se puede abrir el archivo: %1"), path.string()));
 		out << j.dump(2);
 
 		file_path_ = path;
@@ -490,12 +491,12 @@ namespace app_logic {
 	std::unique_ptr<Project> Project::load(const std::filesystem::path& path) {
 		std::ifstream in(path);
 		if (!in.is_open())
-			throw std::runtime_error("No se puede abrir el archivo: " + path.string());
+			throw std::runtime_error(hypergraph_logic::text(LogicText::tr("No se puede abrir el archivo: %1"), path.string()));
 
 		json j;
 		try { in >> j; }
 		catch (const json::parse_error& e) {
-			throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
+			throw std::runtime_error(hypergraph_logic::text(LogicText::tr("El archivo del proyecto está dañado: %1"), e.what()));
 		}
 
 		auto p = std::make_unique<Project>(j.at("name").get<std::string>());
@@ -527,7 +528,7 @@ namespace app_logic {
 					p->recent_colours_.push_back(colorFromHex(c.get<std::string>()));
 				}
 				catch (const std::invalid_argument& e) {
-					throw std::runtime_error(std::string("El archivo del proyecto está dañado: ") + e.what());
+					throw std::runtime_error(hypergraph_logic::text(LogicText::tr("El archivo del proyecto está dañado: %1"), e.what()));
 				}
 			}
 		}

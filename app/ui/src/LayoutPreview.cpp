@@ -1,4 +1,5 @@
 #include "LayoutPreview.h"
+#include "Translation.h"
 #include "HypergraphEditor.h"
 #include "HypergraphRenderer.h"
 #include "NodeVisuals.h"
@@ -136,9 +137,9 @@ namespace ui {
 
         QString nameOf(LayoutPreview::Distance d) {
             switch (d) {
-            case LayoutPreview::Distance::BlockSep:      return QStringLiteral("Entre cajas vecinas");
-            case LayoutPreview::Distance::LayerGap:      return QStringLiteral("Entre cajas y conexiones");
-            case LayoutPreview::Distance::HorizontalSep: return QStringLiteral("Entre líneas horizontales");
+            case LayoutPreview::Distance::BlockSep:      return Tr::tr("Entre cajas vecinas");
+            case LayoutPreview::Distance::LayerGap:      return Tr::tr("Entre cajas y conexiones");
+            case LayoutPreview::Distance::HorizontalSep: return Tr::tr("Entre líneas horizontales");
             }
             return {};
         }
@@ -360,7 +361,7 @@ namespace ui {
         p.setFont(small);
         p.setPen(style::palette::muted);
         p.drawText(card.adjusted(14, 7, -14, 0), Qt::AlignLeft | Qt::AlignTop,
-            QStringLiteral("Arrastra un punto de arriba y mira cómo cambia; pasa el ratón por una medida para ver cuál es"));
+            Tr::tr("Arrastra un punto de arriba y mira cómo cambia; pasa el ratón por una medida para ver cuál es"));
 
         const Frame frame = shown();
         const QTransform t = toWidget(frame);

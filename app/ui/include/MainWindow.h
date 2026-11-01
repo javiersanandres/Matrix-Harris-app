@@ -5,6 +5,7 @@
 #include "DiagramView.h"
 #include "DiagramTabBar.h"
 #include "HelpButton.h"
+#include "Translation.h"
 #include "ViewOverlays.h"
 
 #include <QMainWindow>
@@ -14,6 +15,7 @@
 #include <QToolButton>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 
 class QLabel;
@@ -64,6 +66,12 @@ namespace ui {
         // Constructs the window from an existing loaded project.
         explicit MainWindow(app_logic::Project&& project, QWidget* parent = nullptr);
 
+        // Constructs the window around a project another window had, as it was
+        // (history, unsaved changes, active diagram).
+        explicit MainWindow(std::unique_ptr<app_logic::Project> project, QWidget* parent = nullptr);
+
+        ~MainWindow() override;
+
         // Opens the project at path, asking first about unsaved changes.
         void openProject(const QString& path);
 
@@ -89,6 +97,18 @@ namespace ui {
         // closing, and if the user goes on, the window will close without asking
         // again. False if the user cancelled.
         bool prepareToCloseForUpdate();
+
+        // ── Language ──────────────────────────────────────────────────────────
+        // Puts the app in that language and saves the choice. The window's
+        // texts are built with it, so a new window takes this one's place with
+        // the same project (history and unsaved changes included), size and
+        // active diagram; this one closes (see replaced). During the tour, the
+        // tour starts again in the new language.
+        void switchLanguage(i18n::Language language);
+
+    signals:
+        // This window has handed its project to next and is closing.
+        void replaced(ui::MainWindow* next);
 
     protected:
         void closeEvent(QCloseEvent* event) override;
@@ -237,6 +257,21 @@ namespace ui {
 
         // ── Introductory tour ─────────────────────────────────────────────────────
         void runTutorial(bool first_run);
+        // The tour on the example project, already open; own_file is the
+        // user's project, which comes back when it ends.
+        struct Tour {
+            bool first_run = false;
+            std::filesystem::path own_file;
+        };
+        void startTour(const Tour& tour);
+        // switchLanguage during the tour: the example goes to the new window,
+        // which shows the tour from the start in the new language.
+        void switchLanguage(i18n::Language language, std::optional<Tour> tour);
+        // The names the app gave (the project's, an empty diagram's, the
+        // example's while touring) in the language just applied, from the
+        // ones before.
+        void translateDefaultNames(const std::vector<std::pair<std::string, std::string>>& project_names,
+            const std::vector<std::pair<std::string, std::string>>& diagram_names, bool touring);
         // Puts the user's project back once the tour is over: from its file,
         // or a new one if it had none.
         void restoreAfterTutorial(const std::filesystem::path& own_file);
@@ -247,6 +282,7 @@ namespace ui {
         QRect tutorialTarget(tutorial::Target target) const;
         bool tutorial_running_ = false;
         bool closing_for_update_ = false; // see prepareToCloseForUpdate
+        bool replaced_ = false;           // see switchLanguage
         QAction* action_actualizaciones_ = nullptr;
         std::function<void()> update_checker_;
 

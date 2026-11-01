@@ -30,6 +30,12 @@ namespace updates {
     // signed with the publisher's key.
     void start(ui::MainWindow& window, const QString& appcast_url = {});
 
+    // Another window took the place of the one given to start (the language
+    // changed, see MainWindow::switchLanguage): asks that one about unsaved
+    // changes before installing, and shows the update windows in the new
+    // language. Its checker was handed over with the project.
+    void follow(ui::MainWindow& window);
+
     // Stops every pending check or download (call when the app quits).
     void stop();
 

@@ -1,4 +1,5 @@
 #include "DiagramScene.h"
+#include "Translation.h"
 #include "NodeDialogs.h"
 #include "NodeEditorWidgets.h"
 #include "NodeVisuals.h"
@@ -353,21 +354,21 @@ namespace ui {
             ? QString::fromStdString(pending_node_->getName()) : QString();
         switch (state) {
         case InteractionState::WaitingForSecondNode_AddConnectionParent:
-            return QStringLiteral("Elige la caja que quedará por encima de «%1»").arg(name);
+            return Tr::tr("Elige la caja que quedará por encima de «%1»").arg(name);
         case InteractionState::WaitingForSecondNode_AddConnectionChild:
-            return QStringLiteral("Elige la caja que quedará por debajo de «%1»").arg(name);
+            return Tr::tr("Elige la caja que quedará por debajo de «%1»").arg(name);
         case InteractionState::WaitingForSecondNode_RemoveConnection:
-            return QStringLiteral("Elige la caja cuya conexión con «%1» quieres eliminar").arg(name);
+            return Tr::tr("Elige la caja cuya conexión con «%1» quieres eliminar").arg(name);
         case InteractionState::WaitingForSecondNode_FuseNodes:
-            return QStringLiteral("Elige la caja que se fusionará con «%1»").arg(name);
+            return Tr::tr("Elige la caja que se fusionará con «%1»").arg(name);
         case InteractionState::WaitingForSecondNode_AddSource:
-            return QStringLiteral("Elige la caja que se unirá a la conexión por arriba");
+            return Tr::tr("Elige la caja que se unirá a la conexión por arriba");
         case InteractionState::WaitingForSecondNode_AddTarget:
-            return QStringLiteral("Elige la caja que se unirá a la conexión por abajo");
+            return Tr::tr("Elige la caja que se unirá a la conexión por abajo");
         case InteractionState::WaitingForSecondNode_SimplifyConnection:
-            return QStringLiteral("Elige la caja que quieres quitar de la conexión");
+            return Tr::tr("Elige la caja que quieres quitar de la conexión");
         case InteractionState::WaitingForSecondNode_AddEquivalence:
-            return QStringLiteral("Elige la caja que será equivalente a «%1»").arg(name);
+            return Tr::tr("Elige la otra caja de la equivalencia con «%1»").arg(name);
         case InteractionState::Idle:
             break;
         }
@@ -485,11 +486,11 @@ namespace ui {
         style::addMenuHeader(menu,
             renderNodeIcon(shown, QSize(44, 30), dpr),
             QString::fromStdString(node->getName()),
-            QStringLiteral("%1 por encima · %2 por debajo")
+            Tr::tr("%1 por encima · %2 por debajo")
                 .arg(node->getParents().size()).arg(node->getChildren().size()));
 
         QAction* properties = menu->addAction(style::icon(style::Icon::Properties),
-            QStringLiteral("Propiedades…"), [this, item] { showNodeProperties(item); });
+            Tr::tr("Propiedades…"), [this, item] { showNodeProperties(item); });
         QFont bold = properties->font();
         bold.setBold(true);
         properties->setFont(bold);
@@ -506,27 +507,27 @@ namespace ui {
         };
 
         if (!is_joint_) {
-            style::addMenuSection(menu, QStringLiteral("Crear"));
-            menu->addAction(style::icon(style::Icon::BoxAbove), QStringLiteral("Crear caja arriba"),
+            style::addMenuSection(menu, Tr::tr("Crear"));
+            menu->addAction(style::icon(style::Icon::BoxAbove), Tr::tr("Crear caja arriba"),
                 [this, node] { onCreateNodeAbove(node); });
-            menu->addAction(style::icon(style::Icon::BoxBelow), QStringLiteral("Crear caja debajo"),
+            menu->addAction(style::icon(style::Icon::BoxBelow), Tr::tr("Crear caja debajo"),
                 [this, node] { onCreateNodeBelow(node); });
-            menu->addAction(style::icon(style::Icon::BoxLeft), QStringLiteral("Crear caja a la izquierda"),
+            menu->addAction(style::icon(style::Icon::BoxLeft), Tr::tr("Crear caja a la izquierda"),
                 [this, node] { onCreateNodeLeft(node); });
-            menu->addAction(style::icon(style::Icon::BoxRight), QStringLiteral("Crear caja a la derecha"),
+            menu->addAction(style::icon(style::Icon::BoxRight), Tr::tr("Crear caja a la derecha"),
                 [this, node] { onCreateNodeRight(node); });
         }
 
-        style::addMenuSection(menu, QStringLiteral("Conectar"));
-        addPick(style::Icon::CurrentBelow, QStringLiteral("Caja «%1» por debajo de").arg(QString::fromStdString(node->getName())),
+        style::addMenuSection(menu, Tr::tr("Conectar"));
+        addPick(style::Icon::CurrentBelow, Tr::tr("Caja «%1» por debajo de").arg(QString::fromStdString(node->getName())),
             InteractionState::WaitingForSecondNode_AddConnectionParent,
-            QStringLiteral("Ninguna caja puede quedar por encima de esta"));
-        addPick(style::Icon::CurrentAbove, QStringLiteral("Caja «%1» por encima de").arg(QString::fromStdString(node->getName())),
+            Tr::tr("Ninguna caja puede quedar por encima de esta"));
+        addPick(style::Icon::CurrentAbove, Tr::tr("Caja «%1» por encima de").arg(QString::fromStdString(node->getName())),
             InteractionState::WaitingForSecondNode_AddConnectionChild,
-            QStringLiteral("Ninguna caja puede quedar por debajo de esta"));
-        addPick(style::Icon::Fuse, QStringLiteral("Fusionar"),
+            Tr::tr("Ninguna caja puede quedar por debajo de esta"));
+        addPick(style::Icon::Fuse, Tr::tr("Fusionar"),
             InteractionState::WaitingForSecondNode_FuseNodes,
-            QStringLiteral("Ninguna caja puede fusionarse con esta"));
+            Tr::tr("Ninguna caja puede fusionarse con esta"));
 
         addEquivalenceEntries(menu, node);
 
@@ -537,9 +538,9 @@ namespace ui {
         // "Conexiones hipotéticas": one checkable entry per connection of this box,
         // named after the boxes at its other end. A doubtful connection is drawn
         // discontinuous from this box (see HypergraphRenderer).
-        style::addMenuSection(menu, QStringLiteral("Estilo"));
+        style::addMenuSection(menu, Tr::tr("Estilo"));
         QMenu* doubtful = style::createMenu(menu);
-        doubtful->setTitle(QStringLiteral("Conexiones hipotéticas"));
+        doubtful->setTitle(Tr::tr("Conexiones hipotéticas"));
         doubtful->setIcon(style::icon(style::Icon::LineDashed));
         doubtful->setToolTipsVisible(true);
         menu->addMenu(doubtful);
@@ -547,7 +548,7 @@ namespace ui {
             const NodePtr node_ptr = node->shared_from_this();
             auto names = [](const std::vector<NodePtr>& nodes) {
                 QStringList out;
-                for (const auto& n : nodes) out << QStringLiteral("«%1»").arg(QString::fromStdString(n->getName()));
+                for (const auto& n : nodes) out << Tr::tr("«%1»").arg(QString::fromStdString(n->getName()));
                 return out.join(QStringLiteral(", "));
             };
             int entries = 0;
@@ -556,13 +557,13 @@ namespace ui {
                 const bool as_source = e->containsSource(node_ptr);
                 if (!as_source && !e->containsTarget(node_ptr)) continue;
                 const QString others = names(as_source ? e->getTargets() : e->getSources());
-                const QString text = QStringLiteral("Con %1 (%2)")
+                const QString text = Tr::tr("Con %1 (%2)")
                     .arg(QFontMetrics(doubtful->font()).elidedText(others, Qt::ElideRight, 260),
-                         as_source ? QStringLiteral("abajo") : QStringLiteral("arriba"));
+                         as_source ? Tr::tr("abajo") : Tr::tr("arriba"));
                 QAction* a = doubtful->addAction(text);
                 a->setCheckable(true);
                 a->setChecked(HypergraphEditor::isConnectionEndUncertain(e, node_ptr));
-                a->setToolTip(QStringLiteral("Marca esta conexión si no estás seguro de ella: "
+                a->setToolTip(Tr::tr("Marca esta conexión si no estás seguro de ella: "
                                              "se dibujará discontinua desde esta caja."));
                 Hyperedge* raw = e.get();
                 connect(a, &QAction::triggered, this, [this, raw, node] { onToggleUncertain(raw, node); });
@@ -576,13 +577,13 @@ namespace ui {
                 for (const auto k : { at - 1, at + 1 }) {
                     if (k < 0 || k >= static_cast<std::ptrdiff_t>(members.size())) continue;
                     Node* other = members[static_cast<size_t>(k)].get();
-                    QAction* a = doubtful->addAction(QStringLiteral("Con «%1» (equivalencia)")
+                    QAction* a = doubtful->addAction(Tr::tr("Con «%1» (equivalencia)")
                         .arg(QFontMetrics(doubtful->font()).elidedText(QString::fromStdString(other->getName()),
                              Qt::ElideRight, 220)));
                     a->setCheckable(true);
                     const bool dashed = !currentGraph().isEquivalenceContinuous(node_ptr, other->shared_from_this());
                     a->setChecked(dashed);
-                    a->setToolTip(QStringLiteral("Marca esta equivalencia si no estás seguro de ella: "
+                    a->setToolTip(Tr::tr("Marca esta equivalencia si no estás seguro de ella: "
                                                  "la línea que las une se dibujará discontinua."));
                     connect(a, &QAction::triggered, this, [this, node, other, dashed] {
                         onSetEquivalenceStyle(node, other, dashed);
@@ -592,15 +593,15 @@ namespace ui {
             }
             if (entries == 0) {
                 doubtful->menuAction()->setEnabled(false);
-                doubtful->menuAction()->setToolTip(QStringLiteral("Esta caja no tiene conexiones ni equivalencias"));
+                doubtful->menuAction()->setToolTip(Tr::tr("Esta caja no tiene conexiones ni equivalencias"));
             }
         }
 
-        style::addMenuSection(menu, QStringLiteral("Eliminar"));
-        addPick(style::Icon::RemovePartial, QStringLiteral("Eliminar conexión parcial"),
+        style::addMenuSection(menu, Tr::tr("Eliminar"));
+        addPick(style::Icon::RemovePartial, Tr::tr("Eliminar conexión parcial"),
             InteractionState::WaitingForSecondNode_RemoveConnection,
-            QStringLiteral("Esta caja no está conectada a ninguna otra"));
-        menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar caja"),
+            Tr::tr("Esta caja no está conectada a ninguna otra"));
+        menu->addAction(style::icon(style::Icon::RemoveBox), Tr::tr("Eliminar caja"),
             [this, node] { onRemoveNode(node); });
         addRemoveBlockEntry(menu, node);
 
@@ -628,7 +629,7 @@ namespace ui {
         const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
         style::addMenuHeader(menu,
             style::icon(style::Icon::ForkDownExisting).pixmap(QSize(28, 28), dpr),
-            QStringLiteral("Conexión"),
+            Tr::tr("Conexión"),
             QFontMetrics(menu->font()).elidedText(span, Qt::ElideRight, 260));
 
         auto addPick = [&](style::Icon icon, const QString& text, InteractionState state,
@@ -642,22 +643,22 @@ namespace ui {
         };
 
         if (!is_joint_) {
-            style::addMenuSection(menu, QStringLiteral("Crear"));
-            menu->addAction(style::icon(style::Icon::BoxBetween), QStringLiteral("Crear caja entre"),
+            style::addMenuSection(menu, Tr::tr("Crear"));
+            menu->addAction(style::icon(style::Icon::BoxBetween), Tr::tr("Crear caja entre"),
                 [this, edge] { onCreateNodeIntoEdge(edge); });
-            menu->addAction(style::icon(style::Icon::ForkUpNew), QStringLiteral("Bifurcar arriba con caja nueva"),
+            menu->addAction(style::icon(style::Icon::ForkUpNew), Tr::tr("Bifurcar arriba con caja nueva"),
                 [this, edge] { onCreateSource(edge); });
-            menu->addAction(style::icon(style::Icon::ForkDownNew), QStringLiteral("Bifurcar abajo con caja nueva"),
+            menu->addAction(style::icon(style::Icon::ForkDownNew), Tr::tr("Bifurcar abajo con caja nueva"),
                 [this, edge] { onCreateTarget(edge); });
         }
 
-        style::addMenuSection(menu, QStringLiteral("Conectar"));
-        addPick(style::Icon::ForkUpExisting, QStringLiteral("Bifurcar arriba con caja existente"),
+        style::addMenuSection(menu, Tr::tr("Conectar"));
+        addPick(style::Icon::ForkUpExisting, Tr::tr("Bifurcar arriba con caja existente"),
             InteractionState::WaitingForSecondNode_AddSource,
-            QStringLiteral("Ninguna caja puede unirse a esta conexión por arriba"));
-        addPick(style::Icon::ForkDownExisting, QStringLiteral("Bifurcar abajo con caja existente"),
+            Tr::tr("Ninguna caja puede unirse a esta conexión por arriba"));
+        addPick(style::Icon::ForkDownExisting, Tr::tr("Bifurcar abajo con caja existente"),
             InteractionState::WaitingForSecondNode_AddTarget,
-            QStringLiteral("Ninguna caja puede unirse a esta conexión por abajo"));
+            Tr::tr("Ninguna caja puede unirse a esta conexión por abajo"));
 
         // A connection belongs to the same diagram and block as its boxes.
         Node* reference = edge->getSources().empty() ? nullptr : edge->getSources().front().get();
@@ -667,22 +668,22 @@ namespace ui {
 
         // Each entry names what it will do, with an icon of the result. A
         // connection that is partly dashed (doubtful at some boxes) offers both.
-        style::addMenuSection(menu, QStringLiteral("Estilo"));
+        style::addMenuSection(menu, Tr::tr("Estilo"));
         if (!edge->isContinuous()) {
-            QAction* solid = menu->addAction(style::icon(style::Icon::LineSolid), QStringLiteral("Usar línea continua"),
+            QAction* solid = menu->addAction(style::icon(style::Icon::LineSolid), Tr::tr("Usar línea continua"),
                 [this, edge] { onSetLineStyle(edge, true); });
             if (!edge->allEndsUncertain())
-                solid->setToolTip(QStringLiteral("Quita también las marcas de conexión dudosa"));
+                solid->setToolTip(Tr::tr("Quita también las marcas de conexión dudosa"));
         }
         if (!edge->allEndsUncertain()) {
-            menu->addAction(style::icon(style::Icon::LineDashed), QStringLiteral("Usar línea discontinua"),
+            menu->addAction(style::icon(style::Icon::LineDashed), Tr::tr("Usar línea discontinua"),
                 [this, edge] { onSetLineStyle(edge, false); });
         }
 
-        style::addMenuSection(menu, QStringLiteral("Eliminar"));
-        addPick(style::Icon::Simplify, QStringLiteral("Simplificar conexión"),
+        style::addMenuSection(menu, Tr::tr("Eliminar"));
+        addPick(style::Icon::Simplify, Tr::tr("Simplificar conexión"),
             InteractionState::WaitingForSecondNode_SimplifyConnection, QString());
-        menu->addAction(style::icon(style::Icon::RemoveConnection), QStringLiteral("Eliminar conexión"),
+        menu->addAction(style::icon(style::Icon::RemoveConnection), Tr::tr("Eliminar conexión"),
             [this, edge] { onRemoveHyperedge(edge); });
         addRemoveBlockEntry(menu, reference);
 
@@ -695,18 +696,18 @@ namespace ui {
         const NodePtr node_ptr = node->shared_from_this();
         const EquivalenceChain* chain = graph.getEquivalenceChain(node);
 
-        style::addMenuSection(menu, QStringLiteral("Equivalencias"));
-        QAction* make = menu->addAction(style::icon(style::Icon::Equivalent), QStringLiteral("Hacer equivalente a…"),
+        style::addMenuSection(menu, Tr::tr("Equivalencias"));
+        QAction* make = menu->addAction(style::icon(style::Icon::Equivalent), Tr::tr("Establecer equivalencia entre…"),
             [this, node] { beginSelection(InteractionState::WaitingForSecondNode_AddEquivalence, node, nullptr); });
-        make->setToolTip(QStringLiteral("Elige otra caja: quedarán una junto a la otra, en el mismo nivel, "
+        make->setToolTip(Tr::tr("Elige otra caja: quedarán una junto a la otra, en el mismo nivel, "
                                         "unidas por una línea horizontal"));
         if (candidatesFor(InteractionState::WaitingForSecondNode_AddEquivalence, node, nullptr).empty()) {
             make->setEnabled(false);
             const bool middle = chain && chain->members.front() != node_ptr && chain->members.back() != node_ptr;
             make->setToolTip(middle
-                ? QStringLiteral("Esta caja ya tiene una caja equivalente a cada lado: solo las de los extremos "
-                                 "de la cadena pueden hacerse equivalentes a otra")
-                : QStringLiteral("Ninguna caja puede ser equivalente a esta: las conexiones que hay entre ellas "
+                ? Tr::tr("Esta caja ya tiene una caja equivalente a cada lado: solo las de los extremos "
+                                 "de la cadena pueden establecer una equivalencia con otra")
+                : Tr::tr("Ninguna caja puede ser equivalente a esta: las conexiones que hay entre ellas "
                                  "lo impiden"));
         }
 
@@ -720,9 +721,9 @@ namespace ui {
             const QString name = QFontMetrics(menu->font()).elidedText(QString::fromStdString(other->getName()),
                 Qt::ElideRight, 200);
             QAction* a = menu->addAction(style::icon(style::Icon::RemoveEquivalence),
-                QStringLiteral("Quitar equivalencia con «%1»").arg(name),
+                Tr::tr("Quitar equivalencia con «%1»").arg(name),
                 [this, node, other] { onRemoveEquivalence(node, other); });
-            a->setToolTip(QStringLiteral("Borra la línea que las une: la cadena se parte en dos por ahí"));
+            a->setToolTip(Tr::tr("Borra la línea que las une: la cadena se parte en dos por ahí"));
         }
     }
 
@@ -744,29 +745,29 @@ namespace ui {
         const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
         style::addMenuHeader(menu,
             style::icon(continuous ? style::Icon::EquivalenceSolid : style::Icon::EquivalenceDashed).pixmap(QSize(28, 28), dpr),
-            continuous ? QStringLiteral("Equivalencia") : QStringLiteral("Equivalencia hipotética"),
+            continuous ? Tr::tr("Equivalencia") : Tr::tr("Equivalencia hipotética"),
             QFontMetrics(menu->font()).elidedText(span, Qt::ElideRight, 260));
 
-        style::addMenuSection(menu, QStringLiteral("Estilo"));
+        style::addMenuSection(menu, Tr::tr("Estilo"));
         if (continuous) {
-            QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceDashed), QStringLiteral("Usar línea discontinua"),
+            QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceDashed), Tr::tr("Usar línea discontinua"),
                 [this, left, right] { onSetEquivalenceStyle(left, right, false); });
-            a->setToolTip(QStringLiteral("Marca esta equivalencia como hipotética: las cajas de un lado de la "
+            a->setToolTip(Tr::tr("Marca esta equivalencia como hipotética: las cajas de un lado de la "
                                          "línea dejan de ser seguras con las del otro"));
             a->setProperty(help::TOPIC_PROPERTY, QStringLiteral("equivalenceStyle"));
         }
         else {
-            QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceSolid), QStringLiteral("Usar línea continua"),
+            QAction* a = menu->addAction(style::icon(style::Icon::EquivalenceSolid), Tr::tr("Usar línea continua"),
                 [this, left, right] { onSetEquivalenceStyle(left, right, true); });
-            a->setToolTip(QStringLiteral("Da esta equivalencia por segura: las cajas seguras con una lo pasan a ser "
+            a->setToolTip(Tr::tr("Da esta equivalencia por segura: las cajas seguras con una lo pasan a ser "
                                          "con la otra, y alguna otra línea de la cadena puede volverse continua"));
             a->setProperty(help::TOPIC_PROPERTY, QStringLiteral("equivalenceStyle"));
         }
 
-        style::addMenuSection(menu, QStringLiteral("Eliminar"));
-        QAction* remove = menu->addAction(style::icon(style::Icon::RemoveEquivalence), QStringLiteral("Quitar equivalencia"),
+        style::addMenuSection(menu, Tr::tr("Eliminar"));
+        QAction* remove = menu->addAction(style::icon(style::Icon::RemoveEquivalence), Tr::tr("Quitar equivalencia"),
             [this, left, right] { onRemoveEquivalence(left, right); });
-        remove->setToolTip(QStringLiteral("Borra esta línea: la cadena se parte en dos por ahí, y cada parte vuelve "
+        remove->setToolTip(Tr::tr("Borra esta línea: la cadena se parte en dos por ahí, y cada parte vuelve "
                                           "al nivel que le corresponde"));
 
         help::addHelpButtons(menu, dialogParent());
@@ -776,14 +777,14 @@ namespace ui {
     void DiagramScene::showBackgroundContextMenu(const QPointF& scene_pos) {
         QMenu* menu = style::createMenu();
         menu->setAttribute(Qt::WA_DeleteOnClose);
-        menu->addAction(style::icon(style::Icon::NewBox), QStringLiteral("Nueva caja"),
+        menu->addAction(style::icon(style::Icon::NewBox), Tr::tr("Nueva caja"),
             [this, scene_pos] { onCreateRootNode(scene_pos); });
         // Only when there is something to paste (possibly copied in another window).
         if (canPaste()) {
             menu->setToolTipsVisible(true);
-            QAction* paste = menu->addAction(style::icon(style::Icon::Paste), QStringLiteral("Pegar"),
+            QAction* paste = menu->addAction(style::icon(style::Icon::Paste), Tr::tr("Pegar"),
                 [this, scene_pos] { pasteAt(scene_pos); });
-            paste->setToolTip(QStringLiteral("Pega aquí %1").arg(clipboard::description()));
+            paste->setToolTip(Tr::tr("Pega aquí %1").arg(clipboard::description()));
         }
         help::addHelpButtons(menu, dialogParent());
         menu->popup(QCursor::pos());
@@ -807,19 +808,19 @@ QMenu QLabel#emptyHint { color: #8A90A2; padding: 2px 14px 8px 14px; }
 
         const qreal dpr = dialogParent() ? dialogParent()->devicePixelRatioF() : qApp->devicePixelRatio();
         style::addMenuHeader(menu, style::icon(style::Icon::Joint).pixmap(QSize(28, 28), dpr),
-            QStringLiteral("Administrar esquemas"),
-            diagrams.empty() ? QStringLiteral("El proyecto aún no tiene esquemas")
-                             : QStringLiteral("%1 de %2 en el esquema conjunto").arg(in_joint).arg(diagrams.size()));
+            Tr::tr("Administrar esquemas"),
+            diagrams.empty() ? Tr::tr("El proyecto aún no tiene esquemas")
+                             : Tr::tr("%1 de %2 en el esquema conjunto").arg(in_joint).arg(diagrams.size()));
 
         if (diagrams.empty()) {
-            auto* hint = new QLabel(QStringLiteral("Crea un esquema en otra pestaña\npara poder añadirlo aquí."), menu);
+            auto* hint = new QLabel(Tr::tr("Crea un esquema en otra pestaña\npara poder añadirlo aquí."), menu);
             hint->setObjectName("emptyHint");
             auto* action = new QWidgetAction(menu);
             action->setDefaultWidget(hint);
             menu->addAction(action);
         }
         else {
-            style::addMenuSection(menu, QStringLiteral("Esquemas del proyecto"));
+            style::addMenuSection(menu, Tr::tr("Esquemas del proyecto"));
         }
 
         // All the rows live in one scrolling list: a long project does not make the
@@ -897,10 +898,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             auto* status = new QLabel(row);
             status->setObjectName("diagramStatus");
             status->setProperty("added", is_added);
-            status->setText(!is_added ? QStringLiteral("Fuera del conjunto")
-                          : !blocked.isEmpty() ? QStringLiteral("En el conjunto · unido a otros")
-                          : equivalent_to_others ? QStringLiteral("En el conjunto · con equivalencias a otros")
-                          : QStringLiteral("En el conjunto"));
+            status->setText(!is_added ? Tr::tr("Fuera del conjunto")
+                          : !blocked.isEmpty() ? Tr::tr("En el conjunto · unido a otros")
+                          : equivalent_to_others ? Tr::tr("En el conjunto · con equivalencias a otros")
+                          : Tr::tr("En el conjunto"));
             texts->addWidget(status);
             layout->addLayout(texts, 1);
             layout->addSpacing(14);
@@ -920,14 +921,14 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
                 return b;
             };
             QToolButton* add = makeButton(style::Icon::Add, !is_added,
-                is_added ? QStringLiteral("Ya está en el esquema conjunto")
-                         : QStringLiteral("Añadirlo aquí, donde has hecho clic"));
+                is_added ? Tr::tr("Ya está en el esquema conjunto")
+                         : Tr::tr("Añadirlo aquí, donde has hecho clic"));
             QToolButton* remove = makeButton(style::Icon::Trash, is_added && blocked.isEmpty(),
-                !is_added ? QStringLiteral("No está en el esquema conjunto")
-                : !blocked.isEmpty() ? blocked + QStringLiteral("\nTambién puedes usar «Quitar bloque» en una de sus cajas.")
-                : equivalent_to_others ? QStringLiteral("Quitarlo del esquema conjunto, con sus equivalencias con "
+                !is_added ? Tr::tr("No está en el esquema conjunto")
+                : !blocked.isEmpty() ? blocked + Tr::tr("\nTambién puedes usar «Quitar bloque» en una de sus cajas.")
+                : equivalent_to_others ? Tr::tr("Quitarlo del esquema conjunto, con sus equivalencias con "
                                                         "otros esquemas (el esquema original no cambia)")
-                : QStringLiteral("Quitarlo del esquema conjunto (el esquema original no cambia)"));
+                : Tr::tr("Quitarlo del esquema conjunto (el esquema original no cambia)"));
 
             const QString id = QString::fromStdString(d.id);
             const double click_x = scene_pos.x();
@@ -1059,49 +1060,49 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
     void DiagramScene::onCreateNodeAbove(Node* child) {
         NodePtr child_ptr = child ? child->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createParent(a, child_ptr);
         });
     }
 
     void DiagramScene::onCreateNodeBelow(Node* parent) {
         NodePtr parent_ptr = parent ? parent->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNode(a, parent_ptr->getLayer() + 1, -1, parent_ptr);
         });
     }
 
     void DiagramScene::onCreateNodeLeft(Node* node) {
         NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNodeNextTo(a, neighbour_ptr, true);
         });
     }
 
     void DiagramScene::onCreateNodeRight(Node* node) {
         NodePtr neighbour_ptr = node ? node->shared_from_this() : nullptr;
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNodeNextTo(a, neighbour_ptr, false);
         });
     }
 
     void DiagramScene::onCreateNodeIntoEdge(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNodeInEdge(a, edge_ptr);
         });
     }
 
     void DiagramScene::onCreateSource(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createSource(a, -1, edge_ptr);
         });
     }
 
     void DiagramScene::onCreateTarget(Hyperedge* edge) {
         HyperedgePtr edge_ptr = edge->shared_from_this();
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createTarget(a, -1, edge_ptr);
         });
     }
@@ -1201,7 +1202,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             }
         }
 
-        createNodeWithDialog(QStringLiteral("Nueva caja"), [&](const NodeAttributes& a) {
+        createNodeWithDialog(Tr::tr("Nueva caja"), [&](const NodeAttributes& a) {
             regular_editor_->createNode(a, layer, layer_position, nullptr);
         });
     }
@@ -1639,8 +1640,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
                 for (QGraphicsItem* g : { static_cast<QGraphicsItem*>(guides_->halo), static_cast<QGraphicsItem*>(guides_->bar),
                                           static_cast<QGraphicsItem*>(guides_->dot_top), static_cast<QGraphicsItem*>(guides_->dot_bottom) })
                     g->setVisible(false);
-            placeChip(QString(layer < 0 ? QStringLiteral("Nuevo nivel arriba") : QStringLiteral("Nuevo nivel abajo"))
-                    + (whole_chain ? QStringLiteral(" · con su cadena") : QString()),
+            placeChip(QString(layer < 0 ? Tr::tr("Nuevo nivel arriba") : Tr::tr("Nuevo nivel abajo"))
+                    + (whole_chain ? Tr::tr(" · con su cadena") : QString()),
                 QPointF(c.x(), item->mapRectToScene(item->rect()).top() - 10.0));
             return;
         }
@@ -1654,8 +1655,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         if (!whole_chain && !in_chain) {
             if (const auto end = chainEndLanding(item->node(), layer, c.x())) {
                 placeLandingMarker(end->first, y - 34.0, y + 34.0);
-                placeChip(end->second ? QStringLiteral("A la izquierda de la cadena")
-                                      : QStringLiteral("A la derecha de la cadena"),
+                placeChip(end->second ? Tr::tr("A la izquierda de la cadena")
+                                      : Tr::tr("A la derecha de la cadena"),
                     QPointF(end->first, y - 40.0));
                 return;
             }
@@ -1678,7 +1679,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         else if (std::isfinite(left))                    x = left + 36.0;
         else if (std::isfinite(right))                   x = right - 36.0;
         placeLandingMarker(x, y - 34.0, y + 34.0);
-        placeChip(whole_chain ? QStringLiteral("Toda la cadena se mueve") : QString(), QPointF(x, y - 40.0));
+        placeChip(whole_chain ? Tr::tr("Toda la cadena se mueve") : QString(), QPointF(x, y - 40.0));
     }
 
     void DiagramScene::updateChainPreview(const QPointF& c, int target_layer) {
@@ -1816,19 +1817,19 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
     void DiagramScene::addMoveEntries(QMenu* menu, const PieceChoice& choice, Node* box) {
         if (!choice.move_diagram && !choice.move_block) return;
-        style::addMenuSection(menu, QStringLiteral("Mover"));
+        style::addMenuSection(menu, Tr::tr("Mover"));
         if (choice.move_diagram) {
             const QString name = QFontMetrics(menu->font()).elidedText(choice.diagram_name, Qt::ElideRight, 200);
             QAction* a = menu->addAction(style::icon(style::Icon::Move),
-                name.isEmpty() ? QStringLiteral("Mover este esquema") : QStringLiteral("Mover esquema «%1»").arg(name),
+                name.isEmpty() ? Tr::tr("Mover este esquema") : Tr::tr("Mover esquema «%1»").arg(name),
                 [this, id = choice.diagram_id] { startPieceMove(id, nullptr); });
-            a->setToolTip(QStringLiteral("Llévalo entero a otro sitio o a otro nivel: se mueve con el ratón "
+            a->setToolTip(Tr::tr("Llévalo entero a otro sitio o a otro nivel: se mueve con el ratón "
                                          "y se deja con un clic"));
         }
         if (choice.move_block) {
-            QAction* a = menu->addAction(style::icon(style::Icon::Move), QStringLiteral("Mover bloque"),
+            QAction* a = menu->addAction(style::icon(style::Icon::Move), Tr::tr("Mover bloque"),
                 [this, box] { startPieceMove(std::string(), box); });
-            a->setToolTip(QStringLiteral("Mueve esta caja junto con todas las que están unidas a ella"));
+            a->setToolTip(Tr::tr("Mueve esta caja junto con todas las que están unidas a ella"));
         }
     }
 
@@ -1842,9 +1843,9 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             catch (const std::exception&) { return; }
             const auto boxes = std::count_if(block.begin(), block.end(), [](Node* n) { return !n->isDummy(); });
             if (boxes < 2) return;
-            QAction* a = menu->addAction(style::icon(style::Icon::RemoveBox), QStringLiteral("Eliminar bloque"),
+            QAction* a = menu->addAction(style::icon(style::Icon::RemoveBox), Tr::tr("Eliminar bloque"),
                 [this, box] { onRemoveBlock(box); });
-            a->setToolTip(QStringLiteral("Elimina esta caja y todas las que están unidas a ella, con sus conexiones"));
+            a->setToolTip(Tr::tr("Elimina esta caja y todas las que están unidas a ella, con sus conexiones"));
             return;
         }
         // In the joint: the box's whole diagram, while it is not mixed with others
@@ -1874,15 +1875,15 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             const QString name = QFontMetrics(menu->font()).elidedText(
                 QString::fromStdString(joint.getIncorporatedName(diagram_id)), Qt::ElideRight, 200);
             QAction* a = menu->addAction(style::icon(style::Icon::TakeOut),
-                name.isEmpty() ? QStringLiteral("Quitar este esquema") : QStringLiteral("Quitar esquema «%1»").arg(name),
+                name.isEmpty() ? Tr::tr("Quitar este esquema") : Tr::tr("Quitar esquema «%1»").arg(name),
                 [this, diagram_id] { onRemoveDiagram(diagram_id); });
             a->setToolTip(QStringLiteral("Quita del esquema conjunto todas las cajas de este esquema; "
                                          "el esquema original no cambia"));
         }
         if (diagram_id.empty() || realBoxes(block) != diagram) {
-            QAction* a = menu->addAction(style::icon(style::Icon::TakeOut), QStringLiteral("Quitar bloque"),
+            QAction* a = menu->addAction(style::icon(style::Icon::TakeOut), Tr::tr("Quitar bloque"),
                 [this, box] { onRemoveBlock(box); });
-            a->setToolTip(QStringLiteral("Quita del esquema conjunto esta caja y todas las que están unidas a ella "
+            a->setToolTip(Tr::tr("Quita del esquema conjunto esta caja y todas las que están unidas a ella "
                                          "(también por equivalencias); los esquemas originales no cambian"));
         }
     }
@@ -1897,14 +1898,14 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         // Equivalences with other diagrams go with it: the joint alone had them.
         const bool equivalent_to_others = !joint.isSeparable(diagram_id);
         if (!dialogs::confirm(dialogParent(),
-                name.isEmpty() ? QStringLiteral("¿Quitar este esquema del esquema conjunto?")
-                               : QStringLiteral("¿Quitar «%1» del esquema conjunto?").arg(name),
-                QStringLiteral("Se quitarán del esquema conjunto todas sus cajas y conexiones%1. "
+                name.isEmpty() ? Tr::tr("¿Quitar este esquema del esquema conjunto?")
+                               : Tr::tr("¿Quitar «%1» del esquema conjunto?").arg(name),
+                Tr::tr("Se quitarán del esquema conjunto todas sus cajas y conexiones%1. "
                                "El esquema original no cambia y podrás volver a añadirlo.")
                     .arg(equivalent_to_others
-                        ? QStringLiteral(", y sus equivalencias con cajas de otros esquemas")
+                        ? Tr::tr(", y sus equivalencias con cajas de otros esquemas")
                         : QString()),
-                QStringLiteral("Quitar"), true))
+                Tr::tr("Quitar"), true))
             return;
 
         takeOut(doomed, [this, diagram_id] { joint_editor_->removeHypergraph(diagram_id); });
@@ -1917,10 +1918,10 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
 
         if (!is_joint_) {
             const auto boxes = std::count_if(doomed.begin(), doomed.end(), [](Node* n) { return !n->isDummy(); });
-            if (!dialogs::confirm(dialogParent(), QStringLiteral("¿Eliminar este bloque?"),
-                    QStringLiteral("Se eliminarán sus %1 cajas y sus conexiones. "
+            if (!dialogs::confirm(dialogParent(), Tr::tr("¿Eliminar este bloque?"),
+                    Tr::tr("Se eliminarán sus %1 cajas y sus conexiones. "
                                    "Puedes deshacerlo con Ctrl+Z.").arg(boxes),
-                    QStringLiteral("Eliminar"), true))
+                    Tr::tr("Eliminar"), true))
                 return;
             takeOut(doomed, [this, ptr = box->shared_from_this()] { regular_editor_->removeComponent(ptr); });
             return;
@@ -1940,18 +1941,18 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         QStringList names;
         for (const auto& id : ids) {
             const QString name = QString::fromStdString(joint.getIncorporatedName(id));
-            if (!name.isEmpty()) names << QStringLiteral("«%1»").arg(name);
+            if (!name.isEmpty()) names << Tr::tr("«%1»").arg(name);
         }
         QString detail = boxes == 1
-            ? QStringLiteral("Se quitará esta caja del esquema conjunto.")
-            : QStringLiteral("Se quitarán sus %1 cajas y sus conexiones del esquema conjunto.").arg(boxes);
+            ? Tr::tr("Se quitará esta caja del esquema conjunto.")
+            : Tr::tr("Se quitarán sus %1 cajas y sus conexiones del esquema conjunto.").arg(boxes);
         if (!names.isEmpty())
-            detail += (names.size() == 1 ? QStringLiteral(" Son de %1.") : QStringLiteral(" Vienen de %1."))
+            detail += (names.size() == 1 ? Tr::tr(" Son de %1.") : Tr::tr(" Vienen de %1."))
                 .arg(names.join(QStringLiteral(", ")));
-        detail += QStringLiteral(" Los esquemas originales no cambian.");
+        detail += Tr::tr(" Los esquemas originales no cambian.");
 
-        if (!dialogs::confirm(dialogParent(), QStringLiteral("¿Quitar este bloque del conjunto?"), detail,
-                QStringLiteral("Quitar"), true))
+        if (!dialogs::confirm(dialogParent(), Tr::tr("¿Quitar este bloque del conjunto?"), detail,
+                Tr::tr("Quitar"), true))
             return;
 
         takeOut(doomed, [this, ptr = box->shared_from_this()] { joint_editor_->removeComponent(ptr); });
@@ -1987,22 +1988,22 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         const bool copy_block = is_joint_ ? block != diagram : block.size() < graph.getAllNodes().size();
         if (!copy_diagram && !copy_block) return;
 
-        style::addMenuSection(menu, QStringLiteral("Copiar"));
+        style::addMenuSection(menu, Tr::tr("Copiar"));
         if (copy_block) {
-            QAction* a = menu->addAction(style::icon(style::Icon::Copy), QStringLiteral("Copiar bloque"),
+            QAction* a = menu->addAction(style::icon(style::Icon::Copy), Tr::tr("Copiar bloque"),
                 [this, box] { copyBlock(box); });
-            a->setToolTip(QStringLiteral("Copia esta caja y todas las que están unidas a ella, "
+            a->setToolTip(Tr::tr("Copia esta caja y todas las que están unidas a ella, "
                                          "para pegarlas en cualquier esquema"));
         }
         if (copy_diagram) {
-            QString text = QStringLiteral("Copiar esquema");
+            QString text = Tr::tr("Copiar esquema");
             if (is_joint_) {
                 const QString name = QFontMetrics(menu->font()).elidedText(diagram_name, Qt::ElideRight, 200);
-                text = name.isEmpty() ? QStringLiteral("Copiar este esquema") : QStringLiteral("Copiar esquema «%1»").arg(name);
+                text = name.isEmpty() ? Tr::tr("Copiar este esquema") : Tr::tr("Copiar esquema «%1»").arg(name);
             }
             QAction* a = menu->addAction(style::icon(style::Icon::Copy), text,
                 [this, diagram_id] { copyDiagram(diagram_id); });
-            a->setToolTip(QStringLiteral("Copia el esquema entero, con todos sus bloques, "
+            a->setToolTip(Tr::tr("Copia el esquema entero, con todos sus bloques, "
                                          "para pegarlo en cualquier esquema"));
         }
     }
@@ -2011,7 +2012,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         std::unordered_set<Node*> nodes;
         try { nodes = currentGraph().getComponentNodes(box); }
         catch (const std::exception& e) { showError(e); return; }
-        copyNodes(nodes, QStringLiteral("el bloque de «%1»").arg(QString::fromStdString(box->getName())));
+        copyNodes(nodes, Tr::tr("el bloque de «%1»").arg(QString::fromStdString(box->getName())));
     }
 
     void DiagramScene::copyDiagram(const std::string& diagram_id) {
@@ -2021,12 +2022,12 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             const JointGraphicalHypergraph& joint = joint_editor_->getGraph();
             try { nodes = joint.getHypergraphNodes(diagram_id); }
             catch (const std::exception& e) { showError(e); return; }
-            description = QStringLiteral("el esquema «%1»").arg(QString::fromStdString(joint.getIncorporatedName(diagram_id)));
+            description = Tr::tr("el esquema «%1»").arg(QString::fromStdString(joint.getIncorporatedName(diagram_id)));
         }
         else {
             for (const auto& n : currentGraph().getAllNodes()) nodes.insert(n.get());
-            description = is_joint_ ? QStringLiteral("el esquema conjunto")
-                : QStringLiteral("el esquema «%1»").arg(QString::fromStdString(currentGraph().getName()));
+            description = is_joint_ ? Tr::tr("el esquema conjunto")
+                : Tr::tr("el esquema «%1»").arg(QString::fromStdString(currentGraph().getName()));
         }
         copyNodes(nodes, description);
     }
@@ -2035,7 +2036,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         if (nodes.empty()) return;
         try { clipboard::copy(currentGraph().copyOf(nodes), description); }
         catch (const std::exception& e) { showError(e); return; }
-        emit notice(QStringLiteral("Copiado %1. Pégalo con clic derecho › Pegar o con Ctrl+V, "
+        emit notice(Tr::tr("Copiado %1. Pégalo con clic derecho › Pegar o con Ctrl+V, "
                                    "también en otra ventana.").arg(description));
     }
 
@@ -2082,8 +2083,8 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         }
         rebuildAnimated(from); // the new boxes fade in
         emit graphChanged();
-        emit notice(boxes.size() == 1 ? QStringLiteral("Se ha pegado 1 caja")
-                                      : QStringLiteral("Se han pegado %1 cajas").arg(boxes.size()));
+        emit notice(boxes.size() == 1 ? Tr::tr("Se ha pegado 1 caja")
+                                      : Tr::tr("Se han pegado %1 cajas").arg(boxes.size()));
         return true;
     }
 
@@ -2253,9 +2254,9 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
             v->viewport()->setCursor(Qt::ClosedHandCursor);
         }
         const QString what = diagram_id.empty()
-            ? QStringLiteral("el bloque")
-            : QStringLiteral("«%1»").arg(QString::fromStdString(joint_editor_->getGraph().getIncorporatedName(diagram_id)));
-        emit interactionHintChanged(QStringLiteral("Llevas %1 colgando del ratón: haz clic donde quieras dejarlo "
+            ? Tr::tr("el bloque")
+            : Tr::tr("«%1»").arg(QString::fromStdString(joint_editor_->getGraph().getIncorporatedName(diagram_id)));
+        emit interactionHintChanged(Tr::tr("Llevas %1 colgando del ratón: haz clic donde quieras dejarlo "
                                                    "· Esc para cancelar").arg(what));
         updatePiecePreview();
     }
@@ -2329,9 +2330,9 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
         guides_->ghost->setPen(ghost_pen);
         guides_->ghost->setVisible(true);
 
-        placeChip(new_above ? QStringLiteral("Nuevo nivel arriba")
-              : new_below ? QStringLiteral("Nuevo nivel abajo")
-              : QStringLiteral("Desde el nivel %1").arg(target + 1),
+        placeChip(new_above ? Tr::tr("Nuevo nivel arriba")
+              : new_below ? Tr::tr("Nuevo nivel abajo")
+              : Tr::tr("Desde el nivel %1").arg(target + 1),
             move.grab + shown - QPointF(0.0, 12.0)); // just above the grip, i.e. the cursor
     }
 
@@ -2385,7 +2386,7 @@ QToolButton#rowButton:pressed { background: #E4E7FF; }
     // ============================================================================
 
     void DiagramScene::showError(const std::exception& e) {
-        dialogs::showError(dialogParent(), QStringLiteral("No se ha podido completar la operación"),
+        dialogs::showError(dialogParent(), Tr::tr("No se ha podido completar la operación"),
             QString::fromStdString(e.what()));
     }
 

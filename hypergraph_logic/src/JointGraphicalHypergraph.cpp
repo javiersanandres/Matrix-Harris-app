@@ -4,6 +4,7 @@
 #include <fstream>
 #include <limits>
 #include <stdexcept>
+#include "Text.h"
 
 using json = nlohmann::json;
 
@@ -140,21 +141,20 @@ namespace hypergraph_logic {
 
 	std::unordered_set<Node*> JointGraphicalHypergraph::ownNodesOf(const std::string& id, bool through_equivalences) const {
 		if (!incorporated_ids_.count(id))
-			throw std::invalid_argument("Ese esquema no forma parte del esquema conjunto.");
+			throw std::invalid_argument(text(LogicText::tr("Ese esquema no forma parte del esquema conjunto.")));
 		std::unordered_set<Node*> nodes;
 		for (const auto& c : componentsOf(through_equivalences)) {
 			if (c.graph_ids.count(std::string()))
-				throw std::logic_error("Este esquema conjunto se guardó con una versión anterior y no se "
-				                       "sabe a qué esquema pertenece cada caja.");
+				throw std::logic_error(text(LogicText::tr("Este esquema conjunto se guardó con una versión anterior y no se "
+				                       "sabe a qué esquema pertenece cada caja.")));
 			if (!c.graph_ids.count(id)) continue;
 			if (c.graph_ids.size() > 1) {
 				const std::string name = getIncorporatedName(id);
-				throw std::logic_error("El esquema" + (name.empty() ? std::string() : " «" + name + "»")
-					+ (through_equivalences
-						? " está unido a otros esquemas del conjunto (por conexiones, cajas fusionadas o "
-						  "equivalencias). Quita antes esas conexiones y equivalencias."
-						: " está unido a otros esquemas del conjunto (por conexiones o cajas fusionadas). "
-						  "Quita antes esas conexiones."));
+				throw std::logic_error(through_equivalences
+					? text(LogicText::tr("El esquema «%1» está unido a otros esquemas del conjunto (por conexiones, "
+						"cajas fusionadas o equivalencias). Quita antes esas conexiones y equivalencias."), name)
+					: text(LogicText::tr("El esquema «%1» está unido a otros esquemas del conjunto (por conexiones o "
+						"cajas fusionadas). Quita antes esas conexiones."), name));
 			}
 			nodes.insert(c.nodes.begin(), c.nodes.end());
 		}
@@ -183,7 +183,7 @@ namespace hypergraph_logic {
 	void JointGraphicalHypergraph::addHypergraph(GraphicalHypergraph& g, double click_x) {
 		if (incorporated_ids_.count(g.getId()))
 			throw std::invalid_argument(
-				"El esquema «" + g.getName() + "» ya forma parte del esquema conjunto.");
+				text(LogicText::tr("El esquema «%1» ya forma parte del esquema conjunto."), g.getName()));
 
 		ensureLayout();
 		pruneOrigins();

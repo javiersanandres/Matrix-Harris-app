@@ -1,4 +1,5 @@
 #include "DiagramTabBar.h"
+#include "Translation.h"
 #include "DiagramTabWidget.h"
 #include "UiStyle.h"
 
@@ -24,7 +25,7 @@ namespace ui {
     {
         setFixedSize(SIZE, SIZE);
         setCursor(Qt::PointingHandCursor);
-        setToolTip(QStringLiteral("Nuevo esquema"));
+        setToolTip(Tr::tr("Nuevo esquema"));
 
         hover_anim_ = new QVariantAnimation(this);
         hover_anim_->setDuration(180);
@@ -238,7 +239,7 @@ QScrollBar::add-page, QScrollBar::sub-page { background: none; }
             return;
         }
         {
-            joint_tab_ = new DiagramTabWidget(scene, QStringLiteral("Esquema conjunto"), true, this);
+            joint_tab_ = new DiagramTabWidget(scene, Tr::tr("Esquema conjunto"), true, this);
             // Lined up with the tabs inside the strip (which sit STRIP_PADDING down).
             auto* column = new QVBoxLayout;
             column->setContentsMargins(0, STRIP_PADDING, 0, 0);

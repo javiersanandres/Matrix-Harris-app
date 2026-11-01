@@ -46,12 +46,13 @@ namespace ui {
     // something that also lives there (a notice they asked not to see again, a
     // tour they skipped):
     //
-    //   - a pulsing dot sits on the menu's title in the menu bar;
-    //   - opening the menu hides it and shows a dot next to each flagged entry;
-    //   - closing the menu clears them all: the user has seen where they are.
+    //   - a pulsing dot sits on the menu's title in the menu bar, until the
+    //     menu is opened (a new flag brings it back);
+    //   - in the menu, a dot sits next to each flagged entry until that entry
+    //     is chosen.
     //
-    // Flagged entries are remembered in the user's settings until the menu
-    // has been opened, so a flag survives restarting the application.
+    // Both are remembered in the user's settings, so they survive restarting
+    // the application (and the window being rebuilt in another language).
     // ============================================================================
     class HelpNotifier : public QObject {
     public:
@@ -60,7 +61,8 @@ namespace ui {
         // Makes `action` (an entry of the Help menu) flaggable as `key`.
         void addEntry(const QString& key, QAction* action);
 
-        // Flags that entry until the menu is next opened and closed.
+        // Flags that entry until it is chosen, and the menu's title until the
+        // menu is opened.
         void flag(const QString& key);
 
         QStringList flagged() const { return flagged_; }
@@ -68,6 +70,9 @@ namespace ui {
         // The flags kept in `settings` (see the class comment).
         static QStringList storedFlags(QSettings& settings);
         static void storeFlags(QSettings& settings, const QStringList& keys);
+        // Whether the menu's title has a dot (flags the menu has not shown yet).
+        static bool storedTitleFlag(QSettings& settings);
+        static void storeTitleFlag(QSettings& settings, bool flagged);
 
     protected:
         bool eventFilter(QObject* watched, QEvent* event) override;
@@ -75,13 +80,14 @@ namespace ui {
     private:
         void placeBarDot();
         void placeEntryDots();
-        void clear();
+        void unflag(const QString& key);
         void save() const;
 
         QMenuBar* bar_;
         QMenu* menu_;
         std::map<QString, QAction*> entries_;
         QStringList flagged_;
+        bool title_flagged_ = false;
         NotificationDot* bar_dot_;
         std::map<QString, NotificationDot*> entry_dots_;
     };

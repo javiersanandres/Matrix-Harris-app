@@ -17,6 +17,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include "Text.h"
 
 // ==================================================================================
 // 
@@ -821,7 +822,7 @@ namespace hypergraph_logic {
 		} drop_hooks;
 
 		if (getLayers().empty() || getAllHyperedges().size() < 2) {
-			throw std::logic_error("No hay cruces que minimizar.");
+			throw std::logic_error(text(LogicText::tr("No hay cruces que minimizar.")));
 		}
 		int last_layer = static_cast<int>(layers_.rbegin()->first);
 

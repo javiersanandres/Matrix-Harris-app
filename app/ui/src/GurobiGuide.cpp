@@ -1,4 +1,5 @@
 #include "GurobiGuide.h"
+#include "Translation.h"
 #include "AppDialogs.h"
 #include "PictureViewer.h"
 #include "UiStyle.h"
@@ -50,44 +51,45 @@ namespace ui::gurobi {
             std::vector<Step> steps;
         };
 
-        const QString REQUIREMENT = QStringLiteral(
-            "Para completar estos pasos necesitas ser estudiante, profesor o investigador "
-            "universitario y una cuenta de correo educativa asociada.");
+        QString requirement() {
+            return Tr::tr("Para completar estos pasos necesitas ser estudiante, profesor o investigador "
+                "universitario y una cuenta de correo educativa asociada.");
+        }
 
         const QString GUROBI_LINK = QStringLiteral(
             "<a href=\"https://www.gurobi.com/\" style=\"color:#4F46E5;\">www.gurobi.com</a>");
 
         GuideContent installGuide() {
-            return { QStringLiteral("Cómo instalar Gurobi"), QStringLiteral("instalar"), {
-                { QStringLiteral("Entra en %1, abre <b>Sign In</b> y, en el menú desplegable, haz clic "
+            return { Tr::tr("Cómo instalar Gurobi"), QStringLiteral("instalar"), {
+                { Tr::tr("Entra en %1, abre <b>Sign In</b> y, en el menú desplegable, haz clic "
                                  "en <b>Register</b>.").arg(GUROBI_LINK),
                   { { 1, {} } } },
-                { QStringLiteral("Rellena todos los campos con tu <b>correo institucional</b> y haz clic en <b>Next</b>."),
+                { Tr::tr("Rellena todos los campos con tu <b>correo institucional</b> y haz clic en <b>Next</b>."),
                   { { 2, {} } } },
-                { QStringLiteral("Selecciona <b>Academic</b>, introduce los datos de tu universidad y haz clic "
+                { Tr::tr("Selecciona <b>Academic</b>, introduce los datos de tu universidad y haz clic "
                                  "en <b>Next</b>."),
                   { { 3, {} } } },
-                { QStringLiteral("Escribe una contraseña y pulsa <b>Submit</b>."),
+                { Tr::tr("Escribe una contraseña y pulsa <b>Submit</b>."),
                   { { 4, {} } } },
-                { QStringLiteral("Busca en tu correo el código de verificación, escríbelo y pulsa "
+                { Tr::tr("Busca en tu correo el código de verificación, escríbelo y pulsa "
                                  "<b>Confirm account and Sign In</b>."),
                   { { 5, {} } } },
-                { QStringLiteral("Llegarás al portal de usuario. Abre <b>Downloads</b> y elige "
+                { Tr::tr("Llegarás al portal de usuario. Abre <b>Downloads</b> y elige "
                                  "<b>Download Center</b>."),
                   { { 6, {} } } },
-                { QStringLiteral("En la página de descargas, baja hasta <b>Gurobi Optimizer</b> y, en la fila "
+                { Tr::tr("En la página de descargas, baja hasta <b>Gurobi Optimizer</b> y, en la fila "
                                  "<b>x64 Windows</b>, haz clic en <b>Installer</b> para descargarlo."),
                   { { 7, {} } } },
-                { QStringLiteral("Abre el archivo descargado. En el instalador pulsa <b>Next</b>, acepta los "
+                { Tr::tr("Abre el archivo descargado. En el instalador pulsa <b>Next</b>, acepta los "
                                  "términos de uso y sigue con <b>Next</b> hasta llegar a <b>Install</b>."),
-                  { { 8, QStringLiteral("Pantalla de bienvenida: pulsa «Next».") },
-                    { 9, QStringLiteral("Marca la casilla para aceptar los términos y pulsa «Next».") },
-                    { 10, QStringLiteral("Deja la carpeta propuesta y pulsa «Next».") },
-                    { 11, QStringLiteral("Pulsa «Install».") } } },
-                { QStringLiteral("Espera a que termine la instalación y pulsa <b>Finish</b>. Si se abre algún "
+                  { { 8, Tr::tr("Pantalla de bienvenida: pulsa «Next».") },
+                    { 9, Tr::tr("Marca la casilla para aceptar los términos y pulsa «Next».") },
+                    { 10, Tr::tr("Deja la carpeta propuesta y pulsa «Next».") },
+                    { 11, Tr::tr("Pulsa «Install».") } } },
+                { Tr::tr("Espera a que termine la instalación y pulsa <b>Finish</b>. Si se abre algún "
                                  "archivo automáticamente, no te preocupes: simplemente ciérralo."),
                   { { 12, {} } } },
-                { QStringLiteral("Te pedirá reiniciar el ordenador para que los cambios surtan efecto: pulsa "
+                { Tr::tr("Te pedirá reiniciar el ordenador para que los cambios surtan efecto: pulsa "
                                  "<b>Yes</b>. Después solo te faltará la licencia gratuita: la guía está en "
                                  "<b>Ayuda › Cómo obtener una licencia de Gurobi</b>."),
                   { { 13, {} } } },
@@ -95,39 +97,39 @@ namespace ui::gurobi {
         }
 
         GuideContent licenseGuide() {
-            return { QStringLiteral("Cómo obtener una licencia de Gurobi"), QStringLiteral("licencia"), {
-                { QStringLiteral("<b>Conéctate a la red de tu universidad</b>, ya sea Eduroam o por VPN, y entra "
+            return { Tr::tr("Cómo obtener una licencia de Gurobi"), QStringLiteral("licencia"), {
+                { Tr::tr("<b>Conéctate a la red de tu universidad</b>, ya sea Eduroam o por VPN, y entra "
                                  "en %1. Abre <b>Sign In</b> y elige <b>Customer Login</b>, o haz clic en "
                                  "<b>My Account</b>.").arg(GUROBI_LINK),
-                  { { 1, QStringLiteral("Sign In › Customer Login.") },
-                    { 2, QStringLiteral("O bien, directamente, «My Account».") } } },
-                { QStringLiteral("Escribe el correo con el que te registraste y pulsa <b>Next</b>. A continuación, "
+                  { { 1, Tr::tr("Sign In › Customer Login.") },
+                    { 2, Tr::tr("O bien, directamente, «My Account».") } } },
+                { Tr::tr("Escribe el correo con el que te registraste y pulsa <b>Next</b>. A continuación, "
                                  "introduce tu contraseña y pulsa <b>Sign in</b>."),
-                  { { 3, QStringLiteral("Tu correo, y «Next».") },
-                    { 4, QStringLiteral("Tu contraseña, y «Sign in».") } } },
-                { QStringLiteral("En el portal de usuario, pulsa <b>Request a license</b>."),
+                  { { 3, Tr::tr("Tu correo, y «Next».") },
+                    { 4, Tr::tr("Tu contraseña, y «Sign in».") } } },
+                { Tr::tr("En el portal de usuario, pulsa <b>Request a license</b>."),
                   { { 5, {} } } },
-                { QStringLiteral("De las opciones que aparecen, elige la del medio, <b>Named-User Academic</b>, con "
+                { Tr::tr("De las opciones que aparecen, elige la del medio, <b>Named-User Academic</b>, con "
                                  "<b>Generate now!</b>, y confirma con <b>Confirm Request</b>. Si da un error, lo "
                                  "más probable es que no estés en la red universitaria: conéctate e inténtalo de nuevo."),
-                  { { 6, QStringLiteral("«Generate now!» en la opción del medio.") },
-                    { 7, QStringLiteral("Acepta las condiciones y pulsa «Confirm Request».") } } },
-                { QStringLiteral("Aparecerá un mensaje con un comando que empieza por <b>grbgetkey</b>: cópialo. "
+                  { { 6, Tr::tr("«Generate now!» en la opción del medio.") },
+                    { 7, Tr::tr("Acepta las condiciones y pulsa «Confirm Request».") } } },
+                { Tr::tr("Aparecerá un mensaje con un comando que empieza por <b>grbgetkey</b>: cópialo. "
                                  "Si lo cierras, puedes volver a verlo cuando quieras en <b>Licenses</b>, con el "
                                  "icono de la pantalla de ordenador."),
-                  { { 8, QStringLiteral("Copia el comando completo.") },
-                    { 9, QStringLiteral("En «Licenses», el icono de la pantalla muestra de nuevo las instrucciones.") } } },
-                { QStringLiteral("Abre el menú Inicio, escribe <b>Símbolo del sistema</b> y haz clic en "
+                  { { 8, Tr::tr("Copia el comando completo.") },
+                    { 9, Tr::tr("En «Licenses», el icono de la pantalla muestra de nuevo las instrucciones.") } } },
+                { Tr::tr("Abre el menú Inicio, escribe <b>Símbolo del sistema</b> y haz clic en "
                                  "<b>Ejecutar como administrador</b>."),
                   { { 10, {} } } },
-                { QStringLiteral("Se abrirá una terminal. No te asustes: es simplemente otra forma de interactuar con "
+                { Tr::tr("Se abrirá una terminal. No te asustes: es simplemente otra forma de interactuar con "
                                  "el ordenador. Pega el comando del paso 5 con <b>Ctrl + V</b> o haciendo "
                                  "<b>clic derecho</b>."),
                   { { 11, {} } } },
-                { QStringLiteral("Pulsa <b>Enter</b>. Te preguntará dónde guardar la licencia: vuelve a pulsar "
+                { Tr::tr("Pulsa <b>Enter</b>. Te preguntará dónde guardar la licencia: vuelve a pulsar "
                                  "<b>Enter</b> para dejarla en la carpeta propuesta."),
                   { { 12, {} } } },
-                { QStringLiteral("Verás dónde se ha guardado la licencia. Cierra la terminal y… ¡enhorabuena! "
+                { Tr::tr("Verás dónde se ha guardado la licencia. Cierra la terminal y… ¡enhorabuena! "
                                  "Vuelve a abrir el Taller Matrix Harris para disfrutar de su mejor versión."),
                   { { 13, {} } } },
             } };
@@ -219,7 +221,7 @@ namespace ui::gurobi {
             auto* icon = new QLabel(banner);
             icon->setPixmap(warningPixmap(24, parent ? parent->devicePixelRatioF() : qApp->devicePixelRatio()));
             row->addWidget(icon, 0, Qt::AlignVCenter);
-            auto* text = new QLabel(QStringLiteral("<b>%1</b>").arg(REQUIREMENT), banner);
+            auto* text = new QLabel(QStringLiteral("<b>%1</b>").arg(requirement()), banner);
             text->setWordWrap(true);
             text->setStyleSheet(QStringLiteral("color: #7A4E00; font-size: 10pt;"));
             row->addWidget(text, 1);
@@ -269,7 +271,7 @@ namespace ui::gurobi {
                 source_ = QPixmap(resource);
                 fitted_ = QPixmap();
                 setCursor(source_.isNull() ? Qt::ArrowCursor : Qt::PointingHandCursor);
-                setToolTip(source_.isNull() ? QString() : QStringLiteral("Haz clic para ampliar"));
+                setToolTip(source_.isNull() ? QString() : Tr::tr("Haz clic para ampliar"));
                 // Faded in over the next frames (see paintEvent).
                 shown_at_.start();
                 frame_timer_.start(16);
@@ -311,7 +313,7 @@ namespace ui::gurobi {
                     p.setPen(style::palette::muted);
                     const QRectF r = frame.adjusted(20, 20, -20, -20);
                     p.drawText(r.adjusted(0, 0, 0, -r.height() / 2 + 4), Qt::AlignHCenter | Qt::AlignBottom,
-                        QStringLiteral("Captura pendiente"));
+                        Tr::tr("Captura pendiente"));
                     f.setBold(false);
                     f.setPointSizeF(9);
                     p.setFont(f);
@@ -354,7 +356,7 @@ namespace ui::gurobi {
                     f.setPointSizeF(9);
                     f.setBold(true);
                     p.setFont(f);
-                    const QString label = QStringLiteral("Ampliar");
+                    const QString label = Tr::tr("Ampliar");
                     const double w = QFontMetricsF(f).horizontalAdvance(label) + 40;
                     const QRectF pill(target.right() - w - 10, target.bottom() - 38, w, 28);
                     p.setPen(Qt::NoPen);
@@ -423,7 +425,7 @@ namespace ui::gurobi {
                 const int i = indexAt(event->position().x());
                 if (i != hovered_) {
                     hovered_ = i;
-                    setToolTip(i >= 0 ? QStringLiteral("Paso %1").arg(i + 1) : QString());
+                    setToolTip(i >= 0 ? Tr::tr("Paso %1").arg(i + 1) : QString());
                     update();
                 }
             }
@@ -540,13 +542,13 @@ namespace ui::gurobi {
         col->addWidget(dots, 0, Qt::AlignHCenter);
         dlg.setBody(body);
 
-        dlg.addButton(QStringLiteral("Cerrar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
-        QPushButton* prev = dlg.addActionButton(QStringLiteral("‹  Anterior"), StyledDialog::ButtonStyle::Secondary);
+        dlg.addButton(Tr::tr("Cerrar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
+        QPushButton* prev = dlg.addActionButton(Tr::tr("‹  Anterior"), StyledDialog::ButtonStyle::Secondary);
         // Greyed out on the first slide (on the button itself: the dialog's
         // sheet would not win over its own rule for secondary buttons).
         prev->setStyleSheet(QStringLiteral(
             "QPushButton:disabled { color: #B8BDCB; border-color: #E8EAF0; background: white; }"));
-        QPushButton* next = dlg.addActionButton(QStringLiteral("Siguiente  ›"), StyledDialog::ButtonStyle::Primary);
+        QPushButton* next = dlg.addActionButton(Tr::tr("Siguiente  ›"), StyledDialog::ButtonStyle::Primary);
         next->setDefault(true);
 
         int current = -1;
@@ -567,11 +569,11 @@ namespace ui::gurobi {
                 ? QStringLiteral("<b>%1 / %2</b>&nbsp;&nbsp;%3").arg(slide.shot + 1).arg(shots).arg(s.caption.toHtmlEscaped())
                 : QString());
             dots->setCurrent(slide.step);
-            dlg.setMessage(QStringLiteral("Paso %1 de %2").arg(slide.step + 1).arg(content.steps.size()));
+            dlg.setMessage(Tr::tr("Paso %1 de %2").arg(slide.step + 1).arg(content.steps.size()));
 
             prev->setEnabled(index > 0);
             next->setText(index + 1 < static_cast<int>(slides.size())
-                ? QStringLiteral("Siguiente  ›") : QStringLiteral("Terminar"));
+                ? Tr::tr("Siguiente  ›") : Tr::tr("Terminar"));
         };
         auto forward = [&] {
             if (current + 1 < static_cast<int>(slides.size())) go(current + 1);

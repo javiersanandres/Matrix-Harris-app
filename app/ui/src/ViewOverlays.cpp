@@ -1,4 +1,5 @@
 #include "ViewOverlays.h"
+#include "Translation.h"
 #include "UiStyle.h"
 
 #include <QEvent>
@@ -165,7 +166,7 @@ QToolButton#hintCancel:hover { background: rgba(255, 255, 255, 48); color: white
 
         cancel_ = new QToolButton(this);
         cancel_->setObjectName("hintCancel");
-        cancel_->setText(QStringLiteral("Cancelar"));
+        cancel_->setText(Tr::tr("Cancelar"));
         cancel_->setCursor(Qt::PointingHandCursor);
         row->addWidget(cancel_);
         connect(cancel_, &QToolButton::clicked, this, &HintBanner::cancelRequested);

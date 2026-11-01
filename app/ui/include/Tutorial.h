@@ -1,5 +1,7 @@
 #pragma once
 
+#include "Translation.h"
+
 #include <QRect>
 #include <QString>
 #include <QTimer>
@@ -106,6 +108,9 @@ namespace ui::tutorial {
 
     signals:
         void finished(bool completed); // false: skipped
+        // The language was changed on the first step: the window starts the
+        // tour again in it (finished is not emitted).
+        void languageChosen(ui::i18n::Language language);
 
     protected:
         void paintEvent(QPaintEvent* event) override;
@@ -149,6 +154,7 @@ namespace ui::tutorial {
         QLabel* picture_;
         QPushButton* prev_;
         QPushButton* next_;
+        QWidget* language_; // on the first step only
     };
 
     // Whether the tour still has to be shown on starting the application

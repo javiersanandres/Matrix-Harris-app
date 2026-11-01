@@ -1,4 +1,5 @@
 #include "AppDialogs.h"
+#include "Translation.h"
 #include "UiStyle.h"
 
 #include <QGraphicsDropShadowEffect>
@@ -311,7 +312,7 @@ QPushButton#secondary:hover { background: #F1F2F7; }
             void showSimple(QWidget* parent, StyledDialog::Badge badge, const QString& title, const QString& text) {
                 StyledDialog dlg(badge, title, parent);
                 dlg.setMessage(text);
-                dlg.addButton(QStringLiteral("Entendido"), 0, StyledDialog::ButtonStyle::Primary, true, true);
+                dlg.addButton(Tr::tr("Entendido"), 0, StyledDialog::ButtonStyle::Primary, true, true);
                 dlg.exec();
             }
         }
@@ -334,7 +335,7 @@ QPushButton#secondary:hover { background: #F1F2F7; }
             StyledDialog dlg(destructive ? StyledDialog::Badge::Warning : StyledDialog::Badge::Question,
                 title, parent);
             dlg.setMessage(text);
-            dlg.addButton(QStringLiteral("Cancelar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
+            dlg.addButton(Tr::tr("Cancelar"), 0, StyledDialog::ButtonStyle::Secondary, false, true);
             dlg.addButton(accept_text, 1, destructive ? StyledDialog::ButtonStyle::Danger
                                                       : StyledDialog::ButtonStyle::Primary, true);
             dlg.exec();
@@ -342,11 +343,11 @@ QPushButton#secondary:hover { background: #F1F2F7; }
         }
 
         SaveChoice askToSave(QWidget* parent, const QString& text) {
-            StyledDialog dlg(StyledDialog::Badge::Question, QStringLiteral("¿Guardar los cambios?"), parent);
+            StyledDialog dlg(StyledDialog::Badge::Question, Tr::tr("¿Guardar los cambios?"), parent);
             dlg.setMessage(text);
-            dlg.addButton(QStringLiteral("No guardar"), 1, StyledDialog::ButtonStyle::Secondary);
-            dlg.addButton(QStringLiteral("Cancelar"), 2, StyledDialog::ButtonStyle::Secondary, false, true);
-            dlg.addButton(QStringLiteral("Guardar"), 0, StyledDialog::ButtonStyle::Primary, true);
+            dlg.addButton(Tr::tr("No guardar"), 1, StyledDialog::ButtonStyle::Secondary);
+            dlg.addButton(Tr::tr("Cancelar"), 2, StyledDialog::ButtonStyle::Secondary, false, true);
+            dlg.addButton(Tr::tr("Guardar"), 0, StyledDialog::ButtonStyle::Primary, true);
             dlg.exec();
             switch (dlg.choice()) {
             case 0:  return SaveChoice::Save;

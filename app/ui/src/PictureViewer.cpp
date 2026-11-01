@@ -1,4 +1,5 @@
 #include "PictureViewer.h"
+#include "Translation.h"
 
 #include <QDialog>
 #include <QGuiApplication>
@@ -56,7 +57,7 @@ namespace ui {
                 p.setFont(f);
                 p.setPen(QColor(255, 255, 255, 170));
                 p.drawText(QRectF(0, rect().bottom() - 60, width(), 40), Qt::AlignCenter,
-                    QStringLiteral("Haz clic en cualquier sitio o pulsa Esc para volver"));
+                    Tr::tr("Haz clic en cualquier sitio o pulsa Esc para volver"));
             }
             void mousePressEvent(QMouseEvent* event) override {
                 event->accept();

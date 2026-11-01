@@ -1,4 +1,5 @@
 #include "NodeVisuals.h"
+#include "Translation.h"
 #include "LayoutTypes.h"
 #include "UiStyle.h"
 
@@ -451,7 +452,7 @@ namespace ui::node_visuals {
     void paintAshesChip(QPainter* painter, const QRectF& box, double share, double unit) {
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing);
-        const QString text = QStringLiteral("Negro %1 %").arg(qRound(share * 100.0));
+        const QString text = Tr::tr("Negro %1 %").arg(qRound(share * 100.0));
         QFont font = QApplication::font();
         font.setPointSizeF(8.0);
         font.setBold(true);
